@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.BusinessStatusMapper">
+
+    <!-- 1. 插入当日营业状态 (更新版：支持冪等性，避免重複插入報錯) -->
+    <insert id="insertTodayStatus">
+        INSERT IGNORE INTO business_status (
+        business_date,
+        is_open,
+        next_call_number,
+        daily_total_customers,
+        daily_revenue,
+        daily_takeout_count
+        ) VALUES (
+        #{date},
+        true,
+        1,
+        0,
+        0.00,
+        0
+        )
+    </insert>
+
+    <!-- 2. 查询下一个叫号 -->
+    <select id="getNextCallNumber" resultType="java.lang.Integer">
+        SELECT next_call_number
+        FROM business_status
+        WHERE business_date = #{date}
+    </select>
+
+    <!-- 3. 检查记录是否存在 -->
+    <select id="countByDate" resultType="int">
+        SELECT COUNT(*)
+        FROM business_status
+        WHERE business_date = #{date}
+    </select>
+
+    <!-- 4. 递增下一个叫号 -->
+    <update id="incrementNextCallNumber">
+        UPDATE business_status
+        SET next_call_number = next_call_number + 1
+        WHERE business_date = #{date}
+    </update>
+
+    <!-- 5. 累加当日顾客总数 -->
+    <update id="incrementDailyTotalCustomers">
+        UPDATE business_status
+        SET daily_total_customers = daily_total_customers + #{customerCount}
+        WHERE business_date = #{date}
+    </update>
+
+    <!-- 6. 查询营业状态 -->
+    <select id="loadIsOpenStatus" resultType="java.lang.Boolean">
+        SELECT is_open
+        FROM business_status
+        WHERE business_date = #{date}
+    </select>
+
+    <!-- 7. 更新营业状态（UPSERT） -->
+    <update id="updateBusinessStatus">
+        INSERT INTO business_status (
+        business_date,
+        is_open,
+        next_call_number,
+        daily_total_customers
+        ) VALUES (
+        #{date},
+        #{isOpen},
+        #{nextCallNumber},
+        0
+        )
+        ON DUPLICATE KEY UPDATE
+        is_open = VALUES(is_open),
+        next_call_number = VALUES(next_call_number)
+    </update>
+
+    <!-- 8. 单日报表查询 -->
+    <select id="getDailyReport" resultType="java.util.Map">
+        SELECT
+        bs.business_date AS date,
+        bs.daily_revenue AS revenue,
+        bs.daily_total_customers AS customers,
+        (
+        SELECT COUNT(*)
+        FROM table_orders
+        WHERE DATE(order_time) = bs.business_date
+        AND status = 'CHECKED_OUT'
+        ) AS orderCount
+        FROM business_status bs
+        WHERE bs.business_date = #{date}
+    </select>
+
+    <!-- 9. 日期范围报表查询 -->
+    <select id="getDateRangeReport" resultType="java.util.Map">
+        SELECT
+        bs.business_date as report_date,
+        COALESCE(COUNT(o.order_id), 0) as order_count,
+        bs.daily_revenue as total_revenue,
+        bs.daily_total_customers as total_customers
+        FROM business_status bs
+        LEFT JOIN table_orders o ON
+        DATE(o.order_time) = bs.business_date AND
+        o.status = 'CHECKED_OUT'
+        WHERE bs.business_date BETWEEN #{startDate} AND #{endDate}
+        GROUP BY bs.business_date, bs.daily_revenue, bs.daily_total_customers
+        ORDER BY bs.business_date
+    </select>
+
+    <!-- 递增当日外卖订单计数 -->
+    <update id="incrementDailyTakeoutCount">
+        UPDATE business_status
+        SET daily_takeout_count = daily_takeout_count + 1
+        WHERE business_date = #{date}
+    </update>
+
+
+</mapper>

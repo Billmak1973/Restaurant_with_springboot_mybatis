@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.CustomerGroupMapper">
+
+    <resultMap id="CustomerGroupResult" type="CustomerGroup">
+        <id property="group_id" column="group_id"/>
+        <result property="callNumber" column="call_number"/>
+        <result property="groupSize" column="group_size"/>
+        <result property="startTime" column="start_time"/>
+        <result property="assigned" column="is_assigned"/>
+        <result property="shownWaitMessage" column="shown_wait_message"/>
+        <result property="tableId" column="table_id"/>
+    </resultMap>
+
+    <!-- ===== 保存操作 ===== -->
+
+    <insert id="save" useGeneratedKeys="true" keyProperty="group_id">
+        INSERT INTO customer_groups (
+        call_number, group_size, start_time, is_assigned,
+        shown_wait_message, table_id
+        ) VALUES (
+        #{callNumber}, #{groupSize}, #{startTime},
+        #{assigned}, #{shownWaitMessage}, #{tableId}
+        )
+    </insert>
+
+    <insert id="saveWithoutTableRef" useGeneratedKeys="true" keyProperty="group_id">
+        INSERT INTO customer_groups (
+        call_number, group_size, start_time, is_assigned,
+        shown_wait_message, table_id
+        ) VALUES (
+        #{callNumber}, #{groupSize}, #{startTime},
+        #{assigned}, #{shownWaitMessage}, NULL
+        )
+    </insert>
+
+    <!-- ===== 查询操作 ===== -->
+
+    <select id="findById" resultMap="CustomerGroupResult">
+        SELECT group_id, call_number, group_size, start_time,
+        is_assigned, shown_wait_message, table_id
+        FROM customer_groups
+        WHERE group_id = #{id}
+    </select>
+
+    <select id="findByCallNumber" resultMap="CustomerGroupResult">
+        SELECT group_id, call_number, group_size, start_time,
+        is_assigned, shown_wait_message, table_id
+        FROM customer_groups
+        WHERE call_number = #{callNumber} AND is_assigned = 0
+        ORDER BY start_time ASC
+        LIMIT 1
+    </select>
+
+    <!-- ===== 更新操作 ===== -->
+
+    <update id="update">
+        UPDATE customer_groups SET
+        call_number = #{callNumber},
+        group_size = #{groupSize},
+        start_time = #{startTime},
+        is_assigned = #{assigned},
+        shown_wait_message = #{shownWaitMessage},
+        table_id = #{tableId}
+        WHERE group_id = #{group_id}
+    </update>
+
+    <update id="updateAssignmentStatus">
+        UPDATE customer_groups SET
+        table_id = #{tableId},
+        is_assigned = #{isAssigned},
+        shown_wait_message = #{shownWaitMessage}
+        WHERE group_id = #{groupId}
+    </update>
+
+
+    <!-- ===== 删除操作 ===== -->
+
+    <delete id="delete">
+        DELETE FROM customer_groups WHERE group_id = #{id}
+    </delete>
+
+
+    <!-- CustomerGroupMapper.xml - 已有方法，确保存在 -->
+    <update id="updateTableId">
+        UPDATE customer_groups
+        SET table_id = #{tableId}, is_assigned = TRUE
+        WHERE group_id = #{groupId}
+    </update>
+
+</mapper>

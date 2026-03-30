@@ -1,0 +1,427 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.TablesMapper">
+
+    <!-- 结果映射：数据库字段 → Java 属性 -->
+    <resultMap id="TablesResult" type="Tables">
+        <id property="table_id" column="table_id"/>
+        <result property="displayId" column="display_id"/>
+        <result property="baseId" column="base_id"/>
+        <result property="capacity" column="capacity"/>
+        <result property="physicalCapacity" column="physical_capacity"/>
+        <result property="status" column="status" javaType="com.restaurant.entity.Tables$TableStatus"/>
+        <result property="tableType" column="table_type" javaType="com.restaurant.entity.Tables$TableType"/>
+        <result property="actualSeats" column="actual_seats"/>
+        <result property="currentGroupId" column="current_group_id"/>
+        <result property="split" column="is_split"/>
+        <result property="subTableSuffix" column="sub_table_suffix"/>
+        <result property="mainTableId" column="main_table_id"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="mergedWith" column="merged_with"/>
+        <result property="reservedTime" column="reserved_time"/>
+        <result property="groupWith" column="group_with"/>
+        <!-- 🔧 新增这一行 -->
+        <result property="currentReservationId" column="current_reservation_id"/>
+    </resultMap>
+
+    <!-- 1. findAllTables -->
+    <select id="findAllTables" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with,
+        reserved_time, group_with,
+        current_reservation_id
+        FROM restaurant_tables
+        ORDER BY base_id, display_id
+    </select>
+
+    <!-- 2. findById -->
+    <select id="findById" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with,
+        reserved_time, group_with,
+        current_reservation_id
+        FROM restaurant_tables
+        WHERE table_id = #{id}
+    </select>
+
+    <!-- 3. findByDisplayId -->
+    <select id="findByDisplayId" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with,
+        reserved_time, group_with,
+        current_reservation_id
+        FROM restaurant_tables
+        WHERE display_id = #{displayId}
+    </select>
+
+    <!-- 4. findAvailableTables -->
+    <select id="findAvailableTables" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with
+        FROM restaurant_tables
+        WHERE status = 'VACANT'
+        <if test="capacity &gt; 0">
+            AND capacity &gt;= #{capacity}
+        </if>
+        <if test="tableType != null and tableType != ''">
+            AND table_type = #{tableType}
+        </if>
+        ORDER BY capacity ASC, base_id ASC
+    </select>
+
+    <!-- 5. findSubTablesByMainId -->
+    <select id="findSubTablesByMainId" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with
+        FROM restaurant_tables
+        WHERE main_table_id = #{mainTableId}
+    </select>
+
+    <!-- 6. findAdjacentAvailableTables -->
+    <select id="findAdjacentAvailableTables" resultMap="TablesResult">
+        SELECT
+        table_id, display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with
+        FROM restaurant_tables
+        WHERE status = 'VACANT'
+        AND capacity = #{capacity}
+        AND table_type = 'MAIN'
+        ORDER BY base_id
+    </select>
+
+    <!-- 7. hasExistingTableData -->
+    <select id="hasExistingTableData" resultType="boolean">
+        SELECT COUNT(*) &gt; 0 FROM restaurant_tables
+    </select>
+
+    <!-- ===== 插入操作 ===== -->
+
+    <!-- 8. save -->
+    <insert id="save" useGeneratedKeys="true" keyProperty="table_id">
+        INSERT INTO restaurant_tables (
+        display_id, base_id, capacity, physical_capacity,
+        status, table_type, actual_seats, current_group_id,
+        is_split, sub_table_suffix, main_table_id,
+        start_time, end_time, merged_with,
+        reserved_time, group_with
+        ) VALUES (
+        #{displayId}, #{baseId}, #{capacity}, #{physicalCapacity},
+        #{status}, #{tableType}, #{actualSeats}, #{currentGroupId},
+        #{split}, #{subTableSuffix}, #{mainTableId},
+        #{startTime}, #{endTime}, #{mergedWith},
+        #{reservedTime}, #{groupWith}
+        )
+    </insert>
+
+
+    <!-- 9. initializeDefaultTables -->
+    <insert id="initializeDefaultTables">
+        INSERT INTO restaurant_tables (
+        display_id, base_id, capacity, physical_capacity,
+        status, table_type
+        ) VALUES
+        <foreach collection="tables" item="t" separator=",">
+            (
+            #{t.displayId}, #{t.baseId}, #{t.capacity}, #{t.physicalCapacity},
+            #{t.status}, #{t.tableType}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE display_id = display_id
+    </insert>
+
+    <!-- 10. saveSubTable -->
+    <insert id="saveSubTable" useGeneratedKeys="true" keyProperty="table_id">
+        INSERT INTO restaurant_tables (
+        display_id, base_id, capacity, physical_capacity,
+        status, table_type, start_time, is_split,
+        sub_table_suffix, main_table_id, actual_seats, current_group_id
+        ) VALUES (
+        #{displayId}, #{baseId}, #{capacity}, #{capacity},
+        #{status}, #{tableType}, #{startTime}, #{split},
+        #{subTableSuffix}, #{mainTableId}, #{actualSeats}, #{currentGroupId}
+        )
+    </insert>
+
+    <!-- ===== 更新操作 ===== -->
+
+    <!-- 11. update -->
+    <update id="update">
+        UPDATE restaurant_tables SET
+        display_id = #{displayId},
+        base_id = #{baseId},
+        capacity = #{capacity},
+        physical_capacity = #{physicalCapacity},
+        status = #{status},
+        table_type = #{tableType},
+        actual_seats = #{actualSeats},
+        current_group_id = #{currentGroupId},
+        is_split = #{split},
+        sub_table_suffix = #{subTableSuffix},
+        main_table_id = #{mainTableId},
+        start_time = #{startTime},
+        end_time = #{endTime},
+        merged_with = #{mergedWith},
+        reserved_time = #{reservedTime},
+        group_with = #{groupWith}
+        WHERE table_id = #{table_id}
+    </update>
+
+    <!-- 12. updateTableStatus -->
+    <update id="updateTableStatus">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        current_group_id = #{currentGroupId},
+        actual_seats = #{actualSeats},
+        start_time = #{startTime},
+        end_time = CASE
+        WHEN #{status} = 'VACANT' THEN NULL
+        ELSE end_time
+        END
+        WHERE table_id = #{tableId}
+    </update>
+
+
+    <!-- 13. updateSplitStatus -->
+    <update id="updateSplitStatus">
+        UPDATE restaurant_tables SET
+        is_split = #{isSplit},
+        status = 'SPLITTING',
+        current_group_id = NULL
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 14. updateMergeStatus -->
+    <update id="updateMergeStatus">
+        -- 更新主桌
+        UPDATE restaurant_tables SET
+        status = 'OCCUPIED',
+        table_type = 'MERGED',
+        merged_with = #{mergedWith1},
+        current_group_id = #{groupId},
+        actual_seats = #{actualSeats1},
+        start_time = NOW()
+        WHERE table_id = #{mainTableId};
+
+        -- 更新伙伴桌
+        UPDATE restaurant_tables SET
+        status = 'OCCUPIED',
+        table_type = 'MERGED',
+        merged_with = #{mergedWith2},
+        current_group_id = #{groupId},
+        actual_seats = #{actualSeats2},
+        start_time = NOW()
+        WHERE table_id = #{partnerTableId}
+    </update>
+
+    <!-- 15. updateMergedPairToVacant -->
+    <update id="updateMergedPairToVacant">
+        UPDATE restaurant_tables SET
+        merged_with = NULL,
+        table_type = 'MAIN',
+        status = 'VACANT',
+        current_group_id = NULL,
+        start_time = NULL,
+        end_time = NULL,
+        actual_seats = 0
+        WHERE table_id IN (#{tableId1}, #{tableId2})
+    </update>
+
+    <!-- 16. updateTableStatusForDeparture -->
+    <!-- 16. updateTableStatusForDeparture -->
+    <update id="updateTableStatusForDeparture">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        current_group_id = #{currentGroupId},
+        actual_seats = #{actualSeats},
+        end_time = NOW(),
+        merged_with = NULL,
+        <!-- 🔧【修复】聚餐桌也要清空 group_with -->
+        group_with = NULL,
+        <!-- 🔧【修复】MERGED 和 GROUPED 都要改回 MAIN -->
+        table_type = CASE
+        WHEN #{originalTableType} IN ('MERGED', 'GROUPED') THEN 'MAIN'
+        ELSE table_type
+        END
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- ===== 拆分餐桌原子操作 ===== -->
+
+    <!-- 17. updateMainTableToSplitting -->
+    <update id="updateMainTableToSplitting">
+        UPDATE restaurant_tables SET
+        status = 'SPLITTING',
+        is_split = TRUE,
+        current_group_id = NULL,
+        actual_seats = 0,
+        start_time = NULL,
+        end_time = NULL
+        WHERE table_id = #{mainTableId}
+    </update>
+
+    <!-- 18. getMainTableBaseInfo -->
+    <select id="getMainTableBaseInfo" resultType="java.util.Map">
+        SELECT base_id, display_id
+        FROM restaurant_tables
+        WHERE table_id = #{mainTableId}
+    </select>
+
+    <!-- 19. updateCustomerGroupTableId -->
+    <update id="updateCustomerGroupTableId">
+        UPDATE customer_groups SET
+        table_id = #{tableId},
+        is_assigned = TRUE
+        WHERE group_id = #{groupId}
+    </update>
+
+    <!-- ===== 合并餐桌（恢复拆分）===== -->
+
+    <!-- 恢复主桌状态 -->
+    <update id="restoreMainTableAfterRecombine">
+        UPDATE restaurant_tables
+        SET
+        status = #{status},
+        is_split = #{isSplit},
+        current_group_id = NULL,
+        actual_seats = 0,
+        start_time = NULL,
+        end_time = NULL,
+        merged_with = NULL,
+        table_type = 'MAIN'
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- ===== 删除操作 ===== -->
+
+    <!-- 20. deleteSubTables -->
+    <delete id="deleteSubTables">
+        DELETE FROM restaurant_tables
+        WHERE table_id IN
+        <foreach collection="subTableIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!-- 🔧 替换原有的 updateMergeStatus，拆分成两个独立方法 -->
+
+    <!-- 更新主桌为合并占用状态 -->
+    <update id="updateTableToMergedOccupied">
+        UPDATE restaurant_tables
+        SET
+        status = 'OCCUPIED',
+        table_type = 'MERGED',
+        merged_with = #{mergedWith},
+        current_group_id = #{groupId},
+        actual_seats = #{actualSeats},
+        start_time = NOW()
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 更新伙伴桌为合并占用状态 -->
+    <update id="updatePartnerTableToMergedOccupied">
+        UPDATE restaurant_tables
+        SET
+        status = 'OCCUPIED',
+        table_type = 'MERGED',
+        merged_with = #{mergedWith},
+        current_group_id = #{groupId},
+        actual_seats = #{actualSeats},
+        start_time = NOW()
+        WHERE table_id = #{tableId}
+    </update>
+
+
+
+
+
+    <!-- 找到 updateTableForReservation，添加 current_reservation_id -->
+    <update id="updateTableForReservation">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        reserved_time = #{reservedTime}
+        WHERE table_id = #{tableId}
+    </update>
+
+
+    <update id="updateTableForCheckInWithReservation">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        current_group_id = #{currentGroupId},
+        actual_seats = #{actualSeats},
+        start_time = #{startTime},
+        reserved_time = NULL,
+        <!-- 🔧 删除 group_with = NULL，保留原始值 -->
+        current_reservation_id = #{reservationId}
+        WHERE table_id = #{tableId}
+    </update>
+
+    <update id="updatePartnerTableForCheckIn">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        current_group_id = #{currentGroupId},
+        actual_seats = #{actualSeats},
+        start_time = NOW(),
+        reserved_time = NULL,
+        <!-- 🔧 删除 group_with = NULL，保留原始值 -->
+        current_reservation_id = #{reservationId}
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 在 TablesMapper.xml 中 -->
+    <update id="mergeTables">
+        UPDATE restaurant_tables
+        SET
+        merged_with = #{mergedWith},
+        table_type = 'MERGED',      <!-- 🔧 新增：修改餐桌類型 -->
+        status = 'OCCUPIED'         <!-- 🔧 建議：合併後狀態應變為占用 -->
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 更新餐桌為聚餐桌預約狀態 -->
+    <update id="updateTableForGroupReservation">
+        UPDATE restaurant_tables SET
+        status = 'RESERVED',
+        reserved_time = NOW(),
+        group_with = #{groupWith},
+        table_type = #{tableType}
+        WHERE table_id = #{tableId}
+    </update>
+
+
+    <!-- 更新餐桌類型和 merged_with 字段（合併桌專用） -->
+    <update id="updateTableTypeAndMergedWith">
+        UPDATE restaurant_tables
+        SET
+        table_type = #{tableType},
+        merged_with = #{mergedWith}
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 更新餐桌類型和 group_with 字段（聚餐桌專用） -->
+    <update id="updateTableTypeAndGroupWith">
+        UPDATE restaurant_tables
+        SET
+        table_type = #{tableType},
+        group_with = #{groupWith}
+        WHERE table_id = #{tableId}
+    </update>
+</mapper>

@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.OrderItemMapper">
+
+    <!-- ===== 批量插入 ===== -->
+
+    <!-- 1. addOrderItems -->
+    <insert id="addOrderItems">
+        INSERT INTO order_items (
+        order_id,
+        item_id,
+        quantity,
+        served_quantity,
+        status,
+        price_at_order
+        ) VALUES
+        <foreach collection="items" item="item" separator=",">
+            (
+            #{orderId},
+            #{item.itemId},
+            #{item.quantity},
+            0,
+            'UNSERVED',
+            #{item.priceAtOrder}
+            )
+        </foreach>
+    </insert>
+
+    <!-- ===== 合并订单项 ===== -->
+
+    <update id="updateExistingOrderItems">
+        <foreach collection="items" item="item" separator=";">
+            UPDATE order_items oi
+            JOIN menu_items mi ON oi.item_id = mi.item_id
+            SET
+            oi.quantity = oi.quantity + #{item.quantity},
+            <!-- 状态自动计算：新数量 = 已上菜 → SERVED；否则 → PARTIALLY_SERVED -->
+            oi.status = CASE
+            WHEN oi.served_quantity = (oi.quantity + #{item.quantity}) THEN 'SERVED'
+            WHEN oi.served_quantity &gt; 0 THEN 'PARTIALLY_SERVED'
+            ELSE 'UNSERVED'
+            END,
+            oi.price_at_order = #{item.priceAtOrder}
+            WHERE oi.order_id = #{orderId}
+            AND mi.item_code = #{item.itemCode}
+        </foreach>
+    </update>
+
+
+    <!-- OrderItemMapper.xml -->
+    <insert id="insertNewOrderItems">
+        <foreach collection="items" item="item" separator=";">
+            INSERT INTO order_items (
+            order_id,
+            item_id,
+            quantity,
+            served_quantity,
+            status,
+            price_at_order
+            )
+            SELECT
+            #{orderId},
+            mi.item_id,
+            #{item.quantity},
+            0,
+            'UNSERVED',
+            #{item.priceAtOrder}
+            FROM menu_items mi
+            WHERE mi.item_code = #{item.itemCode}
+        </foreach>
+    </insert>
+
+    <!-- 替代方案：单条插入，由 MyBatis 批量执行 -->
+    <insert id="insertNewOrderItemsSingle">
+        INSERT INTO order_items (
+        order_id,
+        item_id,
+        quantity,
+        served_quantity,
+        status,
+        price_at_order
+        )
+        SELECT
+        #{orderId},
+        mi.item_id,
+        #{quantity},
+        0,
+        'UNSERVED',
+        #{priceAtOrder}
+        FROM menu_items mi
+        WHERE mi.item_code = #{itemCode}
+    </insert>
+
+    <!-- ===== 订单金额计算 ===== -->
+
+    <!-- 4. recalculateOrderTotal -->
+    <select id="recalculateOrderTotal" resultType="java.lang.Double">
+        SELECT SUM(quantity * price_at_order) as total
+        FROM order_items
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- 5. updateOrderTotalAmount -->
+    <update id="updateOrderTotalAmount">
+        UPDATE table_orders
+        SET total_amount = #{newTotal}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- ===== 上菜状态查询与更新 ===== -->
+
+    <!-- 6. getServingStatus -->
+    <select id="getServingStatus" resultType="OrderItemServingStatus">
+        SELECT
+        quantity,
+        served_quantity
+        FROM order_items
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </select>
+
+    <!-- 7. incrementServedQuantity -->
+    <update id="incrementServedQuantity">
+        UPDATE order_items
+        SET
+        served_quantity = #{newServedQuantity},
+        status = #{newStatus}
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </update>
+
+    <!-- 8. markAllItemsAsServed -->
+    <update id="markAllItemsAsServed">
+        UPDATE order_items
+        SET
+        served_quantity = quantity,
+        status = 'SERVED'
+        WHERE order_id = #{orderId}
+        AND status IN ('UNSERVED', 'PARTIALLY_SERVED')
+    </update>
+
+    <!-- 9. hasUnservedItems -->
+    <select id="hasUnservedItems" resultType="boolean">
+        SELECT EXISTS(
+        SELECT 1
+        FROM order_items
+        WHERE order_id = #{orderId}
+        AND served_quantity &lt; quantity
+        )
+    </select>
+
+    <!-- 10. hasServedItems -->
+    <select id="hasServedItems" resultType="boolean">
+        SELECT COUNT(*) &gt; 0
+        FROM order_items
+        WHERE order_id = #{orderId}
+        AND status IN ('PARTIALLY_SERVED', 'SERVED')
+    </select>
+
+    <!-- ===== 撤销订单项 ===== -->
+
+    <!-- 11. deleteOrderItem -->
+    <delete id="deleteOrderItem">
+        DELETE FROM order_items
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </delete>
+
+    <!-- 12. updateOrderItemAfterCancel -->
+    <update id="updateOrderItemAfterCancel">
+        UPDATE order_items
+        SET
+        quantity = #{newQty},
+        served_quantity = #{newServedQty},
+        status = #{newStatus}
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </update>
+
+    <!-- 13. recordCancellation -->
+    <insert id="recordCancellation">
+        INSERT INTO item_cancellations (
+        item_code,
+        cancelled_quantity,
+        cancellation_reason,
+        before_status,
+        cancellation_time
+        ) VALUES (
+        #{itemCode},
+        #{cancelledQuantity},
+        #{reason},
+        #{beforeStatus},
+        NOW()
+        )
+    </insert>
+
+    <!-- 14. getItemCodeByItemId -->
+    <select id="getItemCodeByItemId" resultType="java.lang.String">
+        SELECT item_code
+        FROM menu_items
+        WHERE item_id = #{itemId}
+    </select>
+
+    <!-- 15. getItemStatus -->
+    <select id="getItemStatus" resultType="java.lang.String">
+        SELECT status
+        FROM order_items
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </select>
+
+    <!-- ===== 批量删除与检查 ===== -->
+
+    <!-- 16. deleteOrderItemsByOrderId -->
+    <delete id="deleteOrderItemsByOrderId">
+        DELETE FROM order_items
+        WHERE order_id = #{orderId}
+    </delete>
+
+    <!-- 17. hasRemainingItems -->
+    <select id="hasRemainingItems" resultType="boolean">
+        SELECT COUNT(*) &gt; 0
+        FROM order_items
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- OrderItemMapper.xml - 替换 getExistingItemQuantities -->
+    <select id="getExistingItemQuantitiesRaw" resultType="java.util.Map">
+        SELECT
+        mi.item_code AS itemCode,
+        oi.quantity AS quantity
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+    </select>
+
+</mapper>

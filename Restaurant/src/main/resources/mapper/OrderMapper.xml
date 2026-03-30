@@ -1,0 +1,627 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.OrderMapper">
+
+    <!-- ===== 订单创建与查询 ===== -->
+
+    <insert id="createOrder" useGeneratedKeys="true" keyProperty="orderId">
+        INSERT INTO table_orders (
+        table_id, order_number, order_type, delivery_method,
+        delivery_address, customer_phone, order_time, status,
+        items_total, delivery_fee, total_amount,
+        is_checked_out, is_prepaid, prepaid_amount,
+        delivery_status, reorder_time,
+        reservation_id  <!-- 🔧 VARCHAR 类型 -->
+        ) VALUES (
+        #{tableId}, #{orderNumber}, #{orderType}, #{deliveryMethod},
+        #{deliveryAddress}, #{customerPhone}, NOW(), #{status},
+        #{itemsTotal}, #{deliveryFee}, #{totalAmount},
+        #{isCheckedOut}, #{isPrepaid}, #{prepaidAmount},
+        #{deliveryStatus, jdbcType=VARCHAR, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+        #{reorderTime, jdbcType=TIMESTAMP},
+        #{reservationId, jdbcType=VARCHAR}  <!-- 🔧 修改类型 -->
+        )
+    </insert>
+
+    <!-- 2. findActiveOrderIdByTableId -->
+    <select id="findActiveOrderIdByTableId" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        AND status = 'ORDERED'
+        LIMIT 1
+    </select>
+
+    <!-- 3. findCheckedOutOrderIdByTableId -->
+    <select id="findCheckedOutOrderIdByTableId" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        AND status = 'CHECKED_OUT'
+        ORDER BY order_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 4. getOrderTotalAmount -->
+    <select id="getOrderTotalAmount" resultType="java.lang.Double">
+        SELECT total_amount
+        FROM table_orders
+        WHERE order_id = #{orderId}
+        AND status = 'ORDERED'
+    </select>
+
+    <!-- 5. getOrderCreateTime -->
+    <select id="getOrderCreateTime" resultType="java.sql.Timestamp">
+        SELECT order_time
+        FROM table_orders
+        WHERE order_id = #{orderId}
+        AND status = 'ORDERED'
+    </select>
+
+    <!-- 6. getActiveOrderHeaderByTableId -->
+    <select id="getActiveOrderHeaderByTableId" resultType="java.util.Map">
+        SELECT
+        o.order_time,
+        o.total_amount,
+        o.order_id
+        FROM table_orders o
+        WHERE o.table_id = #{tableId}
+        AND o.status = 'ORDERED'
+        ORDER BY o.order_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 7. getOrderItemsByOrderId -->
+    <select id="getOrderItemsByOrderId" resultType="java.util.Map">
+        SELECT
+        mi.item_code,
+        mi.name,
+        oi.quantity,
+        oi.served_quantity,
+        oi.price_at_order
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+    </select>
+
+    <!-- ===== 订单状态更新 ===== -->
+
+    <!-- 8. checkoutOrder -->
+    <update id="checkoutOrder">
+        UPDATE table_orders
+        SET status = 'CHECKED_OUT',
+        is_checked_out = TRUE
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 9. updateOrderStatusAndAmount -->
+    <update id="updateOrderStatusAndAmount">
+        UPDATE table_orders
+        SET status = #{status},
+        total_amount = #{amount}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 10. isOrderPreviouslyCheckedOut -->
+    <select id="isOrderPreviouslyCheckedOut" resultType="boolean">
+        SELECT EXISTS(
+        SELECT 1
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        AND is_checked_out = TRUE
+        LIMIT 1
+        )
+    </select>
+
+
+    <!-- 11. getLatestOrderStatus - 修正版 -->
+    <select id="getLatestOrderStatus" resultType="com.restaurant.entity.Tables$OrderStatus">
+        SELECT
+        CASE
+        WHEN active.order_id IS NOT NULL THEN
+        CASE
+        WHEN unserved.unserved_count > 0 THEN 'ORDERED_UNFINISHED'
+        ELSE 'ORDERED_FINISHED'
+        END
+        WHEN checked.order_id IS NOT NULL THEN 'CHECKED_OUT'
+        ELSE 'NO_ORDER'
+        END AS order_status
+        FROM
+        (SELECT 1) AS dummy
+        LEFT JOIN (
+        SELECT order_id FROM table_orders
+        WHERE table_id = #{tableId} AND status = 'ORDERED'
+        LIMIT 1
+        ) active ON TRUE
+        LEFT JOIN (
+        SELECT COUNT(*) AS unserved_count
+        FROM order_items oi
+        JOIN table_orders o ON oi.order_id = o.order_id
+        WHERE o.table_id = #{tableId}
+        AND o.status = 'ORDERED'
+        AND oi.served_quantity &lt; oi.quantity
+        ) unserved ON TRUE
+        LEFT JOIN (
+        SELECT order_id FROM table_orders
+        WHERE table_id = #{tableId} AND status = 'CHECKED_OUT'
+        LIMIT 1
+        ) checked ON TRUE
+    </select>
+
+
+    <!-- ===== 订单删除与迁移 ===== -->
+
+    <!-- 12. deleteOrder -->
+    <delete id="deleteOrder">
+        DELETE FROM table_orders WHERE order_id = #{orderId}
+    </delete>
+
+    <!-- 13. deleteTableOrdersByTableId -->
+    <delete id="deleteTableOrdersByTableId">
+        DELETE FROM table_orders WHERE table_id = #{tableId}
+    </delete>
+
+
+    <update id="migrateOrdersToTable">
+        UPDATE table_orders
+        SET table_id = #{toTableId}
+        WHERE table_id = #{fromTableId}
+        AND status = 'ORDERED'  <!-- 只迁移活跃订单 -->
+    </update>
+
+    <!-- 15. hasAnyOrders -->
+    <select id="hasAnyOrders" resultType="boolean">
+        SELECT COUNT(*) &gt; 0
+        FROM table_orders
+        WHERE table_id = #{tableId}
+    </select>
+
+    <!-- ===== 营收统计 ===== -->
+
+    <!-- 16. updateDailyRevenue -->
+    <update id="updateDailyRevenue">
+        UPDATE business_status
+        SET daily_revenue = daily_revenue + #{amount}
+        WHERE business_date = #{revenueDate}
+    </update>
+
+    <!-- 兜底插入（需在 Service 层判断 affected==0 后调用） -->
+    <insert id="insertDailyRevenueIfNotExists">
+        INSERT INTO business_status (business_date, daily_revenue)
+        VALUES (#{revenueDate}, #{amount})
+    </insert>
+
+    <!-- ===== 季度销售报表 ===== -->
+
+    <!-- 17. getQuarterlyDishSalesReport -->
+    <select id="getQuarterlyDishSalesReport" resultType="java.util.Map">
+        SELECT
+        item_code,
+        item_name,
+        SUM(quantity_sold) AS total_quantity,
+        SUM(quantity_sold * sale_price) AS total_revenue,
+        AVG(sale_price) AS avg_price,
+        COUNT(DISTINCT DATE(sale_timestamp)) AS active_days
+        FROM item_quarterly_sales
+        WHERE year = #{year}
+        AND quarter = #{quarter}
+        <if test="category != null and category != '全部'">
+            AND item_code LIKE CONCAT(#{category}, '%')
+        </if>
+        GROUP BY item_code, item_name
+        ORDER BY total_revenue DESC
+    </select>
+
+    <!-- 18. getAvailableYearsForDishSales -->
+    <select id="getAvailableYearsForDishSales" resultType="java.lang.String">
+        SELECT DISTINCT CAST(year AS CHAR) AS year
+        FROM item_quarterly_sales
+        ORDER BY year DESC
+    </select>
+
+    <!-- ===== 季度销售记录原子操作 ===== -->
+
+    <!-- 19. findOrderItemsForSalesRecord -->
+    <select id="findOrderItemsForSalesRecord" resultType="java.util.Map">
+        SELECT
+        mi.item_code,
+        mi.name,
+        oi.price_at_order,
+        oi.quantity
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+    </select>
+
+    <!-- 20. checkQuarterlySalesExists -->
+    <select id="checkQuarterlySalesExists" resultType="java.lang.Integer">
+        SELECT sales_id
+        FROM item_quarterly_sales
+        WHERE item_code = #{itemCode}
+        AND item_name = #{itemName}
+        AND sale_price = #{salePrice}
+        AND year = #{year}
+        AND quarter = #{quarter}
+    </select>
+
+    <!-- 21. updateQuarterlySalesQuantity -->
+    <update id="updateQuarterlySalesQuantity">
+        UPDATE item_quarterly_sales
+        SET quantity_sold = quantity_sold + #{quantity},
+        sale_timestamp = NOW()
+        WHERE sales_id = #{salesId}
+    </update>
+
+    <!-- 22. insertQuarterlySalesRecord -->
+    <insert id="insertQuarterlySalesRecord">
+        INSERT INTO item_quarterly_sales (
+        item_code,
+        item_name,
+        sale_price,
+        quantity_sold,
+        sale_timestamp,
+        year,
+        quarter
+        ) VALUES (
+        #{itemCode},
+        #{itemName},
+        #{salePrice},
+        #{quantity},
+        NOW(),
+        #{year},
+        #{quarter}
+        )
+    </insert>
+
+    <update id="recordQuarterlySales">
+        <!-- 1. 创建临时表 🔧 指定字符集和排序规则 -->
+        CREATE TEMPORARY TABLE IF NOT EXISTS tmp_grouped_items (
+        item_code VARCHAR(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+        item_name VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+        sale_price DECIMAL(8,2),
+        total_quantity INT,
+        group_key VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+        <!-- 2. 清空临时表 -->
+        TRUNCATE TABLE tmp_grouped_items;
+
+        <!-- 3. 插入聚合数据 -->
+        INSERT INTO tmp_grouped_items (item_code, item_name, sale_price, total_quantity, group_key)
+        SELECT
+        mi.item_code,
+        mi.name AS item_name,
+        oi.price_at_order AS sale_price,
+        SUM(oi.quantity) AS total_quantity,
+        CONCAT(mi.item_code, '|', mi.name, '|', oi.price_at_order) COLLATE utf8mb4_unicode_ci AS group_key
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+        GROUP BY mi.item_code, mi.name, oi.price_at_order;
+
+        <!-- 4. 更新现有记录 🔧 在比较时指定排序规则 -->
+        UPDATE item_quarterly_sales iqs
+        INNER JOIN tmp_grouped_items gi
+        ON CONCAT(iqs.item_code, '|', iqs.item_name, '|', iqs.sale_price) COLLATE utf8mb4_unicode_ci = gi.group_key COLLATE utf8mb4_unicode_ci
+        SET
+        iqs.quantity_sold = iqs.quantity_sold + gi.total_quantity,
+        iqs.sale_timestamp = NOW()
+        WHERE iqs.year = #{year} AND iqs.quarter = #{quarter};
+
+        <!-- 5. 插入新记录 🔧 在比较时指定排序规则 -->
+        INSERT INTO item_quarterly_sales
+        (item_code, item_name, sale_price, quantity_sold, sale_timestamp, year, quarter)
+        SELECT
+        gi.item_code,
+        gi.item_name,
+        gi.sale_price,
+        gi.total_quantity,
+        NOW(),
+        #{year},
+        #{quarter}
+        FROM tmp_grouped_items gi
+        WHERE NOT EXISTS (
+        SELECT 1
+        FROM item_quarterly_sales iqs
+        WHERE CONCAT(iqs.item_code, '|', iqs.item_name, '|', iqs.sale_price) COLLATE utf8mb4_unicode_ci = gi.group_key COLLATE utf8mb4_unicode_ci
+        AND iqs.year = #{year}
+        AND iqs.quarter = #{quarter}
+        );
+
+        <!-- 6. 删除临时表 -->
+        DROP TEMPORARY TABLE IF EXISTS tmp_grouped_items;
+    </update>
+
+
+    <!-- findOrderItemsByTableDisplayId 查询 - 列名必须与属性名对应 -->
+    <select id="findOrderItemsByTableDisplayId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,      <!-- → orderItemId (id) -->
+        oi.order_id,           <!-- → orderId (auto) -->
+        oi.item_id,            <!-- → itemId (auto) -->
+        oi.quantity,           <!-- → quantity (auto) -->
+        oi.served_quantity,    <!-- → servedQuantity (auto) -->
+        oi.status,             <!-- → status (auto) -->
+        oi.price_at_order,     <!-- → priceAtOrder (auto) -->
+        mi.item_code,          <!-- → itemCode (auto) -->
+        mi.name AS item_name   <!-- → itemName (auto, 注意 AS 别名) -->
+        FROM table_orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        JOIN restaurant_tables t ON o.table_id = t.table_id
+        WHERE t.display_id = #{displayId}
+        AND o.status = 'ORDERED'
+        ORDER BY oi.order_item_id ASC
+    </select>
+
+
+    <!-- com.restaurant.mapper.OrderMapper.xml -->
+
+    <!-- ===== 修正后的 OrderItemResult：纯 Setter 映射 ===== -->
+    <resultMap id="OrderItemResult" type="OrderItem" autoMapping="true">
+        <!-- 主键必须显式声明（autoMapping 不会映射 id）-->
+        <id property="orderItemId" column="order_item_id"/>
+
+        <!-- 其他字段通过 autoMapping 自动映射（字段名驼峰转换）:
+             order_id        → setOrderId(Integer)        → 自动转换为 int
+             item_id         → setItemId(Integer)         → 自动转换为 int
+             item_code       → setItemCode(String)
+             item_name       → setItemName(String)
+             quantity        → setQuantity(int)           ← 基本类型，MyBatis 自动转换
+             served_quantity → setServedQuantity(int)
+             status          → setStatus(String)
+             price_at_order  → setPriceAtOrder(double)    ← 基本类型，MyBatis 自动转换
+        -->
+    </resultMap>
+
+
+    <!-- ===== com.restaurant.mapper.OrderMapper.xml ===== -->
+    <!-- 查询堂食订单 - 显示餐桌号和订单状态 -->
+    <select id="findDineInOrders" resultType="java.util.Map">
+        SELECT
+        o.order_id,
+        t.display_id as table_display,
+        t.status as table_status,  <!-- 🔧 新增：返回餐桌状态 -->
+        CASE
+        WHEN COUNT(oi.order_item_id) = 0 THEN '未下单'
+        WHEN SUM(CASE WHEN oi.status = 'SERVED' THEN 1 ELSE 0 END) = COUNT(oi.order_item_id)
+        THEN '制作完成'
+        ELSE '制作中'
+        END as order_status,
+        DATE_FORMAT(COALESCE(o.reorder_time, o.order_time), '%H:%i') as order_time
+        FROM table_orders o
+        LEFT JOIN restaurant_tables t ON o.table_id = t.table_id
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        WHERE o.order_type = 'DINE_IN'
+        AND o.status = 'ORDERED'
+        GROUP BY o.order_id, t.display_id, t.status, o.order_time, o.reorder_time
+        ORDER BY COALESCE(o.reorder_time, o.order_time) ASC
+    </select>
+
+
+    <!-- 查询自取订单 - 显示订单号和制作状态 -->
+    <select id="findPickupOrders" resultType="java.util.Map">
+        SELECT
+        o.order_id,
+        o.order_number,
+        CASE
+        WHEN COUNT(oi.order_item_id) = 0 THEN '未下单'
+        WHEN SUM(CASE WHEN oi.status = 'SERVED' THEN 1 ELSE 0 END) = COUNT(oi.order_item_id)
+        THEN '制作完成'
+        ELSE '制作中'
+        END as order_status,
+        DATE_FORMAT(o.order_time, '%H:%i') as order_time
+        FROM table_orders o
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        WHERE o.order_type = 'TAKEOUT'
+        AND o.delivery_method = 'PICKUP'
+        AND o.status = 'ORDERED'
+        GROUP BY o.order_id, o.order_number, o.order_time   <!--  添加 order_number 到 GROUP BY -->
+        ORDER BY o.order_time ASC
+    </select>
+
+    <!-- 查询配送订单 - 显示订单号和配送状态 -->
+    <select id="findDeliveryOrders" resultType="java.util.Map">
+        SELECT
+        o.order_id,
+        o.order_number,
+        o.delivery_status,                   <!--  新增：返回配送狀態 -->
+        CASE
+        WHEN COUNT(oi.order_item_id) = 0 THEN '未下单'
+        WHEN SUM(CASE WHEN oi.status = 'SERVED' THEN 1 ELSE 0 END) = COUNT(oi.order_item_id)
+        THEN '制作完成'
+        ELSE '制作中'
+        END as order_status,
+        DATE_FORMAT(o.order_time, '%H:%i') as order_time
+        FROM table_orders o
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        WHERE o.order_type = 'TAKEOUT'
+        AND o.delivery_method = 'DELIVERY'
+        AND o.status = 'ORDERED'
+        GROUP BY o.order_id, o.order_number, o.delivery_status, o.order_time   <!--  添加 delivery_status 到 GROUP BY -->
+        ORDER BY o.order_time ASC
+    </select>
+
+    <!-- 新增：根据外卖订单号查询订单 -->
+    <select id="findByOrderNumber" resultType="Order">
+        SELECT
+        order_id, order_number, table_id, reservation_id,
+        order_type, delivery_method, delivery_address, customer_phone,
+        order_time, status,
+        items_total, delivery_fee, total_amount,
+        is_checked_out, is_prepaid, prepaid_amount,
+        delivery_status,
+        reorder_time          <!-- ✅ 新增：查询重单时间 -->
+        FROM table_orders
+        WHERE order_number = #{orderNumber}
+        AND status = 'ORDERED'
+    </select>
+
+
+    <!-- 新增：获取下一个外卖订单序号（格式：P-20260305-001） -->
+    <select id="getNextOrderNumber" resultType="java.lang.Integer">
+        SELECT COALESCE(
+        MAX(CAST(SUBSTRING_INDEX(order_number, '-', -1) AS UNSIGNED)),
+        0
+        ) + 1
+        FROM table_orders
+        WHERE order_number LIKE CONCAT(#{prefix}, '-', #{dateStr}, '-%')
+        AND order_type = 'TAKEOUT'
+        <if test="deliveryMethod != null">
+            AND delivery_method = #{deliveryMethod}
+        </if>
+    </select>
+
+
+    <!-- 在 OrderMapper.xml 末尾添加 -->
+    <update id="updateDeliveryStatus">
+        UPDATE table_orders
+        SET delivery_status = #{status}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 新增：根据订单号查询明细 (外卖模式用) -->
+    <select id="findOrderItemsByOrderNumber" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_id,
+        oi.quantity,
+        oi.served_quantity,
+        oi.status,
+        oi.price_at_order,
+        mi.item_code,
+        mi.name AS item_name
+        FROM table_orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE o.order_number = #{orderNumber}
+        AND o.status = 'ORDERED'
+        ORDER BY oi.order_item_id ASC
+    </select>
+
+    <!-- 根据订单ID查询订单明细 -->
+    <select id="findOrderItemsByOrderId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_id,
+        oi.quantity,
+        oi.served_quantity,
+        oi.status,
+        oi.price_at_order,
+        mi.item_code,
+        mi.name AS item_name
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+        ORDER BY oi.order_item_id ASC
+    </select>
+
+    <!-- 根据订单ID查询订单 -->
+    <select id="findById" resultType="Order">
+        SELECT
+        order_id, order_number, table_id, reservation_id,
+        order_type, delivery_method, delivery_address, customer_phone,
+        order_time, status,
+        items_total, delivery_fee, total_amount,
+        is_checked_out, is_prepaid, prepaid_amount,
+        delivery_status,
+        reorder_time          <!-- ✅ 新增：查询重单时间 -->
+        FROM table_orders
+        WHERE order_id = #{orderId}
+    </select>
+
+    <!-- 更新订单的三金额字段 -->
+    <update id="updateOrderItemsTotalAndDeliveryFee">
+        UPDATE table_orders
+        SET
+        items_total = #{itemsTotal},
+        delivery_fee = #{deliveryFee},
+        total_amount = #{totalAmount}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 根据订单号查询订单状态 -->
+    <select id="getOrderStatusByOrderNumber" resultType="com.restaurant.entity.Tables$OrderStatus">
+        SELECT
+        CASE
+        WHEN o.status = 'CHECKED_OUT' THEN 'CHECKED_OUT'
+        WHEN COUNT(oi.order_item_id) = 0 THEN 'NO_ORDER'
+        WHEN SUM(CASE WHEN oi.status = 'SERVED' THEN 1 ELSE 0 END) = COUNT(oi.order_item_id)
+        THEN 'ORDERED_FINISHED'
+        ELSE 'ORDERED_UNFINISHED'
+        END AS order_status
+        FROM table_orders o
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        WHERE o.order_number = #{orderNumber}
+        AND o.status = 'ORDERED'
+        GROUP BY o.order_id, o.status
+    </select>
+
+    <!-- . recordCancellation（合并版：支持菜品/整单撤销） -->
+    <insert id="recordCancellation">
+        INSERT INTO order_cancellations (
+        cancellation_type,
+        order_id,
+        order_number,
+        item_code,
+        cancelled_quantity,
+        before_status,
+        cancelled_amount,
+        cancellation_reason,
+        cancellation_time
+        ) VALUES (
+        #{cancellationType},
+        #{orderId},
+        #{orderNumber},
+        #{itemCode},
+        #{cancelledQuantity},
+        #{beforeStatus},
+        #{cancelledAmount},
+        #{reason},
+        NOW()
+        )
+    </insert>
+
+    <!-- OrderMapper.xml 新增 -->
+    <update id="updateDeliveryFee">
+        UPDATE table_orders
+        SET
+        delivery_fee = #{deliveryFee},
+        total_amount = items_total + #{deliveryFee}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- OrderMapper.xml - 重单时更新订单（状态+金额+重单时间） -->
+    <update id="updateOrderForReorder">
+        UPDATE table_orders
+        SET
+        status = #{status},
+        total_amount = #{amount},
+        items_total = #{amount},
+        delivery_fee = 0.0,
+        reorder_time = #{newOrderTime}  <!-- 🔧 更新重单时间 -->
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 新增：根据预约 ID 更新预点餐订单的餐桌 ID -->
+    <update id="updateTableIdByReservationId">
+        UPDATE table_orders
+        SET table_id = #{tableId}
+        WHERE reservation_id = #{reservationId}
+        AND table_id IS NULL  <!-- 只更新尚未分配餐桌的预点餐订单 -->
+        AND order_type = 'DINE_IN'
+    </update>
+
+    <!-- 根据预约 ID 更新订单类型（带原类型校验，防止误更新） -->
+    <update id="updateOrderTypeByReservationId">
+        UPDATE table_orders
+        SET order_type = #{newType}
+        WHERE reservation_id = #{reservationId}
+        AND order_type = #{originalType}  <!-- 🔧 确保只更新预点餐订单 -->
+        AND status = 'ORDERED'            <!-- 🔧 只更新未结账的订单 -->
+    </update>
+
+</mapper>

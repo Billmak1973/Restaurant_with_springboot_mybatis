@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.QueueMapper">
+
+    <!-- 结果映射：queues + customer_groups 联合查询 -->
+    <resultMap id="QueueCustomerGroupResult" type="CustomerGroup">
+        <!-- customer_groups 字段 -->
+        <id property="group_id" column="group_id"/>
+        <result property="callNumber" column="call_number"/>
+        <result property="groupSize" column="group_size"/>
+        <result property="startTime" column="start_time"/>
+        <result property="assigned" column="is_assigned"/>
+        <result property="shownWaitMessage" column="shown_wait_message"/>
+        <result property="tableId" column="table_id"/>
+        <!-- queues 字段（映射到 position） -->
+        <result property="position" column="position"/>
+    </resultMap>
+
+    <!-- ===== 队列插入与查询 ===== -->
+
+    <!-- 1. insertQueue -->
+    <insert id="insertQueue">
+        INSERT INTO queues (queue_type, group_id, position)
+        VALUES (#{queueType}, #{groupId}, #{position})
+    </insert>
+
+    <!-- 2. getNextQueuePosition -->
+    <select id="getNextQueuePosition" resultType="int">
+        SELECT COALESCE(MAX(position), 0) + 1
+        FROM queues
+        WHERE queue_type = #{queueType}
+    </select>
+
+    <!-- 3. findQueueTypeByGroupId -->
+    <select id="findQueueTypeByGroupId" resultType="java.lang.String">
+        SELECT queue_type
+        FROM queues
+        WHERE group_id = #{groupId}
+    </select>
+
+    <!-- ===== 队列位置管理 ===== -->
+
+    <!-- 4. updateQueuePositions（窗口函数重排） -->
+    <update id="updateQueuePositions">
+        UPDATE queues q1
+        JOIN (
+        SELECT
+        queue_id,
+        ROW_NUMBER() OVER (ORDER BY position ASC, queue_id ASC) as new_position
+        FROM queues
+        WHERE queue_type = #{queueType}
+        ) q2 ON q1.queue_id = q2.queue_id
+        SET q1.position = q2.new_position
+        WHERE q1.queue_type = #{queueType}
+    </update>
+
+    <!-- 5. removeFromQueue -->
+    <delete id="removeFromQueue">
+        DELETE FROM queues
+        WHERE group_id = #{groupId} AND queue_type = #{queueType}
+    </delete>
+
+    <!-- ===== 队列加载 ===== -->
+
+    <!-- 6. loadQueueByType -->
+    <select id="loadQueueByType" resultMap="QueueCustomerGroupResult">
+        SELECT
+        q.queue_id,
+        q.queue_type,
+        q.group_id,
+        q.position,
+        q.join_time,
+        cg.call_number,
+        cg.group_size,
+        cg.start_time,
+        cg.is_assigned,
+        cg.shown_wait_message,
+        cg.table_id
+        FROM queues q
+        JOIN customer_groups cg ON q.group_id = cg.group_id
+        WHERE q.queue_type = #{queueType}
+        ORDER BY q.position ASC, q.queue_id ASC
+    </select>
+
+</mapper>

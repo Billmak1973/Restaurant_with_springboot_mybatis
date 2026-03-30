@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.MenuItemMapper">
+
+    <!-- 结果映射（字段名与属性名自动映射，此处可选） -->
+    <resultMap id="MenuItemResult" type="MenuItem">
+        <id property="itemId" column="item_id"/>
+        <result property="itemCode" column="item_code"/>
+        <result property="name" column="name"/>
+        <result property="price" column="price"/>
+        <result property="categoryId" column="category_id"/>
+        <result property="active" column="is_active"/>
+    </resultMap>
+
+    <!-- ===== 插入操作 ===== -->
+
+    <!-- 1. addItem(MenuItem item) -->
+    <insert id="addItem">
+        INSERT INTO menu_items (
+        item_code,
+        name,
+        price,
+        category_id,
+        is_active
+        ) VALUES (
+        #{itemCode},
+        #{name},
+        #{price},
+        #{categoryId},
+        #{active}
+        )
+    </insert>
+
+    <!-- ===== 查询操作 ===== -->
+
+    <!-- 2. findByCategory(int categoryId) -->
+    <select id="findByCategory" resultMap="MenuItemResult">
+        SELECT
+        item_id,
+        item_code,
+        name,
+        price,
+        category_id,
+        is_active
+        FROM menu_items
+        WHERE category_id = #{categoryId}
+        ORDER BY item_code
+    </select>
+
+    <!-- 3. findById(String itemCode) -->
+    <select id="findById" resultMap="MenuItemResult">
+        SELECT
+        item_id,
+        item_code,
+        name,
+        price,
+        is_active,
+        category_id
+        FROM menu_items
+        WHERE item_code = #{itemCode}
+    </select>
+
+    <!-- 4. findItemIdByCode(String itemCode) -->
+    <select id="findItemIdByCode" resultType="java.lang.Integer">
+        SELECT item_id
+        FROM menu_items
+        WHERE item_code = #{itemCode}
+    </select>
+
+    <!-- 5. existsInOrderItems(String itemCode) -->
+    <select id="existsInOrderItems" resultType="boolean">
+        SELECT EXISTS(
+        SELECT 1
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE mi.item_code = #{itemCode}
+        )
+    </select>
+
+    <!-- ===== 更新操作 ===== -->
+
+    <!-- 6. updateStatus(String itemCode, boolean isActive) -->
+    <update id="updateStatus">
+        UPDATE menu_items
+        SET is_active = #{isActive}
+        WHERE item_code = #{itemCode}
+    </update>
+
+    <!-- 7. updatePrice(String itemCode, double newPrice) -->
+    <update id="updatePrice">
+        UPDATE menu_items
+        SET price = #{newPrice}
+        WHERE item_code = #{itemCode}
+    </update>
+
+    <!-- MenuItemMapper.xml 新增 -->
+    <select id="getMaxItemNumberByPrefix" resultType="java.lang.Integer">
+        SELECT MAX(CAST(SUBSTRING(item_code, 2) AS UNSIGNED))
+        FROM menu_items
+        WHERE item_code LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <!-- ===== 删除操作 ===== -->
+
+    <!-- 8. deletePhysically(String itemCode) -->
+    <delete id="deletePhysically">
+        DELETE FROM menu_items
+        WHERE item_code = #{itemCode}
+    </delete>
+
+    <select id="findByCode" parameterType="string" resultType="MenuItem">
+        SELECT
+        item_id,
+        item_code,
+        name,
+        price,
+        category_id,
+        is_active
+        FROM menu_items
+        WHERE item_code = #{itemCode}
+        LIMIT 1
+    </select>
+
+</mapper>

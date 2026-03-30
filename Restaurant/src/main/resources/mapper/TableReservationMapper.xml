@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.restaurant.mapper.TableReservationMapper">
+
+    <insert id="insert">
+        INSERT INTO table_reservations (
+        reservation_id, customer_name, customer_phone, reservation_time, table_count, table_config_desc,
+        group_type, reserved_table_ids, table_selection_mode, manual_table_numbers,
+        status, within_15h, pre_order, is_prepaid, prepaid_amount, notes
+        ) VALUES (
+        #{reservationId}, #{customerName}, #{customerPhone}, #{reservationTime}, #{tableCount}, #{tableConfigDesc},
+        #{groupType}, #{reservedTableIds}, #{tableSelectionMode}, #{manualTableNumbers},
+        #{status}, #{within15h}, #{preOrder}, #{isPrepaid}, #{prepaidAmount}, #{notes}
+        )
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE table_reservations SET status = #{status} WHERE reservation_id = #{id}
+    </update>
+
+    <select id="findById" resultType="TableReservation">
+        SELECT * FROM table_reservations WHERE reservation_id = #{id}
+    </select>
+
+    <select id="existsByCode" resultType="boolean">
+        SELECT COUNT(*) > 0 FROM table_reservations WHERE reservation_id = #{code}
+    </select>
+
+    <select id="getMaxSequenceToday" resultType="java.lang.Integer">
+        SELECT COALESCE(
+        MAX(CAST(SUBSTRING_INDEX(reservation_id, '-', -1) AS UNSIGNED)),
+        0
+        )
+        FROM table_reservations
+        WHERE reservation_id LIKE CONCAT(#{datePrefix}, '%')
+    </select>
+
+    <delete id="delete">
+        DELETE FROM table_reservations WHERE reservation_id = #{id}
+    </delete>
+
+    <select id="findActiveReservationIdByTableId" resultType="string">
+        SELECT reservation_id
+        FROM table_reservations
+        WHERE FIND_IN_SET(#{tableId}, reserved_table_ids)
+        AND status = 'CONFIRMED'
+        ORDER BY reservation_time DESC
+        LIMIT 1
+    </select>
+
+    <select id="findQuantityModeReservationsForLog" resultType="java.util.Map">
+        SELECT
+        reservation_id,
+        reservation_time,
+        within_15h,
+        customer_name,
+        customer_phone,
+        table_selection_mode,
+        table_config_desc,
+        group_type,
+        status  <!-- 🔧 新增：返回状态字段，方便前端区分颜色 -->
+        FROM table_reservations
+        WHERE status IN ('PRE_CONFIRMED', 'DELAYED')  <!-- 🔧 核心修改：只显示待确认/延迟 -->
+        ORDER BY
+        -- 🔧 优先级排序：1.5小时内优先 → 时间早的优先
+        CASE
+        WHEN within_15h = 1 THEN 0
+        ELSE 1
+        END,
+        reservation_time ASC
+    </select>
+
+    <select id="findDetailById" resultType="TableReservation">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_count,
+        table_config_desc,
+        group_type,
+        reserved_table_ids,
+        table_selection_mode,
+        manual_table_numbers,
+        status,
+        within_15h,
+        pre_order AS preOrder,  <!-- 🔧 添加别名，强制映射 -->
+        is_prepaid AS isPrepaid,
+        prepaid_amount AS prepaidAmount,
+        notes,
+        created_at
+        FROM table_reservations
+        WHERE reservation_id = #{id}
+    </select>
+
+    <!-- 🔧 根据餐桌号查找预定记录（通过 reserved_table_ids 字段） -->
+    <select id="findReservationByTableId" resultType="TableReservation">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_count,
+        table_config_desc,
+        group_type,
+        reserved_table_ids,
+        table_selection_mode,
+        manual_table_numbers,
+        status,
+        within_15h,
+        pre_order,
+        is_prepaid,
+        prepaid_amount,
+        notes,
+        created_at
+        FROM table_reservations
+        WHERE FIND_IN_SET(#{tableId}, reserved_table_ids)  <!-- 🔧 改为 #{tableId} -->
+        AND status = 'CONFIRMED'
+        ORDER BY reservation_time DESC
+        LIMIT 1
+    </select>
+
+
+
+    <!-- 新增：更新预约关联桌号 -->
+    <update id="updateReservedTableIds">
+        UPDATE table_reservations
+        SET reserved_table_ids = #{tableIds}
+        WHERE reservation_id = #{id}
+    </update>
+
+    <!-- 🔧 根据预约号片段查询 -->
+    <select id="findReservationsByCodeFragment" resultType="java.util.Map">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_config_desc,
+        table_selection_mode,
+        status
+        FROM table_reservations
+        WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
+        AND status = 'PRE_CONFIRMED'
+        ORDER BY reservation_time DESC
+    </select>
+
+    <!-- 🔧 根据电话号码后4位查询 -->
+    <select id="findReservationsByPhoneLast4" resultType="java.util.Map">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_config_desc,
+        table_selection_mode,
+        status
+        FROM table_reservations
+        WHERE customer_phone LIKE CONCAT('%', #{phoneLast4})
+        AND status = 'PRE_CONFIRMED'
+        ORDER BY reservation_time DESC
+    </select>
+
+
+    <!-- 🔧 根据预约号片段查询完整预约详情（支持模糊查询） -->
+    <select id="findDetailByCodeFragment" resultType="TableReservation">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_count,
+        table_config_desc,
+        group_type,
+        reserved_table_ids,
+        table_selection_mode,
+        manual_table_numbers,
+        status,
+        within_15h,
+        pre_order AS preOrder,
+        is_prepaid AS isPrepaid,
+        prepaid_amount AS prepaidAmount,
+        notes,
+        created_at
+        FROM table_reservations
+        WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
+        AND status = 'PRE_CONFIRMED'
+        ORDER BY reservation_time DESC
+    </select>
+
+</mapper>

@@ -26,6 +26,8 @@ public interface TableReservationMapper {
 
     List<Map<String, Object>> findQuantityModeReservationsForLog();
 
+    List<Map<String, Object>> findPreOrderReservationsForMonitor();
+
     /**
      * 🔧 根据预约号查询完整预约详情
      */
@@ -52,4 +54,30 @@ public interface TableReservationMapper {
      *  根据预约号片段查询完整预约详情（支持模糊查询）
      */
     List<TableReservation>findDetailByCodeFragment(@Param("codeFragment") String codeFragment);
+
+    /**
+     * 更新预约记录（只更新非空字段）
+     */
+    int updateReservation(TableReservation reservation);
+
+    /**
+     * 🔧 CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态）
+     */
+    List<TableReservation> findDetailByCodeFragmentForCancel(@Param("codeFragment") String codeFragment);
+
+    /**
+     * 记录取消预约时没收的定金
+     */
+    int insertForfeitedDeposit(@Param("reservationId") String reservationId,
+                               @Param("customerName") String customerName,
+                               @Param("customerPhone") String customerPhone,
+                               @Param("reservationTime") LocalDateTime reservationTime,
+                               @Param("forfeitedAmount") Double forfeitedAmount,
+                               @Param("reason") String reason);
+
+    /**
+     * 🔧 更新预约记录的 pre_order 标志
+     */
+    int updatePreOrderFlag(@Param("reservationId") String reservationId,
+                           @Param("preOrder") boolean preOrder);
 }

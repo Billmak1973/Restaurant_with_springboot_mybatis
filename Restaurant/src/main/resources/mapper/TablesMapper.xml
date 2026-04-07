@@ -353,7 +353,7 @@
 
 
 
-    <!-- 找到 updateTableForReservation，添加 current_reservation_id -->
+
     <update id="updateTableForReservation">
         UPDATE restaurant_tables SET
         status = #{status},
@@ -422,6 +422,39 @@
         SET
         table_type = #{tableType},
         group_with = #{groupWith}
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 在 TablesMapper.xml 中添加新方法 -->
+    <update id="updateTableForReservationWithId">
+        UPDATE restaurant_tables SET
+        status = #{status},
+        reserved_time = #{reservedTime},
+        current_reservation_id = #{reservationId}
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 🔧 取消预约专用：重置餐桌状态 -->
+    <update id="resetTableAfterReservationCancel">
+        UPDATE restaurant_tables
+        SET
+        status = 'VACANT',                    -- 状态改空闲
+        table_type = CASE
+        WHEN table_type IN ('MERGED', 'GROUPED') THEN 'MAIN'
+        ELSE table_type
+        END,                                  -- 合并/聚餐改回主桌
+        reserved_time = NULL,                 -- 清空预约锁定时间
+        current_reservation_id = NULL,        -- 清空关联预约ID
+        merged_with = CASE
+        WHEN table_type = 'MERGED' THEN NULL
+        ELSE merged_with
+        END,                                  -- 清空合并关系
+        group_with = CASE
+        WHEN table_type = 'GROUPED' THEN NULL
+        ELSE group_with
+        END,                                  -- 清空聚餐关系
+        current_group_id = NULL,              -- 清空顾客组
+        actual_seats = 0                      -- 清空入座人数
         WHERE table_id = #{tableId}
     </update>
 </mapper>

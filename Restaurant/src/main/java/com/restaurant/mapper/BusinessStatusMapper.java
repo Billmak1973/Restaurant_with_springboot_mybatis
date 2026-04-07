@@ -46,4 +46,10 @@ public interface BusinessStatusMapper {
     int incrementDailyTakeoutCount(@Param("date") java.sql.Date date);
 
 
+    /**
+     * 累加当日取消预约没收的定金
+     */
+    int incrementDailyCancelledPrepaidAmount(
+            @Param("date") java.sql.Date date,
+            @Param("amount") Double amount);
 }

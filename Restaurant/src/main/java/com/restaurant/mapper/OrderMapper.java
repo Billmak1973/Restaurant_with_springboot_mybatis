@@ -1,4 +1,3 @@
-// com.restaurant.mapper.OrderMapper.java
 package com.restaurant.mapper;
 
 import com.restaurant.entity.Order;
@@ -312,13 +311,13 @@ public interface OrderMapper {
      */
     Order findById(@Param("orderId") int orderId);
 
+
     /**
-     * 更新订单的菜品总价、配送费和总金额
+     * 更新订单的菜品总金额和最终总金额（预约订单专用 - 无配送费）
      */
-    int updateOrderItemsTotalAndDeliveryFee(
+    int updateOrderTotals(
             @Param("orderId") int orderId,
             @Param("itemsTotal") Double itemsTotal,
-            @Param("deliveryFee") Double deliveryFee,
             @Param("totalAmount") Double totalAmount
     );
 
@@ -386,5 +385,32 @@ public interface OrderMapper {
             @Param("reservationId") String reservationId,
             @Param("originalType") String originalType,
             @Param("newType") String newType
+    );
+
+    Order findPreOrderByReservationId(@Param("reservationId") String reservationId);
+
+    /**
+     * 🔧 根据 reservation_id 查询订单明细（预约订单专用）
+     */
+    List<OrderItem> findOrderItemsByReservationId(@Param("reservationId") String reservationId);
+
+    // ===== OrderMapper.java 添加方法 =====
+    Order findActiveOrderByReservationId(@Param("reservationId") String reservationId);
+
+    int updatePrepaidInfoByReservationId(
+            @Param("reservationId") String reservationId,
+            @Param("isPrepaid") Boolean isPrepaid,
+            @Param("prepaidAmount") Double prepaidAmount
+    );
+    int updateOrderStatus(
+            @Param("orderId") Integer orderId,
+            @Param("status") String newStatus,
+            @Param("oldStatus") String oldStatus
+    );
+
+    int updateOrderStatusOnly(
+            @Param("orderId") Integer orderId,
+            @Param("status") String newStatus,
+            @Param("oldStatus") String oldStatus
     );
 }

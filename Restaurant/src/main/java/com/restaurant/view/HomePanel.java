@@ -17,6 +17,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.math.BigDecimal;
 import java.net.URL;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -64,6 +65,7 @@ public class HomePanel extends JPanel {
     private JButton cancelReorderBtn;
     private JButton cancelTakeoutBtn;
     private JButton deliveryBtn;
+    private JButton prepareOrderItemBtn;
     private JLabel itemsTotalLabel;      // 菜品总价
     private JLabel deliveryFeeLabel;     // 配送费
 
@@ -78,7 +80,6 @@ public class HomePanel extends JPanel {
         initializeUI();
         refreshOrderTypeDisplays();
     }
-
 
 
     public void setCurrentTableNumber(String tableNumber) {
@@ -106,6 +107,7 @@ public class HomePanel extends JPanel {
             case DINE_IN -> "餐桌号：";
             case PICKUP -> "自取订单：";
             case DELIVERY -> "配送订单：";
+            case RESERVATION -> "预约号：";  // 🔧 新增：预约模式显示"预约号："
             default -> "订单：";
         };
     }
@@ -117,6 +119,7 @@ public class HomePanel extends JPanel {
         return switch (currentOrderType) {
             case DINE_IN -> "确认餐桌";
             case PICKUP, DELIVERY -> "确认订单号";
+            case RESERVATION -> "确认预约号";
             default -> "确认";
         };
     }
@@ -133,6 +136,7 @@ public class HomePanel extends JPanel {
         return switch (currentOrderType) {
             case DINE_IN -> "餐桌号：";
             case PICKUP, DELIVERY -> "订单号：";
+            case RESERVATION -> "预约号：";
             default -> "订单：";
         };
     }
@@ -149,6 +153,8 @@ public class HomePanel extends JPanel {
         if (currentTableNumber == null || currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
             if (currentOrderType == OrderType.DINE_IN) {
                 tableNumberLabel.setText(labelPrefix + "未选择");
+            } else if (currentOrderType == OrderType.RESERVATION) {
+                tableNumberLabel.setText(labelPrefix + "待确认");  // 🔧 预约模式显示"待确认"
             } else {
                 tableNumberLabel.setText(labelPrefix + "待下单");
             }
@@ -324,19 +330,30 @@ public class HomePanel extends JPanel {
             boolean isDineIn = (selectedType == OrderType.DINE_IN);
             boolean isDelivery = (selectedType == OrderType.DELIVERY);
             boolean isPickup = (selectedType == OrderType.PICKUP);
+            boolean isReservation = (selectedType == OrderType.RESERVATION);  // 🔧 新增
 
             // 更新标签和按钮文本
-            fieldLabel.setText(isDineIn ? "餐桌号：" : "订单号：");
+            // 🔧 修改：预约模式也显示"预约号："
+            fieldLabel.setText(isDineIn ? "餐桌号：" : (isReservation ? "预约号：" : "订单号："));
             tableNumberField.setEditable(true);
             confirmTableBtn.setEnabled(true);
-            confirmTableBtn.setText(isDineIn ? "确认餐桌" : "确认订单号");
+
+            // 🔧 修改：预约模式按钮显示"确认预约号"
+            if (isDineIn) {
+                confirmTableBtn.setText("确认餐桌");
+            } else if (isReservation) {
+                confirmTableBtn.setText("确认预约号");
+            } else {
+                confirmTableBtn.setText("确认订单号");
+            }
 
             // 控制复选框可见性
+            // 🔧 修改：只有外卖才显示"自动生号"，预约模式不显示
             boolean isTakeout = (selectedType == OrderType.PICKUP || selectedType == OrderType.DELIVERY);
             generateOrderNumberCheck.setVisible(isTakeout);
 
-            // 堂食模式清空外卖状态
-            if (isDineIn) {
+            // 堂食/预约模式清空外卖状态
+            if (isDineIn || isReservation) {
                 generateOrderNumberCheck.setSelected(false);
                 currentTakeoutOrderNumber = null;
             }
@@ -347,6 +364,7 @@ public class HomePanel extends JPanel {
             currentTableNumber = "";
             frame.setCurrentTableNumber("");
 
+            // 🔧 修改：只有外卖模式才显示订单号前缀，预约模式不需要
             if (isTakeout && !generateOrderNumberCheck.isSelected()) {
                 String prefix = isPickup ? "P" : "D";
                 String dateStr = java.time.LocalDate.now().format(
@@ -356,20 +374,39 @@ public class HomePanel extends JPanel {
                 // 将光标定位到序号位置
                 tableNumberField.setCaretPosition(tableNumberField.getText().length());
             }
+
             // 更新顶部标签
-            tableNumberLabel.setText(isDineIn ? "餐桌号：未选择" :
-                    (selectedType == OrderType.PICKUP ? "自取订单：待下单" : "配送订单：待下单"));
+            // 🔧 修改：预约模式显示"预约号：待确认"
+            if (isDineIn) {
+                tableNumberLabel.setText("餐桌号：未选择");
+            } else if (isReservation) {
+                tableNumberLabel.setText("预约号：待确认");
+            } else if (isPickup) {
+                tableNumberLabel.setText("自取订单：待下单");
+            } else {
+                tableNumberLabel.setText("配送订单：待下单");
+            }
 
             frame.clearTemporaryOrder(currentTableNumber);
             refreshTemporaryOrderDisplay();
             refreshFormalOrderDisplay();
 
-            //  动态更新"确认上桌"按钮文本
+            //  动态更新"确认上桌"按钮文本和可见性
             if (confirmServedBtn != null) {
-                confirmServedBtn.setText(isDineIn ? "确认上桌" : "制作完成");
-                confirmServedBtn.setToolTipText(
-                        isDineIn ? "标记菜品已送达餐桌" : "标记菜品已制作完成，等待取餐/配送"
-                );
+                if (isDineIn) {
+                    // 堂食模式：显示"确认上桌"
+                    confirmServedBtn.setText("确认上桌");
+                    confirmServedBtn.setToolTipText("标记菜品已送达餐桌");
+                    confirmServedBtn.setVisible(true);
+                } else if (isReservation) {
+                    // 🔧 预约模式：隐藏"确认上桌"按钮（客人还没来）
+                    confirmServedBtn.setVisible(false);
+                } else {
+                    // 外卖模式：显示"制作完成"
+                    confirmServedBtn.setText("制作完成");
+                    confirmServedBtn.setToolTipText("标记菜品已制作完成，等待取餐/配送");
+                    confirmServedBtn.setVisible(true);
+                }
             }
 
             //  控制"取消重新点餐"和"撤销外卖"按钮可见性
@@ -377,7 +414,13 @@ public class HomePanel extends JPanel {
                 cancelReorderBtn.setVisible(isDineIn);
             }
             if (cancelTakeoutBtn != null) {
-                cancelTakeoutBtn.setVisible(!isDineIn);
+                cancelTakeoutBtn.setVisible(!isDineIn && !isReservation);  // 🔧 预约也不显示
+            }
+
+            // 在 orderTypeCombo.addActionListener 的末尾添加：
+            if (prepareOrderItemBtn != null) {
+                // 🔧 只有预约订单才显示"标记准备"按钮
+                prepareOrderItemBtn.setVisible(!isDelivery && !isPickup );
             }
 
             if (itemsTotalLabel != null) {
@@ -391,8 +434,8 @@ public class HomePanel extends JPanel {
                 deliveryBtn.setVisible(isDelivery);
             }
 
-            // 外卖模式提示
-            if (!isDineIn) {
+            // 外卖模式提示（预约模式不显示）
+            if (!isDineIn && !isReservation) {
                 JOptionPane.showMessageDialog(
                         HomePanel.this,
                         "【" + selectedType.getDisplayName() + "】模式\n" +
@@ -403,8 +446,6 @@ public class HomePanel extends JPanel {
                 );
             }
         });
-        // ========== 🔧 监听器结束 ==========
-        // 复选框监听器：自动生成订单号
         generateOrderNumberCheck.addItemListener(e -> {
             if (e.getStateChange() == ItemEvent.SELECTED) {
                 generateAndDisplayOrderNumber();
@@ -468,12 +509,21 @@ public class HomePanel extends JPanel {
         deliveryBtn.setFocusPainted(false);
         deliveryBtn.setToolTipText("点击更新订单状态");  // 悬停提示
 
+        // 🔧 新增：标记准备按钮（预约订单专用）
+        prepareOrderItemBtn = new JButton("🍳 标记准备");
+        prepareOrderItemBtn.setBackground(new Color(255, 165, 0));  // 橙色
+        prepareOrderItemBtn.setForeground(Color.WHITE);
+        prepareOrderItemBtn.setFocusPainted(false);
+        prepareOrderItemBtn.setVisible(true);
+        prepareOrderItemBtn.setToolTipText("标记预约订单菜品准备状态");
+
         buttonRowPanel.add(confirmOrderBtn);
         buttonRowPanel.add(confirmServedBtn);
         buttonRowPanel.add(cancelOrderItemBtn);
         buttonRowPanel.add(cancelReorderBtn);
         buttonRowPanel.add(cancelTakeoutBtn);  //  添加新按钮
         buttonRowPanel.add(deliveryBtn);
+        buttonRowPanel.add(prepareOrderItemBtn);  // 🔧 添加新按钮
 
         bottomPanel.add(topRowPanel);
         bottomPanel.add(Box.createRigidArea(new Dimension(0, 5)));
@@ -510,13 +560,15 @@ public class HomePanel extends JPanel {
         cancelOrderItemBtn.addActionListener(e -> showCancelOrderItemDialog());
 
         // 取消重新点餐（堂食专用）
-          cancelReorderBtn.addActionListener(e -> handleCancelReorder());
+        cancelReorderBtn.addActionListener(e -> handleCancelReorder());
 
         //  撤销外卖（外卖专用）
         cancelTakeoutBtn.addActionListener(e -> handleCancelTakeoutOrder());
 
         deliveryBtn.addActionListener(e -> handleDeliveryOrder());
 
+        // 在事件绑定区域添加：
+        prepareOrderItemBtn.addActionListener(e -> showPrepareOrderItemDialog());
         // ========== 🔧 事件绑定结束 ==========
 
         // 初始化编辑器
@@ -591,7 +643,6 @@ public class HomePanel extends JPanel {
     public String getCurrentTakeoutOrderNumber() {
         return currentTakeoutOrderNumber;
     }
-
 
 
     /**
@@ -758,19 +809,18 @@ public class HomePanel extends JPanel {
     }
 
 
+
     public void refreshFormalOrderDisplay() {
         // ===== 基础验证 =====
         if (currentTableNumber == null ||
                 "未选择".equals(currentTableNumber) ||
                 "待下单".equals(currentTableNumber)) {
-
             orderedItemsEditor.setText(
                     "<html><body style='font-family: Microsoft YaHei; padding:20px; color:#999; text-align:center;'>" +
-                            "<p>请选择餐桌或确认订单号</p></body></html>"
+                            "<p>請選擇餐桌或確認訂單號</p></body></html>"
             );
             totalPriceLabel.setText("总价格：0.00 元");
             statusLabel.setText("订单情况：");
-
             // 🔧 清空并隐藏标签
             if (itemsTotalLabel != null) {
                 itemsTotalLabel.setText("菜品：0.00 元");
@@ -790,21 +840,34 @@ public class HomePanel extends JPanel {
             // 堂食模式：通过餐桌号查询
             items = frame.loadFormalOrderItems(currentTableNumber);
             statusLabel.setText(controller.getOrderStatusDisplay(currentTableNumber));
-
             // 🔧 堂食模式：隐藏菜品/配送费标签（总价已包含在总金额中）
             if (itemsTotalLabel != null) itemsTotalLabel.setVisible(false);
             if (deliveryFeeLabel != null) deliveryFeeLabel.setVisible(false);
+        }
+        else if (currentOrderType == OrderType.RESERVATION) {
+            System.out.println("🔍 加载预约订单: " + currentTableNumber);
+            items = frame.loadFormalOrderItemsByReservationId(currentTableNumber);
 
-        } else {
+            // 🔧【修复】根据菜品实际状态动态显示
+            String orderStatusText = calculateReservationOrderStatus(items);
+            statusLabel.setText("订单情况：" + orderStatusText);
+
+            // 🔧 预约订单显示菜品总价
+            if (itemsTotalLabel != null) {
+                itemsTotalLabel.setVisible(true);
+            }
+            if (deliveryFeeLabel != null) {
+                deliveryFeeLabel.setVisible(false);  // 预约订单无配送费
+            }
+        }
+
+        else {
             // 🔧 外卖/配送模式：通过订单号查询
-            System.out.println("🔍 加载外卖订单: " + currentTableNumber);  // 调试日志
-
+            System.out.println("🔍 加载外卖订单: " + currentTableNumber);
             items = frame.loadFormalOrderItemsByOrderNumber(currentTableNumber);
-
             // 显示外卖订单状态
             String orderStatusText = frame.getOrderStatusDisplayByOrderNumber(currentTableNumber);
             statusLabel.setText(orderStatusText);
-
             // 🔧【关键修复】自取+配送都显示菜品总价，只有配送显示配送费
             boolean isTakeout = (currentOrderType == OrderType.PICKUP || currentOrderType == OrderType.DELIVERY);
             if (itemsTotalLabel != null) {
@@ -818,27 +881,47 @@ public class HomePanel extends JPanel {
         // ===== 空数据处理 =====
         if (items == null || items.isEmpty()) {
             // 🔧 更友好的空状态提示
-            String emptyMsg = (currentOrderType == OrderType.DINE_IN)
-                    ? "📭 该餐桌暂无订单明细"
-                    : "📦 订单 " + currentTableNumber + " 暂无菜品（可能刚确认，请稍等）";
+            String emptyMsg;
+            if (currentOrderType == OrderType.DINE_IN) {
+                emptyMsg = "📭 该餐桌暂无订单明细";
+            } else if (currentOrderType == OrderType.RESERVATION) {
+                emptyMsg = "📦 预约订单 " + currentTableNumber + " 暂无菜品（可能刚确认，请稍等）";
+            } else {
+                emptyMsg = "📦 订单 " + currentTableNumber + " 暂无菜品（可能刚确认，请稍等）";
+            }
 
             orderedItemsEditor.setText(
                     "<html><body style='font-family: Microsoft YaHei; padding:20px; color:#999; text-align:center;'>" +
                             "<p>" + emptyMsg + "</p></body></html>"
             );
             totalPriceLabel.setText("总价格：0.00 元");
-
             // 🔧 清空标签
             if (itemsTotalLabel != null) itemsTotalLabel.setText("菜品：0.00 元");
             if (deliveryFeeLabel != null) deliveryFeeLabel.setText("配送费：0.00 元");
-
-            System.out.println("⚠️ 订单明细为空: " + currentTableNumber);  // 调试日志
+            System.out.println(" 订单明细为空: " + currentTableNumber);
             return;
         }
 
         // ===== 生成并显示订单详情 =====
-        String htmlContent = generateOrderItemsHtml(items, true);
-        orderedItemsEditor.setText(htmlContent);
+        String htmlContent;
+        if (currentOrderType == OrderType.DINE_IN) {
+            // 堂食：使用 frame 的方法（显示"未上桌/已上桌"）
+            htmlContent = frame.generateFormalOrderHtml(currentTableNumber, false);
+        }
+        // 🔧【新增】预约订单：使用专用方法（只显示准备状态）
+        else if (currentOrderType == OrderType.RESERVATION) {
+            htmlContent = generateReservationOrderHtml(items, false);
+        }
+        else {
+            // 🔧 外卖/自取：使用已查询的 items 数据，自己生成 HTML（显示"制作中/制作完成"）
+            htmlContent = generateTakeoutOrderHtml(items, false);
+        }
+
+        // 🔧 关键：确保在 EDT 上更新 UI
+        SwingUtilities.invokeLater(() -> {
+            orderedItemsEditor.setText(htmlContent);
+            orderedItemsEditor.setCaretPosition(0);  // 滚动到顶部
+        });
 
         // 🔧 计算菜品总金额（不含配送费）
         double itemsTotal = items.stream()
@@ -870,17 +953,53 @@ public class HomePanel extends JPanel {
                 " | 菜品: " + itemsTotal + " | 配送费: " + deliveryFee + " | 总计: " + total);
     }
 
+
     /**
-     * 辅助方法：生成订单明细HTML
+     * 🔧 计算预约订单的实际状态
      */
-    private String generateOrderItemsHtml(List<OrderItem> items, boolean includeTotal) {
-        if (items.isEmpty()) {
-            return "<html><body style='font-family: Microsoft YaHei; padding:10px; color:#999; text-align:center;'><p>暂无数据</p></body></html>";
+    private String calculateReservationOrderStatus(List<OrderItem> items) {
+        if (items == null || items.isEmpty()) {
+            return "暂无菜品";
         }
 
-        // 🔧 新增：判断是否为外卖订单
-        boolean isTakeoutOrder = currentTableNumber != null &&
-                (currentTableNumber.startsWith("P-") || currentTableNumber.startsWith("D-"));
+        int totalCount = items.size();
+        int preparedCount = 0;
+        int preparingCount = 0;
+        int unservedCount = 0;
+
+        for (OrderItem item : items) {
+            String status = item.getStatus();
+            if ("PREPARED".equals(status)) {
+                preparedCount++;
+            } else if ("PREPARING".equals(status)) {
+                preparingCount++;
+            } else if ("UNSERVED".equals(status)) {
+                unservedCount++;
+            }
+        }
+
+        // 全部已准备
+        if (preparedCount == totalCount) {
+            return "预点餐已全部准备";
+        }
+        // 部分准备中
+        else if (preparingCount > 0 || preparedCount > 0) {
+            return "预点餐准备中 (" + preparedCount + "/" + totalCount + ")";
+        }
+        // 全部未准备
+        else {
+            return "预点餐未准备";
+        }
+    }
+    /**
+     * 🔧 新增：生成预约订单HTML（只显示准备状态，不显示上桌状态）
+     * 预约订单状态：UNSERVED(未准备) / PREPARING(准备中) / PREPARED(已准备)
+     */
+    private String generateReservationOrderHtml(List<OrderItem> items, boolean includeTotal) {
+        if (items == null || items.isEmpty()) {
+            return "<html><body style='font-family: Microsoft YaHei; padding:10px; color:#999; text-align:center;'>" +
+                    "<p>📭 暂无预点餐菜品</p></body></html>";
+        }
 
         // 按状态分组
         Map<String, List<OrderItem>> grouped = items.stream()
@@ -894,10 +1013,118 @@ public class HomePanel extends JPanel {
         // 表头
         html.append("<tr style='background-color:#f5f5f5;'>")
                 .append("<th style='width:50px; text-align:center;'>序号</th>")
-                .append("<th style='width:100px; text-align:center;'>状态</th>")
+                .append("<th style='width:100px; text-align:center;'>准备状态</th>")  // 🔧 改为"准备状态"
                 .append("<th style='width:80px; text-align:left;'>编号</th>")
                 .append("<th style='width:200px; text-align:left;'>菜品</th>")
-                .append("<th style='width:90px; text-align:center;'>数量</th>")
+                .append("<th style='width:90px; text-align:center;'>数量/总数量</th>")  // 🔧 预约订单只显示数量，不显示进度
+                .append("<th style='width:90px; text-align:right;'>单价</th>")
+                .append("<th style='width:100px; text-align:right;'>小计</th>")
+                .append("</tr>");
+
+        double totalAmount = 0.0;
+        int itemNumber = 1;
+
+        // 固定显示顺序：UNSERVED → PREPARING → PREPARED
+        for (String status : Arrays.asList("UNSERVED", "PREPARING", "PREPARED")) {
+            List<OrderItem> group = grouped.get(status);
+            if (group == null || group.isEmpty()) continue;
+
+            // 🔧 预约订单状态文本
+            String statusText = switch (status) {
+                case "UNSERVED" -> "⚪ 未准备";
+                case "PREPARING" -> "🟡 准备中";
+                case "PREPARED" -> "🟢 已准备";
+                default -> status;
+            };
+
+            String statusColor = switch (status) {
+                case "UNSERVED" -> "#9e9e9e";
+                case "PREPARING" -> "#ffa500";
+                case "PREPARED" -> "#4caf50";
+                default -> "#2196f3";
+            };
+
+            for (OrderItem item : group) {
+                double subtotal = item.getQuantity() * item.getPriceAtOrder();
+                totalAmount += subtotal;
+
+                html.append("<tr>");
+                // 序号
+                html.append(String.format("<td style='text-align:center; font-family:monospace;'>%d</td>", itemNumber++));
+                // 状态
+                html.append(String.format(
+                        "<td style='background-color:%s; color:white; font-weight:bold; text-align:center;'>%s</td>",
+                        statusColor, statusText
+                ));
+                // 编号 / 菜名
+                html.append(String.format(
+                        "<td style='white-space:nowrap;'>%s</td>" + "<td style='white-space:nowrap;'>%s</td>",
+                        item.getItemCode(), item.getItemName()
+                ));
+                // 数量列：显示准备进度（已准备/总数）
+                String quantityProgress = String.format("%d/%d",
+                        item.getServedQuantity(),  // 已准备数量
+                        item.getQuantity()          // 总数量
+                );
+                // 部分准备时高亮背景（浅橙色）+ 加粗
+                String quantityStyle = "PREPARING".equals(item.getStatus())
+                        ? "background-color:#fff3e0; font-weight:bold;"
+                        : "";
+                html.append(String.format(
+                        "<td style='text-align:center; font-family:monospace; %s'>%s</td>",
+                        quantityStyle, quantityProgress
+                ));
+                // 单价 / 小计
+                html.append(String.format(
+                        "<td style='text-align:right; font-family:monospace;'>%.2f</td>" +
+                                "<td style='text-align:right; font-weight:bold; color:#d32f2f; font-family:monospace;'>%.2f</td>",
+                        item.getPriceAtOrder(), subtotal
+                ));
+                html.append("</tr>");
+            }
+        }
+
+        html.append("</table>");
+
+        // 总计
+        if (includeTotal && totalAmount > 0) {
+            html.append(String.format(
+                    "<div style='margin-top:15px; padding:12px; background-color:#e8f5e9; " +
+                            "text-align:right; font-size:18px; font-weight:bold; font-family:monospace;'>" +
+                            "订单总计：<span style='color:#c62828;'>%.2f 元</span></div>",
+                    totalAmount
+            ));
+        }
+
+        html.append("</body></html>");
+        return html.toString();
+    }
+
+    /**
+     * 🔧 生成外卖订单HTML（显示制作状态）
+     */
+    private String generateTakeoutOrderHtml(List<OrderItem> items, boolean includeTotal) {
+        if (items == null || items.isEmpty()) {
+            return "<html><body style='font-family: Microsoft YaHei; padding:10px; color:#999; text-align:center;'>" +
+                    "<p>📭 暂无订单</p></body></html>";
+        }
+
+        // 按状态分组
+        Map<String, List<OrderItem>> grouped = items.stream()
+                .collect(Collectors.groupingBy(OrderItem::getStatus));
+
+        StringBuilder html = new StringBuilder();
+        html.append("<html><body style='font-family: Microsoft YaHei; padding:10px;'>");
+        html.append("<table border='1' cellpadding='6' cellspacing='0' ")
+                .append("style='width:100%; table-layout:fixed; border-collapse:collapse;'>");
+
+        // 表头
+        html.append("<tr style='background-color:#f5f5f5;'>")
+                .append("<th style='width:50px; text-align:center;'>序号</th>")
+                .append("<th style='width:100px; text-align:center;'>制作状态</th>")
+                .append("<th style='width:80px; text-align:left;'>编号</th>")
+                .append("<th style='width:200px; text-align:left;'>菜品</th>")
+                .append("<th style='width:90px; text-align:center;'>数量（已做/总数）</th>")
                 .append("<th style='width:90px; text-align:right;'>单价</th>")
                 .append("<th style='width:100px; text-align:right;'>小计</th>")
                 .append("</tr>");
@@ -910,11 +1137,11 @@ public class HomePanel extends JPanel {
             List<OrderItem> group = grouped.get(status);
             if (group == null || group.isEmpty()) continue;
 
-            // 🔧 修改：根据订单类型显示不同状态文本
+            // 🔧 外卖模式状态文本
             String statusText = switch (status) {
-                case "UNSERVED" -> isTakeoutOrder ? "🔴 制作中" : "🔴 未上桌";
-                case "PARTIALLY_SERVED" -> isTakeoutOrder ? "🟠 部分完成" : "🟠 部分上桌";
-                case "SERVED" -> isTakeoutOrder ? "🟢 制作完成" : "🟢 已上桌";
+                case "UNSERVED" -> "🔴 制作中";
+                case "PARTIALLY_SERVED" -> "🟠 部分完成";
+                case "SERVED" -> "🟢 制作完成";
                 default -> status;
             };
 
@@ -930,35 +1157,30 @@ public class HomePanel extends JPanel {
                 totalAmount += subtotal;
 
                 html.append("<tr>");
-
                 // 序号
-                html.append(String.format("<td style='text-align:center;'>%d</td>", itemNumber++));
-
+                html.append(String.format("<td style='text-align:center; font-family:monospace;'>%d</td>", itemNumber++));
                 // 状态
                 html.append(String.format(
                         "<td style='background-color:%s; color:white; font-weight:bold; text-align:center;'>%s</td>",
                         statusColor, statusText
                 ));
-
                 // 编号 / 菜名
                 html.append(String.format(
                         "<td style='white-space:nowrap;'>%s</td>" + "<td style='white-space:nowrap;'>%s</td>",
                         item.getItemCode(), item.getItemName()
                 ));
-
-                // 数量
+                // 数量列：已做/总数
                 String quantityProgress = String.format("%d/%d", item.getServedQuantity(), item.getQuantity());
                 html.append(String.format(
-                        "<td style='text-align:center; font-family:monospace;'>%s</td>", quantityProgress
+                        "<td style='text-align:center; font-family:monospace;'>%s</td>",
+                        quantityProgress
                 ));
-
                 // 单价 / 小计
                 html.append(String.format(
-                        "<td style='text-align:right;'>%.2f</td>" +
-                                "<td style='text-align:right; font-weight:bold; color:#d32f2f;'>%.2f</td>",
+                        "<td style='text-align:right; font-family:monospace;'>%.2f</td>" +
+                                "<td style='text-align:right; font-weight:bold; color:#d32f2f; font-family:monospace;'>%.2f</td>",
                         item.getPriceAtOrder(), subtotal
                 ));
-
                 html.append("</tr>");
             }
         }
@@ -969,7 +1191,7 @@ public class HomePanel extends JPanel {
         if (includeTotal && totalAmount > 0) {
             html.append(String.format(
                     "<div style='margin-top:15px; padding:12px; background-color:#e8f5e9; " +
-                            "text-align:right; font-size:18px; font-weight:bold;'>" +
+                            "text-align:right; font-size:18px; font-weight:bold; font-family:monospace;'>" +
                             "订单总计：<span style='color:#c62828;'>%.2f 元</span></div>",
                     totalAmount
             ));
@@ -1192,8 +1414,6 @@ public class HomePanel extends JPanel {
     }
 
 
-
-
     private String getStatusColor(String status) {
         if (status == null) return "#999";
         return switch (status) {
@@ -1216,7 +1436,6 @@ public class HomePanel extends JPanel {
             default -> "#999";
         };
     }
-
 
 
     /**
@@ -1249,15 +1468,13 @@ public class HomePanel extends JPanel {
     }
 
 
-
-
     private void refreshReservationOrders() {
         StringBuilder html = new StringBuilder();
         html.append("<html><body style='font-family: Microsoft YaHei; padding: 0; margin: 0; font-size: 11px;'>");
 
         try {
             // 🔧 获取数量模式的预约记录
-            List<Map<String, Object>> reservations = controller.getQuantityModeReservationsForLog();
+            List<Map<String, Object>> reservations = controller.getPreOrderReservationsForMonitor();
 
             if (reservations == null || reservations.isEmpty()) {
                 // 🔧 标题栏 - 使用您指定的格式
@@ -1335,7 +1552,7 @@ public class HomePanel extends JPanel {
                     // 🔧 分组标题 - 统一使用您指定的格式
                     html.append("<div style='background-color: #fff8e1; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #ffa000; width: 300px; box-sizing: border-box;'>");
                     html.append("<b style='color: #ef6c00; font-size: 12px;'>🟡 1.5小時內 (").append(urgentList.size()).append(")</b></div>");
-                   //這個格式如果還有文字隔行分開，就要改掉px的值
+                    //這個格式如果還有文字隔行分開，就要改掉px的值
                     html.append("<table border='1' cellpadding='3' cellspacing='0' " +
                             "style='width: 400px; border-collapse: collapse; font-size: 11px; margin-bottom: 10px;'>");
                     html.append("<tr style='background-color: #ffecb3;'>");
@@ -1420,22 +1637,96 @@ public class HomePanel extends JPanel {
         });
     }
 
+
+    /**
+     * 统一处理确认按钮点击事件
+     */
     private void handleConfirmTable(String inputStr) {
         if (inputStr.isEmpty()) {
-            String fieldName = currentOrderType == OrderType.DINE_IN ? "餐桌号" : "订单号";
+            String fieldName = currentOrderType == OrderType.DINE_IN ? "餐桌号" :
+                    (currentOrderType == OrderType.RESERVATION ? "预约号" : "订单号");
             showErrorDialog("请输入" + fieldName, "输入错误");
             return;
         }
 
+        // 🔧【核心修复】根据订单类型分发处理逻辑
         if (currentOrderType == OrderType.DINE_IN) {
-            // 堂食模式：验证餐桌
+            // 堂食：验证餐桌
             handleDineInTableConfirm(inputStr);
+
+        } else if (currentOrderType == OrderType.RESERVATION) {
+            // 🔧 预约：只验证预约号是否存在（不调用外卖验证）
+            if (!validateReservationExists(inputStr)) {
+                return; // 验证失败，直接返回
+            }
+            // 验证通过后，执行后续逻辑（设置全局状态等）
+            handleReservationConfirmed(inputStr);
+
         } else {
-            // 外卖模式：确认订单号
+            // 外卖/配送：验证订单号
             handleTakeoutOrderConfirm(inputStr);
         }
     }
 
+    /**
+     * 🔧 新增：处理预约号验证通过后的逻辑
+     * （复用之前外卖确认成功的逻辑，但去掉格式校验）
+     */
+    private void handleReservationConfirmed(String reservationId) {
+        try {
+            // 1. 设置全局状态
+            currentTableNumber = reservationId;
+            frame.setCurrentTableNumber(reservationId);
+
+            // 2. 更新顶部标签
+            tableNumberLabel.setText("预约号：" + reservationId);
+
+            // 3. 成功反馈
+            JOptionPane.showMessageDialog(frame,
+                    " 预约号确认成功！\n预约号：" + reservationId,
+                    "成功",
+                    JOptionPane.INFORMATION_MESSAGE);
+
+            // 4. 刷新显示
+            refreshFormalOrderDisplay();
+            refreshTemporaryOrderDisplay();
+
+        } catch (Exception e) {
+            showErrorDialog("系统错误: " + e.getMessage(), "错误");
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 🔧 验证预约号是否存在（仅检查存在性）
+     */
+    private boolean validateReservationExists(String reservationId) {
+        try {
+            // 通过 Controller 查询预约详情
+            TableReservation reservation = controller.getReservationDetail(reservationId);
+
+            if (reservation == null) {
+                showErrorDialog(
+                        "预约号不存在！\n" +
+                                "预约号：" + reservationId + "\n\n" +
+                                "可能原因：\n" +
+                                "• 预约号输入错误（请检查）\n" +
+                                "• 该预约记录已被删除",
+                        "预约验证失败"
+                );
+                return false;
+            }
+
+            //  验证通过
+            System.out.println(" 预约号验证成功: " + reservationId);
+            return true;
+
+        } catch (Exception e) {
+            showErrorDialog("系统错误: " + e.getMessage(), "错误");
+            e.printStackTrace();
+            return false;
+        }
+    }
 
     /**
      * 处理外卖订单号确认（修复版 - 设置 currentTakeoutOrderNumber）
@@ -1523,9 +1814,6 @@ public class HomePanel extends JPanel {
             e.printStackTrace();
         }
     }
-
-
-
 
 
     private void handleDineInTableConfirm(String tableNumStr) {
@@ -1638,7 +1926,6 @@ public class HomePanel extends JPanel {
     private void showErrorDialog(String message, String title) {
         JOptionPane.showMessageDialog(frame, message, title, JOptionPane.ERROR_MESSAGE);
     }
-
 
 
     private boolean checkAndWarnIfNotMainOrderTable(String displayId) {
@@ -1767,13 +2054,13 @@ public class HomePanel extends JPanel {
                 if (confirm != JOptionPane.YES_OPTION) {
                     return;  // 用户取消，终止操作
                 }
-                isReorderAfterCheckout = true;  // ✅ 标记为"结账后重单"
-                System.out.println("🔄 检测到结账后重单: 餐桌#" + currentTableNumber);
+                isReorderAfterCheckout = true;  //  标记为"结账后重单"
+                System.out.println(" 检测到结账后重单：餐桌#" + currentTableNumber);
             } else {
                 isReorderAfterCheckout = false;
             }
         } else {
-            // 外卖模式不支持重单逻辑
+            // 外卖/预约模式不支持重单逻辑
             isReorderAfterCheckout = false;
         }
 
@@ -1783,8 +2070,8 @@ public class HomePanel extends JPanel {
         final boolean orderExists;
         final com.restaurant.entity.Order existingOrder;
 
-        if (orderType != OrderType.DINE_IN && currentTableNumber != null &&
-                !currentTableNumber.isEmpty() && !"待下单".equals(currentTableNumber)) {
+        if (orderType != OrderType.DINE_IN && orderType != OrderType.RESERVATION &&
+                currentTableNumber != null && !currentTableNumber.isEmpty() && !"待下单".equals(currentTableNumber)) {
             existingOrder = frame.findActiveOrderByOrderNumber(currentTableNumber);
             orderExists = (existingOrder != null);
             if (orderExists) {
@@ -1822,7 +2109,21 @@ public class HomePanel extends JPanel {
         String deliveryAddress = null;
         Double deliveryFee = 0.0;
 
-        if (orderType != OrderType.DINE_IN) {
+        // 🔧【核心修复】预约订单不需要收集客户信息（已在预约时收集）
+        if (orderType == OrderType.RESERVATION) {
+            // 预约订单：直接从预约记录中获取客户信息（可选，用于订单关联）
+            if (currentTableNumber != null && !currentTableNumber.isEmpty()) {
+                TableReservation reservation = controller.getReservationDetail(currentTableNumber);
+                if (reservation != null) {
+                    customerName = reservation.getCustomerName();
+                    customerPhone = reservation.getCustomerPhone();
+                    System.out.println("📋 预约订单 - 使用预约客户信息：" + customerName + ", " + customerPhone);
+                }
+            }
+            deliveryFee = 0.0;  // 预约订单无配送费
+        }
+        // 🔧 外卖订单（自取/配送）才需要弹窗收集客户信息
+        else if (orderType != OrderType.DINE_IN) {
             if (!orderExists) {
                 // 🔹 新外卖订单：弹窗收集客户信息
                 int rowCount = (orderType == OrderType.DELIVERY) ? 4 : 3;
@@ -1959,6 +2260,15 @@ public class HomePanel extends JPanel {
             msg.append("确认餐桌 ").append(currentTableNumber).append(" 的订单？\n");
             msg.append("共 ").append(orderItems.size()).append(" 项，总计 ¥")
                     .append(String.format("%.2f", finalTotalAmount));
+        } else if (orderType == OrderType.RESERVATION) {
+            // 🔧 预约订单确认信息
+            msg.append("确认预约订单？\n");
+            msg.append("预约号: ").append(currentTableNumber).append("\n");
+            if (customerName != null) msg.append("客人: ").append(customerName).append("\n");
+            if (customerPhone != null) msg.append("电话: ").append(customerPhone).append("\n");
+            msg.append("菜品: ¥").append(String.format("%.2f", itemsTotal));
+            msg.append("\n─────────────\n应付: ¥")
+                    .append(String.format("%.2f", finalTotalAmount));
         } else {
             if (orderExists) {
                 msg.append("（追加菜品）");
@@ -2025,7 +2335,7 @@ public class HomePanel extends JPanel {
                     // 重新计算总金额
                     finalTotalAmount = itemsTotal + deliveryFee;
                     finalTotalAmount = Math.round(finalTotalAmount * 100.0) / 100.0;
-                    System.out.println("💰 配送费计算: 原=" + originalFee +
+                    System.out.println("💰 配送费计算：原=" + originalFee +
                             ", 追加=" + additionalFee + ", 最终=" + deliveryFee);
                 } catch (NumberFormatException ex) {
                     JOptionPane.showMessageDialog(this,
@@ -2087,7 +2397,8 @@ public class HomePanel extends JPanel {
                     // 4. 刷新右侧订单列表
                     switch (finalOrderType) {
                         case DINE_IN -> refreshDineInOrders();
-                        case PICKUP,DELIVERY ->refreshTakeoutOrders();
+                        case PICKUP, DELIVERY -> refreshTakeoutOrders();
+                        case RESERVATION -> refreshReservationOrders();  // 🔧 新增：刷新预约订单列表
                     }
 
                     // 5. 成功提示
@@ -2100,6 +2411,14 @@ public class HomePanel extends JPanel {
                             successMsg = " 堂食订单已提交！\n餐桌: " + finalTableNumber +
                                     "\n总计: ¥" + String.format("%.2f", finalFinalTotalAmount);
                         }
+                    } else if (finalOrderType == OrderType.RESERVATION) {
+                        // 🔧【修复】使用 finalCustomerName/finalCustomerPhone 替代 customerName/customerPhone
+                        successMsg = "✅ 预约订单已提交！\n" +
+                                "预约号: " + finalTableNumber + "\n" +
+                                (finalCustomerName != null ? "客人: " + finalCustomerName + "\n" : "") +
+                                (finalCustomerPhone != null ? "电话: " + finalCustomerPhone + "\n" : "") +
+                                "菜品: ¥" + String.format("%.2f", finalItemsTotal) + "\n" +
+                                "应付: ¥" + String.format("%.2f", finalFinalTotalAmount);
                     } else {
                         String orderNum = frame.getCurrentTakeoutOrderNumber();
                         successMsg = " " + finalOrderType.getDisplayName() + "订单已生成！\n" +
@@ -2314,6 +2633,26 @@ public class HomePanel extends JPanel {
             return false;
         }
 
+        // 🔧【新增】3. 驗證餐桌狀態必須為 OCCUPIED 才能上菜
+        try {
+            Tables table = service.getTableById(tableNumber);
+            if (table == null) {
+                JOptionPane.showMessageDialog(parentComponent, "未找到餐桌：" + tableNumber, "错误", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+            if (table.getStatus() != Tables.TableStatus.OCCUPIED) {
+                String statusText = table.getStatus().getDisplayName();
+                JOptionPane.showMessageDialog(parentComponent,
+                        "餐桌 " + tableNumber + " 當前狀態為【" + statusText + "】，不能上菜！\n" +
+                                "只有【占用中】的餐桌才能標記菜品上桌。",
+                        "狀態錯誤", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+        } catch (Exception e) {
+            System.err.println("⚠️ 查詢餐桌狀態失敗: " + e.getMessage());
+            // 查詢失敗時不阻擋，後續流程會處理
+        }
+
         // 3.  關鍵：從內存緩存獲取 item_id（String → int 轉換在 View 層完成）
         com.restaurant.entity.MenuItem menuItem = frame.getMenuItemById(itemCode.trim().toUpperCase());
         if (menuItem == null) {
@@ -2321,6 +2660,32 @@ public class HomePanel extends JPanel {
             return false;
         }
         int itemId = menuItem.getItemId(); // View 層完成 String → int 轉換
+
+        // 4. 🔧【新增】檢查菜品當前狀態（關鍵：攔截 PREPARING 狀態）
+        try {
+            List<OrderItem> orderItems = frame.loadFormalOrderItems(tableNumber);
+            OrderItem targetItem = null;
+            for (OrderItem item : orderItems) {
+                if (item.getItemCode().equalsIgnoreCase(itemCode)) {
+                    targetItem = item;
+                    break;
+                }
+            }
+
+            if (targetItem != null) {
+                String status = targetItem.getStatus();
+                // 🔧 如果狀態是 PREPARING，提示不能上桌
+                if ("PREPARING".equals(status)) {
+                    JOptionPane.showMessageDialog(parentComponent,
+                            "準備中的菜品暫時不能上桌！，請準備好再上！！",
+                            "提示", JOptionPane.WARNING_MESSAGE);
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            // 查詢失敗時不阻擋，後端會處理
+            System.err.println("⚠️ 查詢菜品狀態失敗: " + e.getMessage());
+        }
 
         // 4.  僅轉發事件，不碰數據庫
         try {
@@ -2344,46 +2709,177 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 一鍵標記所有菜品為已上桌（View 層 - 僅 UI 驗證 + 事件轉發）
+     * 一键标记所有菜品为已上桌（支持预约入座弹窗确认）
      *
-     * @param parentComponent 父組件
-     * @param tableNumber     餐桌編號（String）
+     * @param parentComponent 父组件
+     * @param tableNumber     餐桌编号（String）
      * @return 操作是否成功
      */
     private boolean markAllItemsAsServed(Component parentComponent, String tableNumber) {
-        // 1. UI 驗證：餐桌號
+        // 1. UI 验证：餐桌号
         if (tableNumber == null || tableNumber.trim().isEmpty()) {
             JOptionPane.showMessageDialog(parentComponent, "餐桌号不能为空！", "错误", JOptionPane.ERROR_MESSAGE);
             return false;
         }
 
-        // 2. UI 驗證：合併餐桌規則
+        // 2. UI 验证：合并餐桌规则
         if (!checkAndWarnIfNotMainOrderTable(tableNumber)) {
             return false;
         }
 
-        // 3.  僅轉發事件，不碰數據庫
+        // 3. 验证餐桌状态必须为 OCCUPIED + 获取餐桌对象
+        Tables table = null;
         try {
-            controller.handleMarkAllItemsAsServed(tableNumber); // ← 單行調用
+            table = service.getTableById(tableNumber);
+            if (table == null) {
+                JOptionPane.showMessageDialog(parentComponent, "未找到餐桌：" + tableNumber, "错误", JOptionPane.ERROR_MESSAGE);
+                return false;
+            }
+            if (table.getStatus() != Tables.TableStatus.OCCUPIED) {
+                JOptionPane.showMessageDialog(parentComponent,
+                        "餐桌 " + tableNumber + " 当前状态为【" + table.getStatus().getDisplayName() + "】，不能上菜！\n" +
+                                "只有【占用中】的餐桌才能标记菜品上桌。",
+                        "状态错误", JOptionPane.WARNING_MESSAGE);
+                return false;
+            }
+        } catch (Exception e) {
+            System.err.println(" 查询餐桌状态失败: " + e.getMessage());
+        }
 
-            // 成功後刷新 UI
+        // 4. 【关键】判断是否为「预约入座」：检查 current_reservation_id 是否不为空
+        // 客人入座后订单类型已转为 DINE_IN，必须通过此字段判断是否为预约转化
+        boolean isReservationSeated = (table != null &&
+                table.getCurrentReservationId() != null &&
+                !table.getCurrentReservationId().isEmpty());
+
+        // ═══════════════════════════════════════════════════════════
+        // 【非预约入座】→ 直接调用 Controller 原有方法，保持普通堂食逻辑不变
+        // ═══════════════════════════════════════════════════════════
+        if (!isReservationSeated) {
+            try {
+                // 🔥 直接调用 Controller 原有方法，不弹窗、不干预
+                controller.handleMarkAllItemsAsServed(tableNumber);
+
+                // 成功后刷新 UI
+                SwingUtilities.invokeLater(() -> {
+                    refreshTemporaryOrderDisplay();
+                    refreshFormalOrderDisplay();
+                    refreshDineInOrders();
+                });
+
+                JOptionPane.showMessageDialog(parentComponent,
+                        " 已将餐桌 " + tableNumber + " 的所有菜品标记为已上桌！",
+                        "🎉 成功", JOptionPane.INFORMATION_MESSAGE);
+                return true;
+
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(parentComponent,
+                        " 标记全部菜品失败: " + e.getMessage(),
+                        "错误", JOptionPane.ERROR_MESSAGE);
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 【预约入座】对 PREPARING/UNSERVED 菜品弹窗确认
+        // ═══════════════════════════════════════════════════════════
+        try {
+            List<OrderItem> orderItems = frame.loadFormalOrderItems(tableNumber);
+            if (orderItems == null || orderItems.isEmpty()) {
+                JOptionPane.showMessageDialog(parentComponent, "该餐桌暂无菜品！", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return false;
+            }
+
+            int markedCount = 0;
+            int skippedCount = 0;
+            StringBuilder skippedItems = new StringBuilder();
+
+            for (OrderItem item : orderItems) {
+                String status = item.getStatus();
+                boolean shouldMark = true;  // 默认应该标记
+
+                // 【核心逻辑】预约入座 + (PREPARING 或 UNSERVED) → 弹窗确认
+                if ("PREPARING".equals(status) || "UNSERVED".equals(status)) {
+                    int confirm = JOptionPane.showConfirmDialog(parentComponent,
+                            "<html><body style='font-family:Microsoft YaHei; padding:10px;'>" +
+                                    "<b>\"" + item.getItemName() + "\"</b> (" + item.getItemCode() + ")<br>" +
+                                    "<hr style='border:0; border-top:1px solid #eee; margin:8px 0;'>" +
+                                    "📊 当前状态：<font color='#ffa500'><b>" + getStatusText(status) + "</b></font><br>" +
+                                    "🍽️ 预约入座：<font color='#1976d2'>是</font><br><br>" +
+                                    "<font color='#d32f2f'><b>❓ 该菜品是否已准备好可以上桌？</b></font>" +
+                                    "</body></html>",
+                            "🍳 确认菜品准备状态",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.QUESTION_MESSAGE);
+
+                    if (confirm != JOptionPane.YES_OPTION) {
+                        // 用户选择"否"或取消 → 跳过该菜品
+                        shouldMark = false;
+                        skippedCount++;
+                        if (skippedItems.length() > 0) skippedItems.append(", ");
+                        skippedItems.append(item.getItemCode() + "(" + item.getItemName() + ")");
+                        continue;  // 跳过后续标记逻辑
+                    }
+                }
+
+                // 执行标记（如果应该标记）
+                if (shouldMark) {
+                    try {
+                        controller.handleMarkItemsAsServed(tableNumber, item.getItemId(), item.getQuantity());
+                        markedCount++;
+                    } catch (Exception e) {
+                        System.err.println(" 标记菜品 " + item.getItemCode() + " 失败: " + e.getMessage());
+                    }
+                }
+            }
+
+            // 结果提示
+            if (skippedCount > 0) {
+                String skipMsg = skippedItems.length() > 80 ?
+                        skippedItems.substring(0, 80) + "..." : skippedItems.toString();
+                JOptionPane.showMessageDialog(parentComponent,
+                        " 已标记 " + markedCount + " 个菜品为已上桌。\n\n" +
+                                "⏭ 跳过 " + skippedCount + " 个菜品（确认未准备好）：\n" +
+                                "   " + skipMsg + "\n\n" +
+                                " 请等待这些菜品准备完成后再上桌。",
+                        " 部分菜品跳过", JOptionPane.WARNING_MESSAGE);
+            } else {
+                JOptionPane.showMessageDialog(parentComponent,
+                        " 已将餐桌 " + tableNumber + " 的所有菜品标记为已上桌！",
+                        "🎉 成功", JOptionPane.INFORMATION_MESSAGE);
+            }
+
+            // 成功后刷新 UI
             SwingUtilities.invokeLater(() -> {
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
-//                if (controller != null) {
-//                    controller.refreshOrderStatusOnly();
-//                }
-                JOptionPane.showMessageDialog(parentComponent,
-                        "已將餐桌 " + tableNumber + " 的所有菜品標記為已上桌！",
-                        "成功", JOptionPane.INFORMATION_MESSAGE);
+                refreshDineInOrders();
             });
             return true;
+
         } catch (Exception e) {
             JOptionPane.showMessageDialog(parentComponent,
-                    "標記全部菜品失敗: " + e.getMessage(),
+                    " 标记全部菜品失败: " + e.getMessage(),
                     "错误", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * 辅助方法：获取状态显示文本（带表情符号）
+     */
+    private String getStatusText(String status) {
+        if (status == null) return "⚪ 未知";
+        return switch (status) {
+            case "PREPARING" -> "🟡 准备中";
+            case "PREPARED" -> "🟢 已准备";
+            case "UNSERVED" -> "⚪ 未上桌";
+            case "PARTIALLY_SERVED" -> "🟠 部分上桌";
+            case "SERVED" -> "🟢 已上桌";
+            default -> status;
+        };
     }
 
     /**
@@ -2535,7 +3031,7 @@ public class HomePanel extends JPanel {
                 if (markAllTakeoutItemsAsReady(dialog, inputOrderNumber)) {
                     refreshTemporaryOrderDisplay();
                     refreshFormalOrderDisplay();
-                   refreshTakeoutOrders();
+                    refreshTakeoutOrders();
                 }
             }
             dialog.dispose();
@@ -2676,18 +3172,27 @@ public class HomePanel extends JPanel {
             boolean valid = false;
             if (currentOrderType == OrderType.DINE_IN) {
                 Tables table = service.getTableById(inputId);
-                valid = (table != null && table.getStatus() == Tables.TableStatus.OCCUPIED);
+                valid = (table != null && table.getStatus() == Tables.TableStatus.OCCUPIED
+                || table.getStatus ()== Tables.TableStatus.RESERVED);
             } else {
-                Order order = frame.findActiveOrderByOrderNumber(inputId);
-                valid = (order != null);
+                // 支持预约订单（R开头）和普通外卖订单（P/D开头）
+                if (inputId.startsWith("R")) {
+                    // 预约订单：验证预约号是否存在
+                    TableReservation reservation = controller.getReservationDetail(inputId);
+                    valid = (reservation != null);
+                } else {
+                    // 普通外卖订单：验证订单号是否存在
+                    Order order = frame.findActiveOrderByOrderNumber(inputId);
+                    valid = (order != null);
+                }
             }
             if (!valid) {
-                String typeName = currentOrderType == OrderType.DINE_IN ? "餐桌" : "訂單";
+                String typeName = currentOrderType == OrderType.DINE_IN ? "餐桌" :
+                        (inputId.startsWith("R") ? "預約訂單" : "訂單");
                 JOptionPane.showMessageDialog(dialog, "未找到有效" + typeName + "：" + inputId, "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
-            // 驗證菜品和數量
             String itemId = itemIdField.getText().trim();
             String quantityStr = quantityField.getText().trim();
             if (itemId.isEmpty()) {
@@ -2724,26 +3229,30 @@ public class HomePanel extends JPanel {
                 boolean requiresReason = false;
                 List<OrderItem> orderItems = frame.loadFormalOrderItems(inputId);
 
-                //  调试日志（开发时可保留）
-                System.out.println(" 检查撤销原因 - 订单: " + inputId + ", 菜品: " + Arrays.toString(itemIds));
+                System.out.println("🔍 检查撤销原因 - 订单: " + inputId + ", 菜品: " + Arrays.toString(itemIds));
 
                 if (orderItems != null) {
                     for (String id : itemIds) {
-                        String code = id.trim().toUpperCase();  //  输入转大写
+                        String code = id.trim().toUpperCase();  // 输入转大写
                         for (OrderItem item : orderItems) {
-                            // 🔧 关键修复：两边都转大写再比较，避免大小写不匹配
+                            // 关键修复：两边都转大写再比较，避免大小写不匹配
                             String itemCode = item.getItemCode() != null ?
                                     item.getItemCode().trim().toUpperCase() : "";
+                            String status = item.getStatus();
                             int servedQty = item.getServedQuantity();
 
                             System.out.println("  - 对比: 输入[" + code + "] vs 订单[" + itemCode +
-                                    "], servedQty=" + servedQty);
+                                    "], status=" + status + ", servedQty=" + servedQty);
 
-                            //  修复：统一转大写比较 + 检查已上桌数量
-                            if (code.equals(itemCode) && servedQty > 0) {
+                            // 🔧【核心修复】只有当菜品状态是 PARTIALLY_SERVED 或 SERVED 时才需要原因
+                            // PREPARING 和 PREPARED 状态不需要原因，可以直接删除
+                            if (code.equals(itemCode) &&
+                                    ("PARTIALLY_SERVED".equals(status) || "SERVED".equals(status))) {
                                 requiresReason = true;
-                                System.out.println(" 找到已上桌菜品，需要撤销原因！");
+                                System.out.println("✅ 找到已上桌菜品（状态：" + status + "），需要撤销原因！");
                                 break;
+                            } else if (code.equals(itemCode)) {
+                                System.out.println("ℹ️ 菜品状态为 " + status + "，无需撤销原因，可直接删除");
                             }
                         }
                         if (requiresReason) break;
@@ -2768,7 +3277,7 @@ public class HomePanel extends JPanel {
                     }
                     cancellationReason = cancellationReason.trim();
                 } else {
-                    System.out.println("️ 菜品未上桌或不存在，无需撤销原因");
+                    System.out.println("✅ 所有菜品均未上桌或处于准备状态，无需撤销原因");
                 }
             }
             // 外賣模式：不需要撤銷原因，cancellationReason 保持 null
@@ -2790,7 +3299,7 @@ public class HomePanel extends JPanel {
                 if (currentOrderType == OrderType.DINE_IN) {
                     refreshDineInOrders();
                 } else {
-                 refreshTakeoutOrders();
+                    refreshTakeoutOrders();
                 }
                 JOptionPane.showMessageDialog(dialog, "部分或全部菜品已成功撤銷。");
             } else {
@@ -2808,7 +3317,7 @@ public class HomePanel extends JPanel {
      * @param cancellationReason 撤銷原因（堂食可能需要，外賣=null）
      */
     private boolean cancelOrderItemLogic(Component parent, String identifier, String itemCode, int quantity, String cancellationReason) {
-        // UI 驗證：itemCode → itemId
+        // UI 验证：itemCode → itemId
         com.restaurant.entity.MenuItem menuItem = frame.getMenuItemById(itemCode);
         if (menuItem == null) {
             JOptionPane.showMessageDialog(parent, "菜品 " + itemCode + " 不存在或已停售", "错误", JOptionPane.ERROR_MESSAGE);
@@ -2818,13 +3327,35 @@ public class HomePanel extends JPanel {
 
         try {
             if (currentOrderType == OrderType.DINE_IN) {
-                // 堂食：通過餐桌號撤銷（需要原因）
+                // 堂食：通过餐桌号撤销（需要原因）
                 controller.handleCancelOrderItem(identifier, itemCode, quantity,
-                        cancellationReason != null ? cancellationReason : "用戶撤銷");
-            } else {
-                // 外賣：通過訂單號撤銷（原因可選，傳 null 或默認值）
+                        cancellationReason != null ? cancellationReason : "用户撤销");
+            }
+            // 🔧【修复】预约订单：通过 reservation_id 撤销
+            else if (currentOrderType == OrderType.RESERVATION) {
+                // 1. 查找预点餐订单
+                Order preOrder = frame.findPreOrderByReservationId(identifier);
+                if (preOrder == null) {
+                    JOptionPane.showMessageDialog(parent,
+                            "未找到预约号 " + identifier + " 的预点餐订单",
+                            "错误", JOptionPane.ERROR_MESSAGE);
+                    return false;
+                }
+
+                // 🔧【关键修复】通过 frame 调用预约订单撤销方法
+                frame.cancelReservationOrderItem(
+                        identifier,  // reservation_id
+                        itemId,
+                        quantity,
+                        cancellationReason != null ? cancellationReason : "用户撤销"
+                );
+                System.out.println(" 预约订单菜品撤销成功: reservationId=" + identifier +
+                        ", orderId=" + preOrder.getOrderId());
+            }
+            else {
+                // 外卖：通过订单号撤销（原因可选，传 null 或默认值）
                 controller.handleCancelTakeoutOrderItem(identifier, itemId, quantity,
-                        cancellationReason != null ? cancellationReason : "用戶撤銷");
+                        cancellationReason != null ? cancellationReason : "用户撤销");
             }
             SwingUtilities.invokeLater(() -> {
                 refreshTemporaryOrderDisplay();
@@ -2832,7 +3363,7 @@ public class HomePanel extends JPanel {
             });
             return true;
         } catch (Exception e) {
-            JOptionPane.showMessageDialog(parent, "撤銷菜品失敗：" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(parent, "撤销菜品失败：" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             return false;
         }
     }
@@ -2883,7 +3414,7 @@ public class HomePanel extends JPanel {
             controller.handleCancelTakeoutOrder(orderNumber, reason.trim());
             refreshTemporaryOrderDisplay();
             refreshFormalOrderDisplay();
-           refreshTakeoutOrders();
+            refreshTakeoutOrders();
             JOptionPane.showMessageDialog(this, "整单撤销成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this, "整单撤销失败：" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
@@ -3154,4 +3685,362 @@ public class HomePanel extends JPanel {
     }
 
 
+    private void showPrepareOrderItemDialog() {
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 1】验证订单类型
+    // ═══════════════════════════════════════════════════════════
+    if (currentOrderType == null) {
+        JOptionPane.showMessageDialog(this, "订单类型未初始化", "错误", JOptionPane.ERROR_MESSAGE);
+        return;
+    }
+
+    String reservationId = null;
+
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 2】根据订单类型分支验证，并解析出正确的 reservationId
+    // ═══════════════════════════════════════════════════════════
+    if (currentOrderType == OrderType.RESERVATION) {
+        // ── 预约模式：当前输入的就是预约号 ──
+        if (currentTableNumber == null || currentTableNumber.isEmpty() || "待确认".equals(currentTableNumber)) {
+            JOptionPane.showMessageDialog(this,
+                    "请先确认预约号！\n" +
+                            "操作流程：选择【预约】→ 输入预约号 → 点击【确认预约号】",
+                    "输入错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        reservationId = currentTableNumber; // 直接使用输入的预约号
+    }
+    else if (currentOrderType == OrderType.DINE_IN) {
+        // ── 堂食模式：当前输入的是餐桌号，需反查 reservation_id ──
+        if (currentTableNumber == null || currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
+            JOptionPane.showMessageDialog(this,
+                    "请先输入餐桌号！",
+                    "输入错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 🔧【核心】通过餐桌号查询餐桌实体，获取关联的 reservation_id
+        Tables table = service.getTableById(currentTableNumber);
+        if (table == null) {
+            JOptionPane.showMessageDialog(this,
+                    "未找到餐桌：" + currentTableNumber,
+                    "错误",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // 🔧 关联 table_orders / restaurant_tables 中的 reservation_id
+        reservationId = table.getCurrentReservationId();
+        if (reservationId == null || reservationId.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "该餐桌未关联预约订单！\n" +
+                            "餐桌号：" + currentTableNumber + "\n" +
+                            "提示：此功能仅用于处理已入座且关联了预约记录的餐桌。",
+                    "提示",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+    }
+    else {
+        // 外卖/自取不支持标记准备状态
+        JOptionPane.showMessageDialog(this,
+                "标记准备状态仅支持【堂食】或【预约】订单！",
+                "提示",
+                JOptionPane.WARNING_MESSAGE);
+        return;
+    }
+// ═══════════════════════════════════════════════════════════
+// 【步骤 2.5】🔧 创建 final 副本（关键修复！）
+// ═══════════════════════════════════════════════════════════
+    final String finalReservationId = reservationId;
+
+        // ═══════════════════════════════════════════════════════════
+        // 【步骤 2.6】🔧【新增】验证预约时间是否为当天（核心修复！）
+        // ═══════════════════════════════════════════════════════════
+        TableReservation reservation = controller.getReservationDetail(finalReservationId);
+        if (reservation != null && reservation.getReservationTime() != null) {
+            LocalDate reservationDate = reservation.getReservationTime().toLocalDate();
+            LocalDate today = LocalDate.now();
+
+            if (!reservationDate.isEqual(today)) {
+                JOptionPane.showMessageDialog(this,
+                        "<html><b>⚠️ 只能准备当天的预约菜品！</b><br><br>" +
+                                "📅 预约日期：<font color='#1976d2'>" + reservationDate + "</font><br>" +
+                                "📅 当前日期：<font color='#1976d2'>" + today + "</font><br><br>" +
+                                "请在预约当天再进行菜品准备操作。</html>",
+                        "日期限制",
+                        JOptionPane.WARNING_MESSAGE);
+                return;  // 🔑 关键：直接返回，阻止后续操作
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+    // 【步骤 3】创建对话框
+    // ═══════════════════════════════════════════════════════════
+    String dialogTitle = (currentOrderType == OrderType.RESERVATION)
+            ? "🍳 标记菜品准备状态 - 预约号: " + reservationId
+            : "🍳 标记菜品准备状态 - 餐桌: " + currentTableNumber + " (预约号: " + reservationId + ")";
+
+    JDialog dialog = new JDialog(frame, dialogTitle, true);
+    dialog.setSize(800, 600);
+    dialog.setLocationRelativeTo(this);
+    dialog.setLayout(new BorderLayout(10, 10));
+    dialog.getContentPane().setBackground(new Color(245, 248, 255));
+
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 4】🔧 使用解析出的 reservationId 加载订单菜品
+    // ═══════════════════════════════════════════════════════════
+    List<OrderItem> orderItems = frame.loadFormalOrderItemsByReservationId(reservationId);
+
+    if (orderItems == null || orderItems.isEmpty()) {
+        JOptionPane.showMessageDialog(this,
+                "该预约订单暂无菜品！\n" +
+                        "查询依据：" + (currentOrderType == OrderType.DINE_IN ? "餐桌关联的预约号" : "预约号") + " [" + reservationId + "]",
+                "提示",
+                JOptionPane.INFORMATION_MESSAGE);
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 5】创建菜品列表面板（支持滚动）
+    // ═══════════════════════════════════════════════════════════
+    JPanel listPanel = new JPanel();
+    listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
+    listPanel.setBackground(new Color(245, 248, 255));
+    listPanel.setBorder(new EmptyBorder(10, 15, 10, 15));
+
+    // 🔧 存储：菜品编号 → 已准备数量输入框
+    Map<String, JTextField> preparedQtyMap = new HashMap<>();
+
+    for (OrderItem item : orderItems) {
+        // ── 菜品卡片面板 ──
+        JPanel itemPanel = new JPanel(new BorderLayout(10, 5));
+        itemPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(220, 220, 220), 1),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10)));
+        itemPanel.setBackground(Color.WHITE);
+        itemPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 160));
+
+        // ── 左侧：菜品信息 ──
+        JPanel infoPanel = new JPanel(new GridLayout(4, 1, 0, 5));
+        infoPanel.setBackground(Color.WHITE);
+        infoPanel.setOpaque(false);
+
+        JLabel nameLabel = new JLabel("🍽️ " + item.getItemName() + " (" + item.getItemCode() + ")");
+        nameLabel.setFont(new Font("Microsoft YaHei", Font.BOLD, 14));
+        nameLabel.setForeground(new Color(30, 144, 255));
+        infoPanel.add(nameLabel);
+
+        JLabel totalQtyLabel = new JLabel("总数量：" + item.getQuantity() + " 份");
+        totalQtyLabel.setFont(new Font("Microsoft YaHei", Font.PLAIN, 13));
+        infoPanel.add(totalQtyLabel);
+
+        String currentStatusText = switch (item.getStatus()) {
+            case "UNSERVED" -> "⚪ 未准备";
+            case "PREPARING" -> "🟡 准备中";
+            case "PREPARED" -> "🟢 已准备";
+            default -> item.getStatus();
+        };
+        JLabel statusLabel = new JLabel("当前状态：" + currentStatusText);
+        statusLabel.setFont(new Font("Microsoft YaHei", Font.PLAIN, 13));
+        infoPanel.add(statusLabel);
+
+        JPanel qtyPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        qtyPanel.setBackground(Color.WHITE);
+        qtyPanel.setOpaque(false);
+        qtyPanel.add(new JLabel("已准备："));
+
+        JButton minusBtn = new JButton("-");
+        minusBtn.setFont(new Font("Microsoft YaHei", Font.PLAIN, 12));
+        minusBtn.setPreferredSize(new Dimension(50, 35));
+        minusBtn.setBackground(new Color(244, 67, 54));
+        minusBtn.setForeground(Color.WHITE);
+        minusBtn.setFocusPainted(false);
+
+        JTextField preparedQtyField = new JTextField(String.valueOf(item.getServedQuantity()), 3);
+        preparedQtyField.setHorizontalAlignment(JTextField.CENTER);
+        preparedQtyField.setFont(new Font("Microsoft YaHei", Font.BOLD, 14));
+        preparedQtyField.setPreferredSize(new Dimension(50, 28));
+        preparedQtyField.setBackground(new Color(250, 250, 250));
+
+        JButton plusBtn = new JButton("+");
+        plusBtn.setFont(new Font("Microsoft YaHei", Font.PLAIN, 12));
+        plusBtn.setPreferredSize(new Dimension(50, 35));
+        plusBtn.setBackground(new Color(76, 175, 80));
+        plusBtn.setForeground(Color.WHITE);
+        plusBtn.setFocusPainted(false);
+
+        qtyPanel.add(minusBtn);
+        qtyPanel.add(preparedQtyField);
+        qtyPanel.add(plusBtn);
+        qtyPanel.add(new JLabel("/ " + item.getQuantity() + " 份"));
+        infoPanel.add(qtyPanel);
+
+        JLabel statusPreview = new JLabel("🟢 已准备", SwingConstants.RIGHT);
+        statusPreview.setFont(new Font("Microsoft YaHei", Font.BOLD, 14));
+        statusPreview.setPreferredSize(new Dimension(120, 100));
+
+        Runnable updatePreview = () -> {
+            try {
+                int prepared = Integer.parseInt(preparedQtyField.getText().trim());
+                int total = item.getQuantity();
+                if (prepared <= 0) {
+                    statusPreview.setText("⚪ 未准备");
+                    statusPreview.setForeground(new Color(158, 158, 158));
+                } else if (prepared >= total) {
+                    statusPreview.setText("🟢 已准备");
+                    statusPreview.setForeground(new Color(76, 175, 80));
+                } else {
+                    statusPreview.setText("🟡 准备中");
+                    statusPreview.setForeground(new Color(255, 152, 0));
+                }
+            } catch (NumberFormatException ex) {
+                statusPreview.setText("⚠️ 格式错误");
+                statusPreview.setForeground(Color.RED);
+            }
+        };
+
+        minusBtn.addActionListener(e -> {
+            try {
+                int val = Integer.parseInt(preparedQtyField.getText().trim());
+                if (val > 0) {
+                    preparedQtyField.setText(String.valueOf(val - 1));
+                }
+            } catch (NumberFormatException ex) {
+                preparedQtyField.setText("0");
+            }
+            updatePreview.run();
+        });
+
+        plusBtn.addActionListener(e -> {
+            try {
+                int val = Integer.parseInt(preparedQtyField.getText().trim());
+                if (val < item.getQuantity()) {
+                    preparedQtyField.setText(String.valueOf(val + 1));
+                }
+            } catch (NumberFormatException ex) {
+                preparedQtyField.setText("0");
+            }
+            updatePreview.run();
+        });
+
+        preparedQtyField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { updatePreview.run(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { updatePreview.run(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { updatePreview.run(); }
+        });
+
+        updatePreview.run();
+
+        itemPanel.add(infoPanel, BorderLayout.CENTER);
+        itemPanel.add(statusPreview, BorderLayout.EAST);
+        listPanel.add(itemPanel);
+        listPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+        preparedQtyMap.put(item.getItemCode(), preparedQtyField);
+    }
+
+    JScrollPane scrollPane = new JScrollPane(listPanel);
+    scrollPane.setBorder(BorderFactory.createTitledBorder(
+            BorderFactory.createLineBorder(new Color(200, 220, 240), 1),
+            " 菜品准备进度 ",
+            TitledBorder.LEFT, TitledBorder.TOP,
+            new Font("Microsoft YaHei", Font.BOLD, 13),
+            new Color(30, 144, 255)));
+    scrollPane.getViewport().setBackground(new Color(245, 248, 255));
+    scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+    scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+    scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+    dialog.add(scrollPane, BorderLayout.CENTER);
+
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 6】按钮面板
+    // ═══════════════════════════════════════════════════════════
+    JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+    buttonPanel.setBackground(new Color(245, 248, 255));
+
+    JButton confirmBtn = new JButton("✓ 确认更新");
+    confirmBtn.setFont(new Font("Microsoft YaHei", Font.BOLD, 14));
+    confirmBtn.setBackground(new Color(76, 175, 80));
+    confirmBtn.setForeground(Color.WHITE);
+    confirmBtn.setFocusPainted(false);
+    confirmBtn.setPreferredSize(new Dimension(120, 35));
+
+    JButton cancelBtn = new JButton("✗ 取消");
+    cancelBtn.setFont(new Font("Microsoft YaHei", Font.PLAIN, 14));
+    cancelBtn.setBackground(new Color(158, 158, 158));
+    cancelBtn.setForeground(Color.WHITE);
+    cancelBtn.setFocusPainted(false);
+    cancelBtn.setPreferredSize(new Dimension(100, 35));
+
+    buttonPanel.add(confirmBtn);
+    buttonPanel.add(cancelBtn);
+    dialog.add(buttonPanel, BorderLayout.SOUTH);
+
+    // ═══════════════════════════════════════════════════════════
+    // 【步骤 7】确认按钮事件
+    // ═══════════════════════════════════════════════════════════
+    confirmBtn.addActionListener(e -> {
+        try {
+            int updatedCount = 0;
+            StringBuilder updateLog = new StringBuilder();
+
+            for (OrderItem item : orderItems) {
+                JTextField qtyField = preparedQtyMap.get(item.getItemCode());
+                if (qtyField != null) {
+                    String text = qtyField.getText().trim();
+                    int preparedQty;
+                    try {
+                        preparedQty = Integer.parseInt(text);
+                    } catch (NumberFormatException ex) {
+                        preparedQty = 0;
+                    }
+
+                    preparedQty = Math.max(0, Math.min(preparedQty, item.getQuantity()));
+
+                    String newStatus;
+                    if (preparedQty <= 0) {
+                        newStatus = "UNSERVED";
+                    } else if (preparedQty >= item.getQuantity()) {
+                        newStatus = "PREPARED";
+                    } else {
+                        newStatus = "PREPARING";
+                    }
+
+                    controller.updateReservationOrderItemPrepared(
+                            finalReservationId, item.getItemCode(), preparedQty, newStatus
+                    );
+                    updatedCount++;
+                    updateLog.append(item.getItemName())
+                            .append(": ")
+                            .append(preparedQty)
+                            .append("/")
+                            .append(item.getQuantity())
+                            .append(" (")
+                            .append(switch (newStatus) {
+                                case "UNSERVED" -> "未准备";
+                                case "PREPARING" -> "准备中";
+                                case "PREPARED" -> "已准备";
+                                default -> newStatus;
+                            })
+                            .append(")\n");
+                }
+            }
+
+            JOptionPane.showMessageDialog(dialog,
+                    " 成功更新 " + updatedCount + " 个菜品的准备进度！\n\n" + updateLog,
+                    "成功", JOptionPane.INFORMATION_MESSAGE);
+            refreshFormalOrderDisplay();
+            dialog.dispose();
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(dialog,
+                    " 更新失败：" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
+        }
+    });
+
+    cancelBtn.addActionListener(e -> dialog.dispose());
+    dialog.setVisible(true);
+}
 }

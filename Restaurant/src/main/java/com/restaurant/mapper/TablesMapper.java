@@ -259,7 +259,6 @@ public interface TablesMapper {
     // ===== 拆分餐桌原子操作（替代原 splitOccupiedTable）=====
 
 
-
     int updateTableForReservation(
             @Param("tableId") int tableId,
             @Param("status") String status,
@@ -289,7 +288,6 @@ public interface TablesMapper {
     );
 
 
-    // com.restaurant.mapper.TablesMapper.java
 
     // 刪除 @Update 註解
     void mergeTables(@Param("tableId") int tableId,
@@ -342,4 +340,15 @@ public interface TablesMapper {
             @Param("tableType") String tableType,
             @Param("groupWith") String groupWith
     );
+
+    int updateTableForReservationWithId(
+            @Param("tableId") int tableId,
+            @Param("status") String status,
+            @Param("reservedTime") LocalDateTime reservedTime,
+            @Param("reservationId") String reservationId
+    );
+    /**
+     * 🔧 取消预约时还原餐桌：状态改VACANT + 类型重置MAIN + 清空关联字段
+     */
+    int resetTableAfterReservationCancel(@Param("tableId") int tableId);
 }

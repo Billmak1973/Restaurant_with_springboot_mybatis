@@ -90,7 +90,6 @@ CREATE TABLE IF NOT EXISTS table_reservations (
     reserved_table_ids VARCHAR(50) NULL COMMENT '本单预定桌号',
     table_selection_mode ENUM('MANUAL', 'QUANTITY') DEFAULT 'QUANTITY' COMMENT '餐桌选择方式',
     manual_table_numbers VARCHAR(100) NULL COMMENT '手动输入的餐桌号',
---     status ENUM('CONFIRMED', 'CANCELLED', 'NO_SHOW') DEFAULT 'CONFIRMED' COMMENT '预定状态',
     status ENUM('PRE_CONFIRMED', 'CONFIRMED', 'NO_SHOW', 'DELAYED', 'COMPLETED'),
     within_15h BOOLEAN DEFAULT FALSE COMMENT '是否 1.5 小时内到店',
     pre_order BOOLEAN DEFAULT FALSE COMMENT '是否预点餐',
@@ -172,8 +171,6 @@ CREATE TABLE IF NOT EXISTS table_orders (
 
     -- 🔧【关键修改】reservation_id 改为 VARCHAR(30)，支持自定义格式 R20260322-1234-1
     reservation_id VARCHAR(30) NULL COMMENT '預定 ID，預定訂單時填寫 (到店後保留關聯或置空)',
-
---     order_type ENUM('DINE_IN', 'TAKEOUT') DEFAULT 'DINE_IN' COMMENT '訂單類型',
     order_type ENUM('DINE_IN', 'TAKEOUT', 'RESERVATION') DEFAULT 'DINE_IN' COMMENT '訂單類型',
     -- 外賣配送方式 (僅當 order_type='TAKEOUT' 時有效)
     delivery_method ENUM('PICKUP', 'DELIVERY') NULL COMMENT '外賣方式：PICKUP=自取，DELIVERY=配送',
@@ -191,8 +188,7 @@ CREATE TABLE IF NOT EXISTS table_orders (
     -- 重新点单时间（首次下单为 NULL，重单时更新）
     reorder_time DATETIME NULL COMMENT '重新点单时间（首次下单为 NULL，重单时更新）',
 
-    status ENUM('ORDERED', 'CHECKED_OUT') DEFAULT 'ORDERED' COMMENT '訂單狀態',
-
+    status ENUM('NO_ORDER', 'ORDERED', 'CHECKED_OUT') DEFAULT 'ORDERED' COMMENT '訂單狀態',
     -- 三个金额字段
     items_total DECIMAL(10,2) DEFAULT 0.00 COMMENT '菜品总金额（不含配送费）',
     delivery_fee DECIMAL(10,2) DEFAULT 0.00 COMMENT '配送费（仅配送订单有效）',
@@ -231,13 +227,17 @@ CREATE TABLE IF NOT EXISTS order_items (
                                            item_id INT NOT NULL COMMENT '菜品 ID',
                                            quantity INT NOT NULL DEFAULT 1 COMMENT '总数量',
                                            served_quantity INT NOT NULL DEFAULT 0 COMMENT '已上菜数量',
-                                           status ENUM('UNSERVED', 'PARTIALLY_SERVED', 'SERVED') DEFAULT 'UNSERVED' COMMENT '上菜状态',
+                                           status ENUM('UNSERVED','PREPARING', 'PREPARED', 'PARTIALLY_SERVED', 'SERVED') DEFAULT 'UNSERVED' COMMENT '上菜状态',
     price_at_order DECIMAL(8,2) NOT NULL COMMENT '下单时价格',
+
     FOREIGN KEY (order_id) REFERENCES table_orders(order_id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES menu_items(item_id) ON DELETE RESTRICT,
+
     INDEX idx_order_id (order_id),
-    INDEX idx_item_id (item_id)
+    INDEX idx_item_id (item_id),
+    INDEX idx_status (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细';
+
 
 
 CREATE TABLE IF NOT EXISTS order_cancellations (

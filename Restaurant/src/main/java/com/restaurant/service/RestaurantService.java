@@ -62,9 +62,9 @@ public class RestaurantService {
         this.customerGroupMapper = customerGroupMapper;
         this.businessStatusMapper = businessStatusMapper;
         this.orderMapper = orderMapper;
-        this.queueMapper=queueMapper;
-        this.orderItemMapper=orderItemMapper;
-        this.reservationMapper=reservationMapper;
+        this.queueMapper = queueMapper;
+        this.orderItemMapper = orderItemMapper;
+        this.reservationMapper = reservationMapper;
         this.dataSource = dataSource;
     }
 
@@ -102,6 +102,7 @@ public class RestaurantService {
                 // 只打印关键堆栈（前5行），避免刷屏
                 e.printStackTrace(new java.io.PrintWriter(System.err) {
                     private int count = 0;
+
                     @Override
                     public void println(String x) {
                         if (count++ < 5) super.println(x);
@@ -128,10 +129,10 @@ public class RestaurantService {
 
 
     private void loadQueuesFromDatabase() {
-        try{
+        try {
             // 加载2人桌队列
-            List<CustomerGroup>q2=queueMapper.loadQueueByType("2_SEAT");
-            queue2Seat=new LinkedList<>(q2);
+            List<CustomerGroup> q2 = queueMapper.loadQueueByType("2_SEAT");
+            queue2Seat = new LinkedList<>(q2);
 
             // 加载4人桌队列
             List<CustomerGroup> q4 = queueMapper.loadQueueByType("4_SEAT");
@@ -234,14 +235,13 @@ public class RestaurantService {
             }
         }
         // 🔧【新增】排序後再更新到內存緩存
-        List<Tables>sortedTables=sortTablesForDisplay(tables);
+        List<Tables> sortedTables = sortTablesForDisplay(tables);
 
         // 更新到内存缓存 Map
         for (Tables table : sortedTables) {
             tableMap.put(table.getDisplayId(), table);
         }
     }
-
 
 
     // ===== 輔助方法：為餐桌關聯顧客組 =====
@@ -273,6 +273,7 @@ public class RestaurantService {
 
     /**
      * 添加顾客组（完整版：支持 4 种分配策略）
+     *
      * @param groupSize 顾客组人数
      * @return 创建的顾客组，或 null（如果无法添加）
      */
@@ -308,7 +309,7 @@ public class RestaurantService {
                 //  策略 4a: 尝试分配单张空桌（任意容量）
                 Tables assignedTable = tryAssignTableToGroup(group);
                 if (assignedTable != null) {
-                    processTableAssignment( group, assignedTable);
+                    processTableAssignment(group, assignedTable);
                     assigned = true;
                     System.out.println(" 策略 4a: 单桌分配成功 - 餐桌 #" + assignedTable.getDisplayId());
                 }
@@ -326,7 +327,7 @@ public class RestaurantService {
                         System.out.println(" 策略 4c: 合并 4 人桌分配成功 - 顾客组 #" + group.getCallNumber());
                     }
                 }
-               //   策略 4d: 1-2 人 → 自动分裂占用中的餐桌
+                //   策略 4d: 1-2 人 → 自动分裂占用中的餐桌
                 else if (groupSize <= 2) {
                     assigned = tryAutoSplitForGroup(group);
                     if (assigned) {
@@ -413,7 +414,7 @@ public class RestaurantService {
 
 
     // ===== 處理餐桌分配（支持局部刷新版）=====
-    private void processTableAssignment( CustomerGroup group, Tables table) throws SQLException {
+    private void processTableAssignment(CustomerGroup group, Tables table) throws SQLException {
 
         // 1. 更新數據庫：餐桌狀態 → OCCUPIED
         int updated = tablesMapper.updateTableStatus(
@@ -478,7 +479,8 @@ public class RestaurantService {
 
     /**
      * 🔧 策略4b/4c：嘗試合併兩張相鄰空桌分配給顧客組
-     * @param group 顧客組
+     *
+     * @param group         顧客組
      * @param tableCapacity 單張餐桌容量（2或4）
      * @return true=分配成功，false=無可用相鄰桌
      */
@@ -520,7 +522,7 @@ public class RestaurantService {
             }
 
             // 🔧【关键修复】5. 更新顾客组分配状态
-            int groupUpdated=customerGroupMapper.updateAssignmentStatus(
+            int groupUpdated = customerGroupMapper.updateAssignmentStatus(
                     group.getGroup_id(),
                     table1.getTableId(),
                     true,
@@ -548,7 +550,8 @@ public class RestaurantService {
 
     /**
      * 🔧 輔助方法：在列表中查找相鄰的餐桌對
-     * @param tables 可用餐桌列表（已按base_id排序）
+     *
+     * @param tables   可用餐桌列表（已按base_id排序）
      * @param capacity 餐桌容量
      * @return 相鄰餐桌對（2張），或null
      */
@@ -617,6 +620,7 @@ public class RestaurantService {
             mem2.setStartTime(LocalDateTime.now());
         }
     }
+
     /**
      * 获取合并餐桌的伙伴桌（通过 displayId 查询）
      */
@@ -633,6 +637,7 @@ public class RestaurantService {
 
     /**
      * 🔧 策略 4d：尝试自动分裂占用中的餐桌（1-2 人专用）
+     *
      * @param group 新顾客组
      * @return true=分裂成功，false=无可分裂餐桌
      */
@@ -707,7 +712,7 @@ public class RestaurantService {
         System.out.println(" 订单已迁移至子桌 #" + subTableA.getDisplayId());
 
         // 5. 🔧 同步更新内存缓存（事务提交后由调用方刷新）
-        syncMemoryAfterAutoSplit(targetTable, subTableA, subTableB, existingGroup, group,originalStartTime);
+        syncMemoryAfterAutoSplit(targetTable, subTableA, subTableB, existingGroup, group, originalStartTime);
 
         // 6. 从队列移除新顾客组（内存操作）
         removeFromQueue(group);
@@ -781,7 +786,7 @@ public class RestaurantService {
      * 🔧 同步更新内存缓存（事务提交后调用）
      */
     private void syncMemoryAfterAutoSplit(Tables mainTable, Tables subA, Tables subB,
-                                          CustomerGroup existingGroup, CustomerGroup newGroup,  LocalDateTime originalStartTime) {
+                                          CustomerGroup existingGroup, CustomerGroup newGroup, LocalDateTime originalStartTime) {
         // 1. 更新主桌缓存状态
         Tables memMain = tableMap.get(mainTable.getDisplayId());
         if (memMain != null) {
@@ -821,120 +826,119 @@ public class RestaurantService {
     }
 
 
+    @Transactional(rollbackFor = Exception.class)
+    public void processCustomerDeparture(String displayId) {
+        // 1. 查询主餐桌
+        Tables mainTable = tablesMapper.findByDisplayId(displayId);
+        if (mainTable == null) {
+            throw new IllegalArgumentException("餐桌不存在: " + displayId);
+        }
 
- @Transactional(rollbackFor = Exception.class)
- public void processCustomerDeparture(String displayId) {
-     // 1. 查询主餐桌
-     Tables mainTable = tablesMapper.findByDisplayId(displayId);
-     if (mainTable == null) {
-         throw new IllegalArgumentException("餐桌不存在: " + displayId);
-     }
+        // 🔧【核心】收集所有需要处理的餐桌（支持合并桌 + 聚餐桌）
+        List<Tables> tablesToProcess = new ArrayList<>();
+        tablesToProcess.add(mainTable);
 
-     // 🔧【核心】收集所有需要处理的餐桌（支持合并桌 + 聚餐桌）
-     List<Tables> tablesToProcess = new ArrayList<>();
-     tablesToProcess.add(mainTable);
+        // ── 情况 1: 合并桌 (2 张桌) ──
+        if (mainTable.getTableType() == Tables.TableType.MERGED && mainTable.getMergedWith() != null) {
+            Tables partner = tablesMapper.findByDisplayId(mainTable.getMergedWith());
+            if (partner == null || partner.getStatus() != Tables.TableStatus.OCCUPIED) {
+                throw new IllegalStateException("合并餐桌伙伴状态异常: " + mainTable.getMergedWith());
+            }
+            tablesToProcess.add(partner);
+        }
+        // ── 情况 2: 聚餐桌 (3 张或以上) ──
+        else if (mainTable.getTableType() == Tables.TableType.GROUPED && mainTable.getGroupWith() != null) {
+            // 解析 group_with 字段（格式："7,8,9"）
+            String[] groupIds = mainTable.getGroupWith().split(",");
+            for (String id : groupIds) {
+                String trimmedId = id.trim();
+                // 避免重复添加主桌
+                if (!trimmedId.equals(displayId) && !trimmedId.isEmpty()) {
+                    Tables groupedTable = tablesMapper.findByDisplayId(trimmedId);
+                    if (groupedTable == null) {
+                        System.err.println("⚠️ 聚餐桌关联桌不存在: " + trimmedId);
+                        continue;
+                    }
+                    // 验证状态
+                    if (groupedTable.getStatus() != Tables.TableStatus.OCCUPIED) {
+                        throw new IllegalStateException("聚餐桌 #" + trimmedId +
+                                " 状态异常: " + groupedTable.getStatus());
+                    }
+                    tablesToProcess.add(groupedTable);
+                }
+            }
+        }
 
-     // ── 情况 1: 合并桌 (2 张桌) ──
-     if (mainTable.getTableType() == Tables.TableType.MERGED && mainTable.getMergedWith() != null) {
-         Tables partner = tablesMapper.findByDisplayId(mainTable.getMergedWith());
-         if (partner == null || partner.getStatus() != Tables.TableStatus.OCCUPIED) {
-             throw new IllegalStateException("合并餐桌伙伴状态异常: " + mainTable.getMergedWith());
-         }
-         tablesToProcess.add(partner);
-     }
-     // ── 情况 2: 聚餐桌 (3 张或以上) ──
-     else if (mainTable.getTableType() == Tables.TableType.GROUPED && mainTable.getGroupWith() != null) {
-         // 解析 group_with 字段（格式："7,8,9"）
-         String[] groupIds = mainTable.getGroupWith().split(",");
-         for (String id : groupIds) {
-             String trimmedId = id.trim();
-             // 避免重复添加主桌
-             if (!trimmedId.equals(displayId) && !trimmedId.isEmpty()) {
-                 Tables groupedTable = tablesMapper.findByDisplayId(trimmedId);
-                 if (groupedTable == null) {
-                     System.err.println("⚠️ 聚餐桌关联桌不存在: " + trimmedId);
-                     continue;
-                 }
-                 // 验证状态
-                 if (groupedTable.getStatus() != Tables.TableStatus.OCCUPIED) {
-                     throw new IllegalStateException("聚餐桌 #" + trimmedId +
-                             " 状态异常: " + groupedTable.getStatus());
-                 }
-                 tablesToProcess.add(groupedTable);
-             }
-         }
-     }
+        // 🔧【关键修复】收集所有需要删除的预约记录ID（用Set去重）
+        Set<String> reservationIdsToDelete = new HashSet<>();
+        for (Tables t : tablesToProcess) {
+            if (t.getCurrentReservationId() != null && !t.getCurrentReservationId().isEmpty()) {
+                reservationIdsToDelete.add(t.getCurrentReservationId());
+            }
+        }
 
-     // 🔧【关键修复】收集所有需要删除的预约记录ID（用Set去重）
-     Set<String> reservationIdsToDelete = new HashSet<>();
-     for (Tables t : tablesToProcess) {
-         if (t.getCurrentReservationId() != null && !t.getCurrentReservationId().isEmpty()) {
-             reservationIdsToDelete.add(t.getCurrentReservationId());
-         }
-     }
+        // 🔧【调试日志】输出处理列表
+        System.out.println("🔍 [DEBUG] processCustomerDeparture:");
+        System.out.println("   主桌: #" + displayId + " (类型:" + mainTable.getTableType() + ")");
+        System.out.println("   处理餐桌数: " + tablesToProcess.size());
+        for (Tables t : tablesToProcess) {
+            System.out.println("   - 餐桌#" + t.getDisplayId() +
+                    ", reservationId: " + t.getCurrentReservationId());
+        }
+        System.out.println("   待删除预约记录数: " + reservationIdsToDelete.size());
 
-     // 🔧【调试日志】输出处理列表
-     System.out.println("🔍 [DEBUG] processCustomerDeparture:");
-     System.out.println("   主桌: #" + displayId + " (类型:" + mainTable.getTableType() + ")");
-     System.out.println("   处理餐桌数: " + tablesToProcess.size());
-     for (Tables t : tablesToProcess) {
-         System.out.println("   - 餐桌#" + t.getDisplayId() +
-                 ", reservationId: " + t.getCurrentReservationId());
-     }
-     System.out.println("   待删除预约记录数: " + reservationIdsToDelete.size());
+        // 🔧【批量处理】更新所有关联餐桌的内存缓存 + 数据库状态
+        for (Tables table : tablesToProcess) {
+            String tid = table.getDisplayId();
 
-     // 🔧【批量处理】更新所有关联餐桌的内存缓存 + 数据库状态
-     for (Tables table : tablesToProcess) {
-         String tid = table.getDisplayId();
+            // 1. 更新内存缓存
+            Tables memoryTable = tableMap.get(tid);
+            if (memoryTable != null) {
+                memoryTable.setCurrentGroupId(null);
+                memoryTable.setCurrentGroup(null);
+                memoryTable.setStatus(Tables.TableStatus.SETTING_UP);
+                memoryTable.setActualSeats(0);
+                memoryTable.setEndTime(LocalDateTime.now());
+                memoryTable.setCurrentReservationId(null);  // 🔧 清空预约ID关联
+                System.out.println("   ✅ 内存缓存已更新: #" + tid);
+            }
 
-         // 1. 更新内存缓存
-         Tables memoryTable = tableMap.get(tid);
-         if (memoryTable != null) {
-             memoryTable.setCurrentGroupId(null);
-             memoryTable.setCurrentGroup(null);
-             memoryTable.setStatus(Tables.TableStatus.SETTING_UP);
-             memoryTable.setActualSeats(0);
-             memoryTable.setEndTime(LocalDateTime.now());
-             memoryTable.setCurrentReservationId(null);  // 🔧 清空预约ID关联
-             System.out.println("   ✅ 内存缓存已更新: #" + tid);
-         }
+            // 2. 更新数据库状态（占用 → 准备中）
+            int updated = tablesMapper.updateTableStatusForDeparture(
+                    table.getTableId(),
+                    Tables.TableStatus.SETTING_UP.name(),
+                    null, 0, table.getTableType().name());
+            if (updated == 0) {
+                System.err.println("⚠️ 数据库更新失败: #" + tid);
+            } else {
+                System.out.println("   ✅ 数据库已更新: #" + tid);
+            }
+        }
 
-         // 2. 更新数据库状态（占用 → 准备中）
-         int updated = tablesMapper.updateTableStatusForDeparture(
-                 table.getTableId(),
-                 Tables.TableStatus.SETTING_UP.name(),
-                 null, 0, table.getTableType().name());
-         if (updated == 0) {
-             System.err.println("⚠️ 数据库更新失败: #" + tid);
-         } else {
-             System.out.println("   ✅ 数据库已更新: #" + tid);
-         }
-     }
+        // 🔧【核心修复】统一删除预约记录（无论单桌/合并桌/聚餐桌，只删一次）
+        for (String reservationId : reservationIdsToDelete) {
+            try {
+                int deleted = reservationMapper.delete(reservationId);
+                System.out.println("🗑️ 已删除预约记录: " + reservationId + " (影响行数: " + deleted + ")");
+            } catch (Exception e) {
+                // 记录已删除或不存在时忽略（幂等处理）
+                System.out.println("⚠️ 预约记录 " + reservationId + " 删除时异常（可能已删除）: " + e.getMessage());
+            }
+        }
 
-     // 🔧【核心修复】统一删除预约记录（无论单桌/合并桌/聚餐桌，只删一次）
-     for (String reservationId : reservationIdsToDelete) {
-         try {
-             int deleted = reservationMapper.delete(reservationId);
-             System.out.println("🗑️ 已删除预约记录: " + reservationId + " (影响行数: " + deleted + ")");
-         } catch (Exception e) {
-             // 记录已删除或不存在时忽略（幂等处理）
-             System.out.println("⚠️ 预约记录 " + reservationId + " 删除时异常（可能已删除）: " + e.getMessage());
-         }
-     }
+        // 3. 删除顾客组记录（所有桌共享同一个 group，只删一次）
+        if (mainTable.getCurrentGroupId() != null) {
+            customerGroupMapper.delete(mainTable.getCurrentGroupId());
+            System.out.println("🗑️ 已删除顾客组: #" + mainTable.getCurrentGroupId());
+        }
 
-     // 3. 删除顾客组记录（所有桌共享同一个 group，只删一次）
-     if (mainTable.getCurrentGroupId() != null) {
-         customerGroupMapper.delete(mainTable.getCurrentGroupId());
-         System.out.println("🗑️ 已删除顾客组: #" + mainTable.getCurrentGroupId());
-     }
-
-     // 🔧【调试日志】输出最终结果
-     String tableList = tablesToProcess.stream()
-             .map(Tables::getDisplayId)
-             .collect(Collectors.joining(","));
-     System.out.println("✅ [DEBUG] 离店处理完成: 餐桌组 [" + tableList + "]" +
-             ", 删除预约记录数: " + reservationIdsToDelete.size() + "\n");
- }
+        // 🔧【调试日志】输出最终结果
+        String tableList = tablesToProcess.stream()
+                .map(Tables::getDisplayId)
+                .collect(Collectors.joining(","));
+        System.out.println("✅ [DEBUG] 离店处理完成: 餐桌组 [" + tableList + "]" +
+                ", 删除预约记录数: " + reservationIdsToDelete.size() + "\n");
+    }
 
     public void cleanTable(String displayId) {
         Tables table = tablesMapper.findByDisplayId(displayId);
@@ -947,8 +951,8 @@ public class RestaurantService {
                 Tables.TableStatus.VACANT.name(),
                 null, 0, null);
 
-        Tables memoryTable= tableMap.get(displayId);
-        if(memoryTable!=null){
+        Tables memoryTable = tableMap.get(displayId);
+        if (memoryTable != null) {
             memoryTable.setStatus(Tables.TableStatus.VACANT);
             memoryTable.setCurrentGroup(null);
             memoryTable.setCurrentGroup(null);
@@ -959,6 +963,7 @@ public class RestaurantService {
 
     /**
      * 拆分餐桌（2 人桌→兩個 1 人桌，4 人桌→兩個 2 人桌）
+     *
      * @param displayId 主桌顯示編號（如 "7"）
      * @return 拆分後的子桌列表
      * @throws IllegalStateException 如果不符合拆分條件
@@ -1063,12 +1068,13 @@ public class RestaurantService {
         tableMap.put(subB.getDisplayId(), subB);
 
         // 3. 可選：刷新全局緩存確保一致性
-         refreshTableCache();
+        refreshTableCache();
     }
 
 
     /**
      * 🔧 餐桌顯示排序：主桌在前（1-15），子桌在後（1a,1b,2a,2b...）
+     *
      * @param tables 原始餐桌列表
      * @return 排序後的列表
      */
@@ -1229,6 +1235,7 @@ public class RestaurantService {
 
     /**
      * 🔧 入队操作（Spring 事务模式 - 无需手动传 Connection）
+     *
      * @param group 顾客组
      */
     @Transactional(rollbackFor = Exception.class)  // 声明事务边界
@@ -1339,6 +1346,7 @@ public class RestaurantService {
 
     /**
      * 验证餐桌编号格式
+     *
      * @param tableNumber 餐桌编号（如 "7" 或 "7a"）
      * @return true=格式有效，false=格式无效
      */
@@ -1364,6 +1372,7 @@ public class RestaurantService {
 
     /**
      * 检查餐桌是否为合并桌中的主桌（编号较小的那张）
+     *
      * @param displayId 餐桌显示ID（如 "7" 或 "8"）
      * @return true=是主桌或不是合并桌，false=是合并桌中的伙伴桌
      */
@@ -1404,6 +1413,7 @@ public class RestaurantService {
 
     /**
      * 从餐桌显示ID中提取数字编号
+     *
      * @param displayId 餐桌显示ID（如 "7" 或 "7a"）
      * @return 数字编号
      */
@@ -1700,17 +1710,17 @@ public class RestaurantService {
 
     /**
      * 获取所有空闲餐桌（从内存缓存获取，不查数据库）
+     *
      * @return 空闲餐桌列表
      */
     @Transactional(readOnly = true)
     public List<Tables> getAllVacantTables() {
         return tableMap.values().stream()
                 .filter(table -> table.getStatus() == Tables.TableStatus.VACANT)
-                .filter(tables -> tables.getTableType()==Tables.TableType.MAIN)
+                .filter(tables -> tables.getTableType() == Tables.TableType.MAIN)
                 .sorted(Comparator.comparingInt(Tables::getBaseId))  // 🔧 按 baseId 升序排序
                 .collect(Collectors.toList());
     }
-
 
 
     /**
@@ -1720,7 +1730,7 @@ public class RestaurantService {
      * @param data 來自 View 的表單數據 Map
      * @return 結果 Map {success: Boolean, message: String, reservationId: String}
      */
-
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> createReservation(Map<String, Object> data) {
         Map<String, Object> result = new HashMap<>();
         try {
@@ -1795,7 +1805,7 @@ public class RestaurantService {
                 // ── 手動模式：使用 selectedTables ──
                 totalTableCount = (selectedTables != null) ? selectedTables.size() : 0;
                 configDesc = (selectedTables != null && !selectedTables.isEmpty())
-                        ? "手動指定桌號: " + String.join(",", selectedTables)
+                        ? "手動指定桌號：" + String.join(",", selectedTables)
                         : "";
             } else {
                 // ── 數量模式：使用 tableConfig ──
@@ -1825,16 +1835,36 @@ public class RestaurantService {
             reservation.setTableConfigDesc(configDesc);
 
             // ═══════════════════════════════════════════════════════════
-            // 【步驟 4】核心邏輯分支：三個場景處理
+            // 🔧【核心修復】步驟 4：先插入預約記錄（避免外鍵約束錯誤）
+            // ═══════════════════════════════════════════════════════════
+            // 🔧 關鍵：先檢查編號唯一性
+            int maxRetry = 3;
+            int retry = 0;
+            while (retry < maxRetry) {
+                if (!reservationMapper.existsByCode(reservationCode)) {
+                    break;  // 編號可用，跳出循環
+                }
+                // 編號已存在：順序號 +1 重試
+                retry++;
+                reservationCode = generateReservationCode(customerPhone, reservationTimeStr, retry);
+                reservation.setReservationId(reservationCode);
+            }
+
+            // 🔧【關鍵修復】先插入預約記錄到 table_reservations 表
+            // 這樣後續更新 restaurant_tables.current_reservation_id 時外鍵約束才能通過
+            reservationMapper.insert(reservation);
+            System.out.println("✅ 預約記錄已插入：" + reservationCode);
+
+            // ═══════════════════════════════════════════════════════════
+            // 【步驟 5】核心邏輯分支：三個場景處理
             // ═══════════════════════════════════════════════════════════
 
             // 【場景 1】1.5 小時內 + 手動指定桌號 (MANUAL) → 鎖定 restaurant_tables
             if (within15h != null && within15h && isManualMode &&
                     selectedTables != null && !selectedTables.isEmpty()) {
 
-                // ========= 【分支1】MAIN（原本邏輯） =========
+                // ========= 【分支 1】MAIN（原本邏輯） =========
                 if ("MAIN".equals(tableType)) {
-
                     List<String> lockedTableIds = new ArrayList<>();
 
                     for (String displayId : selectedTables) {
@@ -1849,11 +1879,12 @@ public class RestaurantService {
                             );
                         }
 
-                        // 鎖定
-                        tablesMapper.updateTableForReservation(
+                        // 🔧【修改點 1】使用新方法，傳入 reservationCode
+                        tablesMapper.updateTableForReservationWithId(
                                 table.getTableId(),
                                 "RESERVED",
-                                LocalDateTime.now().plusMinutes(90)
+                                LocalDateTime.now().plusMinutes(90),
+                                reservationCode  // 🔧 新增參數
                         );
 
                         lockedTableIds.add(displayId);
@@ -1863,7 +1894,7 @@ public class RestaurantService {
                     reservation.setReservedTableIds(String.join(",", lockedTableIds));
                 }
 
-                // ========= 【分支2】MERGED（新增核心） =========
+                // ========= 【分支 2】MERGED（新增核心） =========
                 else if ("MERGED".equals(tableType)) {
 
                     if (selectedTables.size() != 2) {
@@ -1900,8 +1931,14 @@ public class RestaurantService {
                     // =========  同時鎖定 =========
                     LocalDateTime reserveTime = LocalDateTime.now().plusMinutes(90);
 
-                    tablesMapper.updateTableForReservation(t1.getTableId(), "RESERVED", reserveTime);
-                    tablesMapper.updateTableForReservation(t2.getTableId(), "RESERVED", reserveTime);
+                    // 🔧【修改點 2】第一張桌：使用新方法
+                    tablesMapper.updateTableForReservationWithId(
+                            t1.getTableId(), "RESERVED", reserveTime, reservationCode
+                    );
+                    // 🔧【修改點 3】第二張桌：使用新方法
+                    tablesMapper.updateTableForReservationWithId(
+                            t2.getTableId(), "RESERVED", reserveTime, reservationCode
+                    );
 
                     // ========= 記錄 =========
                     // ========= 🔧【關鍵修復】記錄：區分顯示格式和查詢格式 =========
@@ -1914,11 +1951,11 @@ public class RestaurantService {
                     reservation.setReservedTableIds(mergedIdsQuery);       // ✓ 查詢用 ","
 
                     // 🔧【調試日誌】確認寫入值（開發時可啟用）
-                    System.out.println("🔧 MERGED 預約記錄: manual_table_numbers=" + mergedIdsDisplay +
+                    System.out.println("🔧 MERGED 預約記錄：manual_table_numbers=" + mergedIdsDisplay +
                             ", reserved_table_ids=" + mergedIdsQuery);
                 }
 
-                // ========= 🔧【新增分支3】GROUP（聚餐桌：3張或以上6人桌） =========
+                // ========= 🔧【新增分支 3】GROUP（聚餐桌：3 張或以上 6 人桌） =========
                 else if ("GROUP".equals(tableType)) {
 
                     // 🔧 驗證 1: 數量必須 >= 3 張
@@ -1948,10 +1985,12 @@ public class RestaurantService {
                     LocalDateTime reserveTime = LocalDateTime.now().plusMinutes(90);
                     for (String displayId : lockedTableIds) {
                         Tables table = tablesMapper.findByDisplayId(displayId);
-                        tablesMapper.updateTableForReservation(
+                        // 🔧【修改點 4】循環內：使用新方法
+                        tablesMapper.updateTableForReservationWithId(
                                 table.getTableId(),
                                 "RESERVED",
-                                reserveTime
+                                reserveTime,
+                                reservationCode  // 🔧 新增參數
                         );
                         // 🔧 更新餐桌的 group_with 和 table_type（用於離店時識別關聯桌）
                         tablesMapper.updateTableForGroupReservation(
@@ -1971,17 +2010,17 @@ public class RestaurantService {
                     reservation.setReservedTableIds(groupIdsQuery);       // ✓ 查詢用 ","
 
                     // 🔧【調試日誌】確認寫入值（可選，開發時啟用）
-                    System.out.println("🔧 GROUP 預約記錄: manual_table_numbers=" + groupIdsDisplay +
+                    System.out.println("🔧 GROUP 預約記錄：manual_table_numbers=" + groupIdsDisplay +
                             ", reserved_table_ids=" + groupIdsQuery);
                 }
 
-                // ========= 【分支4】未知桌型 =========
+                // ========= 【分支 4】未知桌型 =========
                 else {
                     throw new IllegalArgumentException("不支援的桌型：" + tableType);
                 }
             }
 
-            //【場景 2】 1.5 小时内 + 数量模式（非手动输入桌号）
+            //【場景 2】1.5 小時內 + 數量模式（非手動輸入桌號）
             else if (within15h != null && within15h && !isManualMode) {
                 reservation.setManualTableNumbers(null);
                 // 不操作 restaurant_tables
@@ -1992,26 +2031,6 @@ public class RestaurantService {
                 reservation.setManualTableNumbers(null);
                 // 不操作 restaurant_tables
             }
-
-            // ═══════════════════════════════════════════════════════════
-            // 🔧【關鍵】檢查編號唯一性（防止並發重複）
-            // ═══════════════════════════════════════════════════════════
-            int maxRetry = 3;
-            int retry = 0;
-            while (retry < maxRetry) {
-                if (!reservationMapper.existsByCode(reservationCode)) {
-                    break;  // 編號可用，跳出循環
-                }
-                // 編號已存在：順序號 +1 重試
-                retry++;
-                reservationCode = generateReservationCode(customerPhone, reservationTimeStr, retry);
-                reservation.setReservationId(reservationCode);
-            }
-
-            // ═══════════════════════════════════════════════════════════
-            // 【步驟 5】寫入 table_reservations 表
-            // ═══════════════════════════════════════════════════════════
-            reservationMapper.insert(reservation);
 
             // ═══════════════════════════════════════════════════════════
             // 🔧【新增步驟 6】數量模式 + 預點餐 → 創建「一條」訂單記錄
@@ -2036,7 +2055,7 @@ public class RestaurantService {
                     preOrderEntity.setDeliveryFee(0.0);
                     preOrderEntity.setTotalAmount(0.0);
 
-                    preOrderEntity.setStatus("ORDERED");
+                    preOrderEntity.setStatus("NO_ORDER");
                     preOrderEntity.setIsCheckedOut(false);
 
                     // 🔧 關鍵：設置預付信息 + 關聯預約 ID
@@ -2053,12 +2072,11 @@ public class RestaurantService {
                             ", 桌型:" + tableType);
 
                 } catch (Exception e) {
-                    System.err.println("⚠️ 創建預點餐訂單失敗: " + e.getMessage());
+                    System.err.println("⚠️ 創建預點餐訂單失敗：" + e.getMessage());
                     // 不拋異常，避免影響預約創建（訂單可後續補創）
                     e.printStackTrace();
                 }
             }
-
 
             result.put("success", true);
             result.put("message", "預約成功！預約號：" + reservationCode);
@@ -2072,11 +2090,12 @@ public class RestaurantService {
         }
         return result;
     }
+
     /**
      * 🔧 生成自定義預約編號：R+ 年月日 + 手機尾號 + 當天全局順序號
      * 格式：R20260322-1234-1
      *
-     * @param phone 客戶手機號
+     * @param phone              客戶手機號
      * @param reservationTimeStr 預約時間字符串 "yyyy-MM-dd HH:mm"
      * @return 自定義編號
      */
@@ -2119,7 +2138,8 @@ public class RestaurantService {
 
     /**
      * 🔧 輔助方法：驗證餐桌類型規則（僅數量模式使用）
-     * @param tableType 餐桌類型
+     *
+     * @param tableType   餐桌類型
      * @param tableConfig 桌子配置（已確保不為空）
      */
     private void validateTableTypeRules(String tableType, Map<String, Integer> tableConfig) {
@@ -2135,8 +2155,7 @@ public class RestaurantService {
             if (totalTables != 1) {
                 throw new IllegalArgumentException("⚠️ 個人桌只能選擇 1 張主桌！");
             }
-        }
-        else if ("MERGED".equals(tableType)) {
+        } else if ("MERGED".equals(tableType)) {
             // 合併桌：必須是 2 張相同容量的桌子
             if (tableConfig.size() != 1) {
                 throw new IllegalArgumentException("⚠️ 合併桌只能選擇一種容量的桌子！");
@@ -2175,10 +2194,9 @@ public class RestaurantService {
     }
 
 
-
     @Transactional(rollbackFor = Exception.class)
     public void processGuestCheckIn(String displayId, int actualSeats, String reservationId) {
-        System.out.println("🔍 [DEBUG] processGuestCheckIn 开始:");
+        System.out.println(" [DEBUG] processGuestCheckIn 开始:");
         System.out.println("   displayId: " + displayId);
         System.out.println("   actualSeats: " + actualSeats);
         System.out.println("   reservationId 参数: " + reservationId);
@@ -2203,7 +2221,6 @@ public class RestaurantService {
         List<Tables> tablesToProcess = new ArrayList<>();
         Map<String, Integer> seatAllocation = new LinkedHashMap<>();  // displayId -> 分配人数
 
-        // ── 情况 1: 普通桌或合并桌（2张）──
         // ── 情况 1: 普通桌或合并桌（2张）──
         if (mainTable.getTableType() == Tables.TableType.MERGED && mainTable.getMergedWith() != null) {
             Tables partnerTable = tablesMapper.findByDisplayId(mainTable.getMergedWith());
@@ -2236,9 +2253,7 @@ public class RestaurantService {
 
             System.out.println("🔧 合并桌人数分配: 主桌#" + mainTable.getDisplayId() + "=" + mainSeats +
                     "人，伙伴桌#" + partnerTable.getDisplayId() + "=" + partnerSeats + "人");
-        }
-
-        else if (mainTable.getTableType() == Tables.TableType.GROUPED && mainTable.getGroupWith() != null) {
+        } else if (mainTable.getTableType() == Tables.TableType.GROUPED && mainTable.getGroupWith() != null) {
             // 解析 group_with 字段（格式："7,8,9"）
             String[] groupIds = mainTable.getGroupWith().split(",");
             List<Tables> groupedTables = new ArrayList<>();
@@ -2414,6 +2429,15 @@ public class RestaurantService {
     }
 
     /**
+     * 🔧 获取数量模式的预约记录（用于日志显示）
+     * 委托给 Mapper 层查询
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getPreOrderReservationsForMonitor() {
+        return reservationMapper.findPreOrderReservationsForMonitor();
+    }
+
+    /**
      * 🔧 根据预约号查询完整预约详情
      */
     @Transactional(readOnly = true)
@@ -2436,13 +2460,10 @@ public class RestaurantService {
     }
 
 
-
-
-
-
     /**
      * 🔧 分配餐桌給預約記錄（核心業務邏輯 - 完整版）
-     * @param reservationId 預約號
+     *
+     * @param reservationId      預約號
      * @param selectedDisplayIds 選中的餐桌顯示 ID 列表
      */
     @Transactional(rollbackFor = Exception.class)
@@ -2475,15 +2496,15 @@ public class RestaurantService {
             // 解析容量（支持"2人桌"、"4人桌"、"6人桌"）
             if (normalizedDesc.contains("2人桌")) {
                 requiredCapacity = 2;
-                System.out.println("   ✅ 識別容量：2人桌");
+                System.out.println("    識別容量：2人桌");
             } else if (normalizedDesc.contains("4人桌")) {
                 requiredCapacity = 4;
-                System.out.println("   ✅ 識別容量：4人桌");
+                System.out.println("    識別容量：4人桌");
             } else if (normalizedDesc.contains("6人桌")) {
                 requiredCapacity = 6;
-                System.out.println("   ✅ 識別容量：6人桌");
+                System.out.println("    識別容量：6人桌");
             } else {
-                System.out.println("   ⚠️ 未識別容量配置");
+                System.out.println("    未識別容量配置");
             }
 
             // 提取數量 (例如 "x2")
@@ -2492,10 +2513,10 @@ public class RestaurantService {
                 if (parts.length > 1) {
                     try {
                         requiredCount = Integer.parseInt(parts[1].trim().replaceAll("[^0-9]", ""));
-                        System.out.println("   ✅ 識別數量：" + requiredCount + "張");
+                        System.out.println("    識別數量：" + requiredCount + "張");
                     } catch (Exception e) {
                         requiredCount = reservation.getTableCount(); // 兜底
-                        System.out.println("   ⚠️ 數量解析失敗，使用 table_count: " + requiredCount);
+                        System.out.println("    數量解析失敗，使用 table_count: " + requiredCount);
                     }
                 } else {
                     requiredCount = reservation.getTableCount();
@@ -2506,7 +2527,7 @@ public class RestaurantService {
         } else {
             // 如果是手動模式，可能沒有 configDesc，直接取 tableCount
             requiredCount = reservation.getTableCount();
-            System.out.println("  ⚠️ table_config_desc 為空，使用 table_count: " + requiredCount);
+            System.out.println("   table_config_desc 為空，使用 table_count: " + requiredCount);
         }
 
         // 🔧【調試日誌】
@@ -2515,7 +2536,7 @@ public class RestaurantService {
                 ", 桌型:" + groupType);
 
         if (requiredCapacity == 0 && "QUANTITY".equals(reservation.getTableSelectionMode())) {
-            System.err.println("⚠️ 無法解析桌型配置: table_config_desc = " + configDesc);
+            System.err.println(" 無法解析桌型配置: table_config_desc = " + configDesc);
             throw new IllegalStateException("無法解析預定桌型配置（" + configDesc + "），請聯繫管理員");
         }
 
@@ -2587,8 +2608,7 @@ public class RestaurantService {
                 );
                 System.out.println("🔧 合併桌更新: " + displayId1 + " ↔ " + displayId2);
             }
-        }
-        else if (tableCount >= 3) {
+        } else if (tableCount >= 3) {
             // ── 聚餐桌（3張或以上）：所有桌的 group_with 指向同一列表 ──
             String groupWithStr = String.join(",", validDisplayIds);  // 格式："10,11,12"
 
@@ -2606,32 +2626,302 @@ public class RestaurantService {
         }
         // tableCount == 1 時保持 MAIN，無需更新
 
-        // 5. 🔧 處理預點餐訂單：更新 table_id
-        if (Boolean.TRUE.equals(reservation.getPreOrder())) {
-            // 查找關聯的預點餐訂單 (table_id 為 NULL)
-            if (!selectedTableIds.isEmpty()) {
-                // 簡單排序，取第一個作為主桌 ID
-                selectedTableIds.sort(Integer::compareTo);
-                int mainTableId = selectedTableIds.get(0);
 
-                int updated = orderMapper.updateTableIdByReservationId(reservationId, mainTableId);
-                if (updated > 0) {
-                    System.out.println("✅ 預點餐訂單已關聯餐桌 ID: " + mainTableId);
-                } else {
-                    System.out.println("⚠️ 未找到關聯的預點餐訂單，跳過 table_id 更新");
+        // ═══════════════════════════════════════════════════════════
+        // 🔧【步驟 5】更新訂單的 table_id（取最小餐桌號）
+        // 規則：無論什麼類型的桌子，只有 1 個訂單，table_id = 最小的餐桌 ID
+        // ═══════════════════════════════════════════════════════════
+        if (!selectedTableIds.isEmpty()) {
+            // 排序，取最小的餐桌 ID 作為主桌 ID
+            selectedTableIds.sort(Integer::compareTo);
+            int mainTableId = selectedTableIds.get(0);
+
+            // 🔧 更新 table_orders 表的 table_id
+            int updated = orderMapper.updateTableIdByReservationId(reservationId, mainTableId);
+            if (updated > 0) {
+                System.out.println(" 訂單 table_id 已更新: reservationId=" + reservationId +
+                        ", table_id=" + mainTableId);
+            } else {
+                System.out.println(" 未找到關聯訂單，跳過 table_id 更新");
+            }
+        }
+
+        if ("PRE_CONFIRMED".equals(reservation.getStatus())) {
+            reservationMapper.updateStatus(reservationId, "CONFIRMED");
+            System.out.println(" 預約狀態已更新: " + reservationId + " [PRE_CONFIRMED → CONFIRMED]");
+        }
+
+        System.out.println("✅ 餐桌分配成功：預約 " + reservationId + " -> 桌號 " + idsStr);
+    }
+
+
+    @Transactional(rollbackFor = Exception.class)
+    public void updateReservation(String reservationId, Map<String, Object> edits) {
+        // 1 查询原预约记录
+        TableReservation original = reservationMapper.findDetailById(reservationId);
+        if (original == null) {
+            throw new IllegalArgumentException("预约记录不存在：" + reservationId);
+        }
+
+        // 验证状态
+        if (!"PRE_CONFIRMED".equals(original.getStatus()) &&
+                !"CONFIRMED".equals(original.getStatus())) {
+            throw new IllegalStateException("当前预约状态不可修改：" + original.getStatus());
+        }
+
+        // 2 创建修改后的对象（先复制原数据）
+        TableReservation updated = new TableReservation();
+        updated.setReservationId(reservationId);
+        updated.setCustomerName(original.getCustomerName());
+        updated.setCustomerPhone(original.getCustomerPhone());
+        updated.setReservationTime(original.getReservationTime());
+        updated.setTableCount(original.getTableCount());
+        updated.setTableConfigDesc(original.getTableConfigDesc());
+        updated.setGroupType(original.getGroupType());
+        updated.setReservedTableIds(original.getReservedTableIds());
+        updated.setTableSelectionMode(original.getTableSelectionMode());
+        updated.setManualTableNumbers(original.getManualTableNumbers());
+        updated.setStatus(original.getStatus());
+        updated.setWithin15h(original.getWithin15h());
+        updated.setPreOrder(original.getPreOrder());
+        updated.setIsPrepaid(original.getIsPrepaid());
+        updated.setPrepaidAmount(original.getPrepaidAmount());
+        updated.setNotes(original.getNotes());
+
+        boolean hasChanges = false;
+
+        // ── 修改预约时间 ──
+        if (edits.containsKey("newReservationTime")) {
+            String newTimeStr = (String) edits.get("newReservationTime");
+            LocalDateTime newTime = LocalDateTime.parse(
+                    newTimeStr,
+                    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+            );
+            if (newTime.isEqual(original.getReservationTime())) {
+                throw new IllegalArgumentException("新预约时间不能与原时间相同！");
+            }
+            if (newTime.isBefore(LocalDateTime.now())) {
+                throw new IllegalArgumentException("预约时间不能是过去的时间！");
+            }
+            updated.setReservationTime(newTime);
+            long minutes = java.time.Duration.between(LocalDateTime.now(), newTime).toMinutes();
+            updated.setWithin15h(minutes >= 0 && minutes <= 90);
+            hasChanges = true;
+            System.out.println(" 修改预约时间: " + original.getReservationTime() + " → " + newTime);
+        }
+
+        // ── 修改桌子配置 ──
+        if (edits.containsKey("tableConfig")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Integer> newConfig = (Map<String, Integer>) edits.get("tableConfig");
+            if (isTableConfigSame(newConfig, original.getTableConfigDesc())) {
+                throw new IllegalArgumentException("新桌子配置不能与原配置相同！");
+            }
+            StringBuilder descBuilder = new StringBuilder();
+            int totalTables = 0;
+            if (newConfig.containsKey("2")) {
+                int qty = newConfig.get("2");
+                if (qty > 0) {
+                    descBuilder.append("2 人桌 x").append(qty).append(", ");
+                    totalTables += qty;
+                }
+            }
+            if (newConfig.containsKey("4")) {
+                int qty = newConfig.get("4");
+                if (qty > 0) {
+                    descBuilder.append("4 人桌 x").append(qty).append(", ");
+                    totalTables += qty;
+                }
+            }
+            if (newConfig.containsKey("6")) {
+                int qty = newConfig.get("6");
+                if (qty > 0) {
+                    descBuilder.append("6 人桌 x").append(qty).append(", ");
+                    totalTables += qty;
+                }
+            }
+            if (totalTables == 0) {
+                throw new IllegalArgumentException("桌子配置不能为空！");
+            }
+            updated.setTableConfigDesc(descBuilder.toString());
+            updated.setTableCount(totalTables);
+            hasChanges = true;
+            System.out.println(" 修改桌子配置: " + original.getTableConfigDesc() + " → " + descBuilder);
+        }
+
+        // ── 修改预点餐 ──
+        if (edits.containsKey("preOrder")) {
+            Boolean newPreOrder = (Boolean) edits.get("preOrder");
+            if (original.getPreOrder() && !newPreOrder) {
+                throw new IllegalArgumentException("预点餐状态不能从'是'改为'否'！");
+            }
+            if (!original.getPreOrder() && newPreOrder) {
+                updated.setPreOrder(true);
+                hasChanges = true;
+                System.out.println(" 修改预点餐: 否 → 是");
+
+                // 🔧【核心修复】传入修改后的预付参数（使用 updated 对象的新值）
+                Boolean finalIsPrepaid = updated.getIsPrepaid();
+                Double finalPrepaidAmount = updated.getPrepaidAmount();
+                createPreOrderRecord(reservationId, finalIsPrepaid, finalPrepaidAmount);
+            }
+        }
+
+        // ── 修改预付金额 ──
+        if (edits.containsKey("prepaidAmount")) {
+            Double newPrepaidAmount = (Double) edits.get("prepaidAmount");
+            Double originalPrepaid = original.getPrepaidAmount() != null ?
+                    original.getPrepaidAmount() : 0.0;
+            if (newPrepaidAmount < originalPrepaid) {
+                throw new IllegalArgumentException(
+                        "预付金额只能增加，不能减少！\n" +
+                                "原金额：" + String.format("%.2f", originalPrepaid) + " 元\n" +
+                                "新金额：" + String.format("%.2f", newPrepaidAmount) + " 元"
+                );
+            }
+            if (newPrepaidAmount > originalPrepaid) {
+                updated.setIsPrepaid(true);
+                updated.setPrepaidAmount(newPrepaidAmount);
+                hasChanges = true;
+                System.out.println(" 修改预付金额: " + originalPrepaid + " → " + newPrepaidAmount);
+                syncPrepaidToOrder(reservationId, true, newPrepaidAmount);
+            }
+        }
+
+        // ── 修改备注 ──
+        if (edits.containsKey("notes")) {
+            String newNotes = (String) edits.get("notes");
+            String originalNotes = original.getNotes() != null ? original.getNotes() : "";
+            updated.setNotes(newNotes);
+            hasChanges = true;
+            System.out.println(" 修改备注: " + originalNotes + " → " + newNotes);
+        }
+
+        // 4 验证：至少有一项修改
+        if (!hasChanges) {
+            throw new IllegalArgumentException("没有实际修改内容！");
+        }
+
+        // 5 执行数据库更新
+        int updatedRows = reservationMapper.updateReservation(updated);
+        if (updatedRows == 0) {
+            throw new RuntimeException("更新预约记录失败");
+        }
+
+        System.out.println(" 预约修改成功: " + reservationId);
+    }
+
+    /**
+     * 🔧 辅助方法：比较桌子配置是否相同
+     */
+    private boolean isTableConfigSame(Map<String, Integer> newConfig, String originalDesc) {
+        if (originalDesc == null || originalDesc.isEmpty()) {
+            return newConfig.isEmpty();
+        }
+
+        // 解析原配置描述（如："2人桌 x1, 4人桌 x2, "）
+        Map<String, Integer> originalConfig = new HashMap<>();
+        String[] parts = originalDesc.split(",");
+        for (String part : parts) {
+            part = part.trim();
+            if (part.isEmpty()) continue;
+
+            // 解析 "2人桌 x1" 或 "4人桌 x2"
+            if (part.contains("人桌") && part.contains("x")) {
+                String[] segments = part.split("x");
+                if (segments.length == 2) {
+                    String capacity = segments[0].replaceAll("[^0-9]", "");
+                    String qty = segments[1].trim();
+                    if (!capacity.isEmpty() && !qty.isEmpty()) {
+                        try {
+                            originalConfig.put(capacity, Integer.parseInt(qty));
+                        } catch (NumberFormatException e) {
+                            // 忽略
+                        }
+                    }
                 }
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【步驟 6】更新預約狀態：PRE_CONFIRMED → CONFIRMED
-        // ═══════════════════════════════════════════════════════════
-        if ("PRE_CONFIRMED".equals(reservation.getStatus())) {
-            reservationMapper.updateStatus(reservationId, "CONFIRMED");
-            System.out.println("🔄 預約狀態已更新: " + reservationId + " [PRE_CONFIRMED → CONFIRMED]");
+        // 比较两个 Map
+        if (newConfig.size() != originalConfig.size()) {
+            return false;
         }
 
-        System.out.println("✅ 餐桌分配成功：預約 " + reservationId + " -> 桌號 " + idsStr);
+        for (Map.Entry<String, Integer> entry : newConfig.entrySet()) {
+            Integer originalQty = originalConfig.get(entry.getKey());
+            if (originalQty == null || !originalQty.equals(entry.getValue())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * 🔧 创建预点餐订单记录（当预点餐状态从否改为是时调用）
+     *
+     * @param reservationId 预约号
+     * @param isPrepaid     是否预付（修改后的新值）
+     * @param prepaidAmount 预付金额（修改后的新值）
+     */
+    private void createPreOrderRecord(String reservationId, Boolean isPrepaid, Double prepaidAmount) {
+        // 1. 先检查是否已存在预点餐订单
+        Order existingOrder = orderMapper.findPreOrderByReservationId(reservationId);
+        if (existingOrder != null) {
+            System.out.println(" 预点餐订单已存在，跳过创建: reservationId=" + reservationId);
+            return;
+        }
+
+        // 2. 构建订单实体
+        Order preOrder = new Order();
+        preOrder.setReservationId(reservationId);
+        preOrder.setOrderType("RESERVATION");
+        preOrder.setOrderTime(LocalDateTime.now());
+        preOrder.setStatus("NO_ORDER");  // 🔧 初始状态：未下单
+
+        // 3. 🔧【核心修复】使用传入的新预付参数，而不是原始值
+        preOrder.setIsPrepaid(isPrepaid != null && isPrepaid);
+        preOrder.setPrepaidAmount(prepaidAmount != null ? prepaidAmount : 0.00);
+
+        // 4. 初始化金额字段
+        preOrder.setItemsTotal(0.00);
+        preOrder.setDeliveryFee(0.00);
+        preOrder.setTotalAmount(prepaidAmount != null ? prepaidAmount : 0.00);  // 🔧 总金额包含预付
+
+        // 5. 插入数据库
+        orderMapper.createOrder(preOrder);
+
+        System.out.println(" 预点餐订单已创建: reservationId=" + reservationId +
+                ", orderId=" + preOrder.getOrderId() +
+                ", isPrepaid=" + preOrder.getIsPrepaid() +
+                ", prepaidAmount=" + preOrder.getPrepaidAmount());
+    }
+
+    /**
+     * 🔧 輔助方法：同步預付信息到關聯訂單
+     *
+     * @param reservationId 預約號
+     * @param isPrepaid     是否預付
+     * @param prepaidAmount 預付金額
+     */
+    private void syncPrepaidToOrder(String reservationId, Boolean isPrepaid, Double prepaidAmount) {
+        try {
+            int updated = orderMapper.updatePrepaidInfoByReservationId(
+                    reservationId, isPrepaid, prepaidAmount);
+            if (updated > 0) {
+                System.out.println("預付信息已同步到訂單: reservationId=" + reservationId +
+                        ", is_prepaid=" + isPrepaid + ", prepaid_amount=" + prepaidAmount);
+            } else {
+                // 可能還沒有創建預點餐訂單，記錄日誌但不拋異常
+                System.out.println("ℹ 未找到關聯的預點餐訂單，跳過預付信息同步: " + reservationId);
+            }
+        } catch (Exception e) {
+            // 同步失敗不影響預約修改主流程，但記錄日誌
+            System.err.println(" 同步預付信息到訂單失敗: " + e.getMessage());
+            // 可選：根據業務需求決定是否拋出異常
+            // throw new RuntimeException("同步預付信息失敗", e);
+        }
     }
 
     /**
@@ -2669,6 +2959,218 @@ public class RestaurantService {
             return Collections.emptyList();
         }
         return reservationMapper.findDetailByCodeFragment(codeFragment);
+    }
+
+
+    /**
+     * 🔧 CANCEL 模式专用：根据预约号片段查询（支持所有状态）
+     */
+    @Transactional(readOnly = true)
+    public List<TableReservation> findReservationsForCancel(String codeFragment) {
+        if (codeFragment == null || codeFragment.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return reservationMapper.findDetailByCodeFragmentForCancel(codeFragment);
+    }
+
+
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> cancelReservation(String reservationId, String cancellationReason) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // ===== 步骤 1：查询预约记录 =====
+            TableReservation reservation = reservationMapper.findDetailById(reservationId);
+            if (reservation == null) {
+                result.put("success", false);
+                result.put("message", "预约记录不存在：" + reservationId);
+                return result;
+            }
+
+            // ===== 步骤 2：状态验证（只有 COMPLETED 不能取消）=====
+            String status = reservation.getStatus();
+            if ("COMPLETED".equals(status)) {
+                result.put("success", false);
+                result.put("message", "当前预约状态不可取消：" + getStatusText(status));
+                return result;
+            }
+
+            // ===== 步骤 3：处理预付定金（删除前必须先记录！）=====
+            Double forfeitedAmount = 0.0;
+            if (Boolean.TRUE.equals(reservation.getIsPrepaid()) &&
+                    reservation.getPrepaidAmount() != null &&
+                    reservation.getPrepaidAmount() > 0) {
+
+                forfeitedAmount = reservation.getPrepaidAmount();
+
+                // 🔧 使用用户输入的原因（兜底：顾客主动取消预约）
+                String reason = (cancellationReason != null && !cancellationReason.trim().isEmpty())
+                        ? cancellationReason.trim()
+                        : "顾客主动取消预约";
+
+                recordForfeitedDeposit(reservation, forfeitedAmount, reason);
+
+                businessStatusMapper.incrementDailyCancelledPrepaidAmount(
+                        java.sql.Date.valueOf(LocalDate.now()),
+                        forfeitedAmount
+                );
+            }
+
+            // ===== 步骤 4：释放已锁定的餐桌（只要 reserved_table_ids 不为空）=====
+            if (reservation.getReservedTableIds() != null &&
+                    !reservation.getReservedTableIds().isEmpty()) {
+
+                releaseReservedTables(reservation.getReservedTableIds());
+                System.out.println(" 餐桌状态已重置");
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 🔧【核心修复】步骤 5：只有 preOrder=true 才删除预点餐订单
+            // ═══════════════════════════════════════════════════════════
+            if (Boolean.TRUE.equals(reservation.getPreOrder())) {
+                // 🔧 预点餐预约：删除关联的订单记录
+                deletePreOrderIfExists(reservationId);
+                System.out.println(" 预点餐订单已删除: " + reservationId);
+            }
+
+            // ===== 步骤 6：删除预约记录（必须在所有关联数据清理之后！）=====
+            int deleted = reservationMapper.delete(reservationId);
+            if (deleted == 0) {
+                throw new RuntimeException("删除预约记录失败");
+            }
+
+            // ===== 步骤 7：组装返回结果 =====
+            result.put("success", true);
+            result.put("message", "预约已取消并删除");
+            result.put("forfeitedAmount", forfeitedAmount > 0 ? forfeitedAmount : null);
+            result.put("needRefresh", true);
+
+            System.out.println(" 预约记录已删除: " + reservationId +
+                    (forfeitedAmount > 0 ? ", 没收定金: " + forfeitedAmount + ", 原因: " + cancellationReason : ""));
+
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("message", "系统错误: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return result;
+    }
+
+    /**
+     * 🔧 辅助方法：获取状态中文显示
+     */
+    private String getStatusText(String status) {
+        if (status == null) return "未知";
+        return switch (status) {
+            case "PRE_CONFIRMED" -> "待确认";
+            case "CONFIRMED" -> "已确认";
+            case "NO_SHOW" -> "未到店";
+            case "DELAYED" -> "已延迟";
+            default -> status;
+        };
+    }
+
+    /**
+     * 🔧 辅助方法：记录没收定金到 forfeited_deposits 表
+     */
+    private void recordForfeitedDeposit(TableReservation reservation, Double amount, String reason) {
+        try {
+            reservationMapper.insertForfeitedDeposit(
+                    reservation.getReservationId(),
+                    reservation.getCustomerName(),
+                    reservation.getCustomerPhone(),
+                    reservation.getReservationTime(),
+                    amount,
+                    reason
+            );
+            System.out.println(" 没收定金已记录: 预约号=" + reservation.getReservationId() +
+                    ", 金额=" + amount + ", 原因=" + reason);
+        } catch (Exception e) {
+            // 🔧 记录失败时打印日志，但不中断取消流程（避免影响用户体验）
+            System.err.println(" 记录没收定金失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 辅助方法：释放已锁定的餐桌（取消预约时调用）
+     * 执行顺序：必须在删除 table_reservations 记录之前！
+     */
+    private void releaseReservedTables(String reservedTableIds) {
+        if (reservedTableIds == null || reservedTableIds.isEmpty()) {
+            return;
+        }
+
+        String[] tableDisplayIds = reservedTableIds.split(",");
+        for (String displayId : tableDisplayIds) {
+            String trimmedId = displayId.trim();
+            if (trimmedId.isEmpty()) continue;
+
+            try {
+                Tables table = tablesMapper.findByDisplayId(trimmedId);
+                if (table != null) {
+                    // 🔧【核心】调用新方法重置餐桌状态
+                    tablesMapper.resetTableAfterReservationCancel(table.getTableId());
+
+                    System.out.println("🔓 餐桌状态已重置: #" + trimmedId +
+                            " [RESERVED→VACANT, " + table.getTableType() + "→MAIN]");
+
+                    // 🔧 同步更新内存缓存
+                    Tables memoryTable = tableMap.get(trimmedId);
+                    if (memoryTable != null) {
+                        memoryTable.setStatus(Tables.TableStatus.VACANT);
+                        // 如果是合并/聚餐，类型改回 MAIN
+                        if (memoryTable.getTableType() != Tables.TableType.MAIN) {
+                            memoryTable.setTableType(Tables.TableType.MAIN);
+                            memoryTable.setMergedWith(null);
+                            memoryTable.setGroupWith(null);
+                        }
+                        // 清空预约相关字段
+                        memoryTable.setCurrentReservationId(null);
+                        memoryTable.setReservedTime(null);
+                        memoryTable.setCurrentGroupId(null);
+                        memoryTable.setActualSeats(0);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("⚠️ 释放餐桌失败: " + trimmedId + " - " + e.getMessage());
+                // 不中断流程，继续处理其他餐桌
+            }
+        }
+    }
+
+    /**
+     * 🔧 辅助方法：删除预约关联的预点餐订单（order_items + table_orders）
+     *
+     * @param reservationId 预约号
+     */
+    private void deletePreOrderIfExists(String reservationId) {
+        try {
+            // 1 先查询是否存在预点餐订单
+            Order preOrder = orderMapper.findPreOrderByReservationId(reservationId);
+            if (preOrder == null) {
+                System.out.println(" 预约 " + reservationId + " 无关联预点餐订单，跳过订单删除");
+                return;
+            }
+
+            Integer orderId = preOrder.getOrderId();
+            System.out.println(" 找到预点餐订单: orderId=" + orderId +
+                    ", reservationId=" + reservationId);
+
+            // 2️ 删除订单明细（order_items）- 必须先删子表
+            int itemsDeleted = orderItemMapper.deleteOrderItemsByOrderId(orderId);
+            System.out.println("️ 已删除订单明细: " + itemsDeleted + " 条");
+
+            // 3 删除订单主记录（table_orders）
+            int orderDeleted = orderMapper.deleteOrder(orderId);
+            System.out.println(" 已删除预点餐订单主记录: orderId=" + orderId);
+
+        } catch (Exception e) {
+            // 订单删除失败不影响预约取消主流程，但记录日志
+            System.err.println(" 删除预点餐订单失败: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     // ===== 根據 displayId 獲取餐桌 =====

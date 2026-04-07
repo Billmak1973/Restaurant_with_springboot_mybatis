@@ -5,7 +5,7 @@ import com.restaurant.entity.MenuItem;
 import com.restaurant.entity.OrderItem;
 import com.restaurant.service.MenuItemService;
 import com.restaurant.service.RestaurantService;
-import com.restaurant.entity.OrderType;  // ✅ 新增導入
+import com.restaurant.entity.OrderType;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;

@@ -183,7 +183,33 @@ public interface OrderItemMapper {
      * @param orderId 订单ID
      * @return List of Map: [{item_code: "A1", quantity: 2}, ...]
      */
-    List<Map<String, Object>> getExistingItemQuantitiesRaw(@Param("orderId") int orderId);
+    // OrderItemMapper.java
+    List<Map<String, Object>> getExistingItemQuantitiesRaw(
+            @Param("orderId") int orderId,
+            @Param("status") String status);  // 🔧 新增参数
+//    List<Map<String, Object>> getExistingItemQuantitiesRaw(@Param("orderId") int orderId);
 
+    // ===== OrderItemMapper.java 添加方法 =====
 
+    int updateServedQuantityAndStatus(
+            @Param("orderId") int orderId,
+            @Param("itemId") int itemId,
+            @Param("servedQuantity") int servedQuantity,
+            @Param("newStatus") String newStatus
+    );
+
+    /**
+     * 更新现有订单项数量（预约订单专用 - 使用 PREPARING/PREPARED 状态）
+     */
+    int updateExistingOrderItemsForReservation(
+            @Param("orderId") int orderId,
+            @Param("items") List<OrderItem> items);
+
+    /**
+     * 批量插入新订单项（支持指定初始状态）
+     */
+    int insertNewOrderItemsWithStatus(
+            @Param("orderId") int orderId,
+            @Param("items") List<OrderItem> items,
+            @Param("initialStatus") String initialStatus);
 }

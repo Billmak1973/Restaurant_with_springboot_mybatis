@@ -49,6 +49,26 @@
         LIMIT 1
     </select>
 
+    <select id="findPreOrderReservationsForMonitor" resultType="java.util.Map">
+        SELECT
+        reservation_id,
+        reservation_time,
+        within_15h,
+        customer_name,
+        customer_phone,
+        table_selection_mode,
+        table_config_desc,
+        group_type,
+        status,
+        pre_order  <!-- 🔧 返回预点餐字段 -->
+        FROM table_reservations
+        WHERE status IN ('PRE_CONFIRMED', 'DELAYED')
+        AND pre_order = 1  <!-- 🔧 核心：只查预点餐 -->
+        ORDER BY
+        CASE WHEN within_15h = 1 THEN 0 ELSE 1 END,
+        reservation_time ASC
+    </select>
+
     <select id="findQuantityModeReservationsForLog" resultType="java.util.Map">
         SELECT
         reservation_id,
@@ -139,7 +159,8 @@
         reservation_time,
         table_config_desc,
         table_selection_mode,
-        status
+        status,
+        notes
         FROM table_reservations
         WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
         AND status = 'PRE_CONFIRMED'
@@ -155,7 +176,8 @@
         reservation_time,
         table_config_desc,
         table_selection_mode,
-        status
+        status,
+        notes
         FROM table_reservations
         WHERE customer_phone LIKE CONCAT('%', #{phoneLast4})
         AND status = 'PRE_CONFIRMED'
@@ -189,4 +211,95 @@
         ORDER BY reservation_time DESC
     </select>
 
+    <!-- 更新预约记录（动态SQL，只更新非空字段） -->
+    <update id="updateReservation">
+        UPDATE table_reservations
+        <set>
+            <if test="reservationTime != null">
+                reservation_time = #{reservationTime},
+            </if>
+            <if test="tableCount != null">
+                table_count = #{tableCount},
+            </if>
+            <if test="tableConfigDesc != null and tableConfigDesc != ''">
+                table_config_desc = #{tableConfigDesc},
+            </if>
+            <if test="preOrder != null">
+                pre_order = #{preOrder},
+            </if>
+            <if test="isPrepaid != null">
+                is_prepaid = #{isPrepaid},
+            </if>
+            <if test="prepaidAmount != null">
+                prepaid_amount = #{prepaidAmount},
+            </if>
+            <if test="notes != null">
+                notes = #{notes},
+            </if>
+            <if test="within15h != null">
+                within_15h = #{within15h},
+            </if>
+        </set>
+        WHERE reservation_id = #{reservationId}
+    </update>
+
+    <!-- 🔧 CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态） -->
+    <select id="findDetailByCodeFragmentForCancel" resultType="TableReservation">
+        SELECT
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        table_count,
+        table_config_desc,
+        group_type,
+        reserved_table_ids,
+        table_selection_mode,
+        manual_table_numbers,
+        status,
+        within_15h,
+        pre_order AS preOrder,
+        is_prepaid AS isPrepaid,
+        prepaid_amount AS prepaidAmount,
+        notes,
+        created_at
+        FROM table_reservations
+        WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
+        AND status IN ('PRE_CONFIRMED', 'CONFIRMED', 'NO_SHOW', 'DELAYED')
+        ORDER BY
+        CASE status
+        WHEN 'PRE_CONFIRMED' THEN 1
+        WHEN 'CONFIRMED' THEN 2
+        WHEN 'DELAYED' THEN 3
+        WHEN 'NO_SHOW' THEN 4
+        ELSE 5
+        END,
+        reservation_time DESC
+    </select>
+
+    <!-- 记录取消预约时没收的定金 -->
+    <insert id="insertForfeitedDeposit">
+        INSERT INTO forfeited_deposits (
+        reservation_id,
+        customer_name,
+        customer_phone,
+        reservation_time,
+        forfeited_amount,
+        cancellation_reason
+        ) VALUES (
+        #{reservationId},
+        #{customerName},
+        #{customerPhone},
+        #{reservationTime},
+        #{forfeitedAmount},
+        #{reason}
+        )
+    </insert>
+
+    <!-- 🔧 更新预约记录的 pre_order 标志 -->
+    <update id="updatePreOrderFlag">
+        UPDATE table_reservations
+        SET pre_order = #{preOrder}
+        WHERE reservation_id = #{reservationId}
+    </update>
 </mapper>

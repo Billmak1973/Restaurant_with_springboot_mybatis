@@ -48,7 +48,6 @@
     </update>
 
 
-    <!-- OrderItemMapper.xml -->
     <insert id="insertNewOrderItems">
         <foreach collection="items" item="item" separator=";">
             INSERT INTO order_items (
@@ -176,7 +175,7 @@
 
     <!-- 13. recordCancellation -->
     <insert id="recordCancellation">
-        INSERT INTO item_cancellations (
+        INSERT INTO order_cancellations (
         item_code,
         cancelled_quantity,
         cancellation_reason,
@@ -220,14 +219,66 @@
         WHERE order_id = #{orderId}
     </select>
 
-    <!-- OrderItemMapper.xml - 替换 getExistingItemQuantities -->
     <select id="getExistingItemQuantitiesRaw" resultType="java.util.Map">
         SELECT
         mi.item_code AS itemCode,
-        oi.quantity AS quantity
+        oi.quantity AS quantity,
+        oi.served_quantity AS servedQuantity,  <!-- 🔧 新增：已上桌数量 -->
+        oi.status AS status                     <!-- 🔧 新增：当前状态 -->
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
         WHERE oi.order_id = #{orderId}
+        <!-- 🔧 利用状态索引优化查询 -->
+        <if test="status != null">
+            AND oi.status = #{status}
+        </if>
     </select>
 
+    <update id="updateServedQuantityAndStatus">
+        UPDATE order_items
+        SET served_quantity = #{servedQuantity}, status = #{newStatus}
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+    </update>
+
+    <!-- 预约订单专用：使用 PREPARING/PREPARED 状态 -->
+    <update id="updateExistingOrderItemsForReservation">
+        <foreach collection="items" item="item" separator=";">
+            UPDATE order_items oi
+            JOIN menu_items mi ON oi.item_id = mi.item_id
+            SET
+            oi.quantity = oi.quantity + #{item.quantity},
+            oi.status = CASE
+            WHEN oi.served_quantity = 0 THEN 'UNSERVED'           <!--  未准备 -->
+            WHEN oi.served_quantity >= (oi.quantity + #{item.quantity}) THEN 'PREPARED'  <!--  已全部准备 -->
+            WHEN oi.served_quantity > 0 THEN 'PREPARING'          <!--  部分准备中 -->
+            ELSE 'PREPARING'
+            END,
+            oi.price_at_order = #{item.priceAtOrder}
+            WHERE oi.order_id = #{orderId}
+            AND mi.item_code = #{item.itemCode}
+        </foreach>
+    </update>
+
+    <!-- 插入新订单项（支持指定初始状态） -->
+    <insert id="insertNewOrderItemsWithStatus">
+        <foreach collection="items" item="item" separator=";">
+            INSERT INTO order_items (
+            order_id,
+            item_id,
+            quantity,
+            served_quantity,
+            status,
+            price_at_order
+            )
+            SELECT
+            #{orderId},
+            mi.item_id,
+            #{item.quantity},
+            0,
+            #{initialStatus},
+            #{item.priceAtOrder}
+            FROM menu_items mi
+            WHERE mi.item_code = #{item.itemCode}
+        </foreach>
+    </insert>
 </mapper>

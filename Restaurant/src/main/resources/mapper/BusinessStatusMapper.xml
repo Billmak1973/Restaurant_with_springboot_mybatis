@@ -4,24 +4,30 @@
 <mapper namespace="com.restaurant.mapper.BusinessStatusMapper">
 
     <!-- 1. 插入当日营业状态 (更新版：支持冪等性，避免重複插入報錯) -->
+    <!-- 修改后：动态计算 status_id = 当前最大值 + 1 -->
     <insert id="insertTodayStatus">
         INSERT IGNORE INTO business_status (
+        status_id,
         business_date,
         is_open,
         next_call_number,
         daily_total_customers,
         daily_revenue,
         daily_takeout_count
-        ) VALUES (
+        )
+        SELECT
+        COALESCE((SELECT MAX(status_id) FROM business_status), 0) + 1,
         #{date},
         true,
         1,
         0,
         0.00,
         0
+        FROM DUAL
+        WHERE NOT EXISTS (
+        SELECT 1 FROM business_status WHERE business_date = #{date}
         )
     </insert>
-
     <!-- 2. 查询下一个叫号 -->
     <select id="getNextCallNumber" resultType="java.lang.Integer">
         SELECT next_call_number
@@ -114,5 +120,11 @@
         WHERE business_date = #{date}
     </update>
 
+    <!-- 累加当日取消预约没收的定金 -->
+    <update id="incrementDailyCancelledPrepaidAmount">
+        UPDATE business_status
+        SET daily_cancelled_prepaid_amount = daily_cancelled_prepaid_amount + #{amount}
+        WHERE business_date = #{date}
+    </update>
 
 </mapper>

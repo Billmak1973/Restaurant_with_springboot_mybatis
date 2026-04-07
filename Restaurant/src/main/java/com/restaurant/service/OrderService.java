@@ -22,17 +22,19 @@ public class OrderService {
     private final MenuItemMapper menuItemMapper;
     private final TablesMapper tablesMapper;  //  新增
     private final BusinessStatusMapper businessStatusMapper;  // 🔧 新增字段
-
+    private final TableReservationMapper reservationMapper;
     public OrderService(OrderMapper orderMapper,
                         OrderItemMapper orderItemMapper,
                         MenuItemMapper menuItemMapper,
                         TablesMapper tablesMapper,
-                        BusinessStatusMapper businessStatusMapper) {
+                        BusinessStatusMapper businessStatusMapper,
+                        TableReservationMapper reservationMapper) {
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
         this.menuItemMapper = menuItemMapper;
         this.tablesMapper = tablesMapper;
         this.businessStatusMapper = businessStatusMapper;
+        this.reservationMapper = reservationMapper;
     }
 
 
@@ -219,8 +221,6 @@ public class OrderService {
         return order.getDeliveryFee() != null ? order.getDeliveryFee() : 0.0;
     }
 
-    // ===== OrderService.java 新增方法 =====
-
     /**
      * 根据餐桌ID查询活跃订单ID（供 Controller 调用）
      */
@@ -241,7 +241,76 @@ public class OrderService {
         return (order != null && "ORDERED".equals(order.getStatus())) ? order : null;
     }
 
-    // OrderService.java - mergeOrderItems 方法
+    /**
+     * 🔧【核心修复】根据 served_quantity 和 total_quantity 计算合并后的正确状态
+     * 4种情况：
+     * 1. 预约订单（客人未入座）→ PREPARING/PREPARED
+     * 2. 客人已入座 + 菜品未上桌 → PREPARING
+     * 3. 客人已入座 + 菜品已上桌 → PARTIALLY_SERVED/SERVED
+     * 4. 普通堂食订单 → PARTIALLY_SERVED/SERVED/UNSERVED
+     *
+     * @param servedQty          已上桌/已准备数量
+     * @param originalQty        原订单总数量
+     * @param newQty             本次新增数量
+     * @param originalStatus     数据库当前状态
+     * @param isReservationOrder 是否为预约订单（order_type='RESERVATION'）
+     * @param isReservationSeated 是否为预约入座（currentReservationId 不为空）
+     * @return 合并后应使用的状态字符串
+     */
+    private String calculateMergedStatus(int servedQty, int originalQty, int newQty,
+                                         String originalStatus,
+                                         boolean isReservationOrder,
+                                         boolean isReservationSeated) {
+        int totalQty = originalQty + newQty;
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情况1】预约订单（客人未入座）→ 只能是 PREPARING/PREPARED
+        // ═══════════════════════════════════════════════════════════
+        if (isReservationOrder && !isReservationSeated) {
+            if (servedQty >= totalQty) {
+                return "PREPARED";  // 全部已准备
+            } else {
+                return "PREPARING"; // 部分或未准备
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情况2&3】预约入座（currentReservationId 存在）
+        // ═══════════════════════════════════════════════════════════
+        if (isReservationSeated) {
+            // ──【情况2】菜品未上桌（PREPARING/PREPARED/UNSERVED）→ PREPARING
+            if ("PREPARING".equals(originalStatus) ||
+                    "PREPARED".equals(originalStatus) ||
+                    "UNSERVED".equals(originalStatus)) {
+                return "PREPARING";
+            }
+            // ──【情况3】菜品已上桌（PARTIALLY_SERVED/SERVED）→ PARTIALLY_SERVED
+            else if ("PARTIALLY_SERVED".equals(originalStatus) ||
+                    "SERVED".equals(originalStatus)) {
+                if (servedQty >= totalQty) {
+                    return "SERVED";
+                } else {
+                    return "PARTIALLY_SERVED";
+                }
+            }
+            // 兜底
+            else {
+                return "PREPARING";
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情况4】普通堂食订单（无 currentReservationId）
+        // ═══════════════════════════════════════════════════════════
+        if (servedQty >= totalQty) {
+            return "SERVED";
+        } else if (servedQty > 0) {
+            return "PARTIALLY_SERVED";
+        } else {
+            return "UNSERVED";
+        }
+    }
+
     @Transactional
     public void mergeOrderItems(Integer orderId, Map<String, Integer> newItemsMap) {
         if (orderId == null || orderId <= 0) {
@@ -251,18 +320,63 @@ public class OrderService {
             return;
         }
 
-        // 1. 获取订单现有项（原始列表）
-        List<Map<String, Object>> rawList = orderItemMapper.getExistingItemQuantitiesRaw(orderId);
+        // 1. 查询订单
+        Order order = orderMapper.findById(orderId);
+        if (order == null) {
+            throw new IllegalArgumentException("订单不存在: " + orderId);
+        }
 
-        // 2. 手动转换为 item_code -> quantity 映射
+        // ═══════════════════════════════════════════════════════════
+        // 🔧【核心修復】只有預點餐訂單 + NO_ORDER 狀態才升級為 ORDERED
+        // ═══════════════════════════════════════════════════════════
+        if ("RESERVATION".equals(order.getOrderType()) &&
+                "NO_ORDER".equals(order.getStatus()) &&
+                !newItemsMap.isEmpty()) {
+
+            int updated = orderMapper.updateOrderStatus(orderId, "ORDERED", "NO_ORDER");
+            if (updated > 0) {
+                System.out.println(" [狀態升級] 預點餐訂單: orderId=" + orderId +
+                        ", reservationId=" + order.getReservationId() +
+                        ", NO_ORDER → ORDERED");
+            } else {
+                // 可能並發情況下已被其他請求升級，記錄警告但不拋異常
+                System.out.println("[狀態升級] 訂單 " + orderId + " 可能已被其他請求升級，跳過");
+            }
+        }
+
+        // 2. 🔧【核心】判断订单类型和入座状态
+        boolean isReservationOrder = "RESERVATION".equals(order.getOrderType());
+        boolean isReservationSeated = false;
+
+        if (order.getTableId() != null) {
+            Tables table = tablesMapper.findById(order.getTableId());
+            if (table != null &&
+                    table.getCurrentReservationId() != null &&
+                    !table.getCurrentReservationId().isEmpty()) {
+                isReservationSeated = true;
+                System.out.println("🔍 检测到预约入座订单: orderId=" + orderId +
+                        ", reservationId=" + table.getCurrentReservationId());
+            }
+        }
+
+        // 3. 🔧【核心修复】获取订单现有项 + served_quantity + 状态
+        List<Map<String, Object>> rawList = orderItemMapper.getExistingItemQuantitiesRaw(orderId,null);
         Map<String, Integer> existingItems = new HashMap<>();
+        Map<String, Integer> existingServedQty = new HashMap<>();
+        Map<String, String> existingItemStatus = new HashMap<>();
+
         for (Map<String, Object> row : rawList) {
             String code = ((String) row.get("itemCode")).trim().toUpperCase();
             Integer qty = (Integer) row.get("quantity");
-            existingItems.put(code, qty);//關鍵
+            Integer served = (Integer) row.get("servedQuantity");
+            String status = (String) row.get("status");
+
+            existingItems.put(code, qty);
+            existingServedQty.put(code, served != null ? served : 0);
+            existingItemStatus.put(code, status);
         }
 
-        // 3. 分离更新/插入项（原有逻辑）
+        // 4. 分离更新/插入项
         List<OrderItem> itemsToUpdate = new ArrayList<>();
         List<OrderItem> itemsToInsert = new ArrayList<>();
 
@@ -287,18 +401,89 @@ public class OrderService {
             }
         }
 
-        // 4. 执行批量更新/插入 + 重算金额（原有逻辑）
+        // 5. 🔧【核心修复】根据4种情况计算合并后的正确状态
         if (!itemsToUpdate.isEmpty()) {
-            orderItemMapper.updateExistingOrderItems(orderId, itemsToUpdate);
-        }
-        if (!itemsToInsert.isEmpty()) {
-            orderItemMapper.insertNewOrderItems(orderId, itemsToInsert);
+            // 🔹 预约入座：按计算后的状态分组
+            List<OrderItem> servedGroup = new ArrayList<>();    // PARTIALLY_SERVED/SERVED → 普通逻辑
+            List<OrderItem> unservedGroup = new ArrayList<>();  // PREPARING/PREPARED/UNSERVED → 预约逻辑
+
+            for (OrderItem item : itemsToUpdate) {
+                String itemCode = item.getItemCode();
+                int newQty = item.getQuantity();
+
+                // 🔧 获取原有数据
+                Integer originalQty = existingItems.get(itemCode);
+                Integer originalServed = existingServedQty.getOrDefault(itemCode, 0);
+                String originalStatus = existingItemStatus.get(itemCode);
+
+                // 🔧【核心】计算合并后的状态（4种情况）
+                String newStatus = calculateMergedStatus(
+                        originalServed,           // served_qty
+                        originalQty,              // 原数量
+                        newQty,                   // 新增数量
+                        originalStatus,           // 原状态
+                        isReservationOrder,       // 是否预约订单
+                        isReservationSeated       // 是否预约入座
+                );
+
+                System.out.println("🔧 菜品 " + itemCode +
+                        " 原:" + originalStatus + "(" + originalServed + "/" + originalQty + ")" +
+                        " + 新增:" + newQty +
+                        " → 新状态:" + newStatus + "(" + originalServed + "/" + (originalQty + newQty) + ")" +
+                        " [预约订单:" + isReservationOrder + ", 预约入座:" + isReservationSeated + "]");
+
+                // 根据新状态分组处理
+                if ("SERVED".equals(newStatus) || "PARTIALLY_SERVED".equals(newStatus)) {
+                    servedGroup.add(item);
+                } else {
+                    unservedGroup.add(item);
+                }
+
+                // 🔧 临时保存新状态供后续使用
+                item.setStatus(newStatus);
+            }
+
+            //  已上桌的菜品 → 普通堂食逻辑
+            if (!servedGroup.isEmpty()) {
+                System.out.println(" 已上桌菜品 → 普通逻辑，数量: " + servedGroup.size());
+                orderItemMapper.updateExistingOrderItems(orderId, servedGroup);
+            }
+            //  未上桌的菜品 → 预约逻辑
+            if (!unservedGroup.isEmpty()) {
+                System.out.println(" 未上桌菜品 → 预约逻辑，数量: " + unservedGroup.size());
+                orderItemMapper.updateExistingOrderItemsForReservation(orderId, unservedGroup);
+            }
         }
 
+        // 6. 🔧 新插入的菜品设置初始状态
+        if (!itemsToInsert.isEmpty()) {
+            String initialStatus = "UNSERVED";  //  修复：统一为 UNSERVED
+
+            System.out.println(" 新菜品初始状态: " + initialStatus + ", 数量: " + itemsToInsert.size());
+            orderItemMapper.insertNewOrderItemsWithStatus(orderId, itemsToInsert, initialStatus);
+        }
+
+        // 7. 重算金额（预约订单无配送费）
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
-            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+            // 🔧 预约订单：只更新 items_total 和 total_amount，两者相等
+            orderMapper.updateOrderTotals(
+                    orderId,
+                    newTotal,    // items_total = 菜品总金额
+                    newTotal     // total_amount = items_total（无配送费）
+            );
+
+            System.out.println(" 预约订单金额已更新: orderId=" + orderId +
+                    ", items_total=" + newTotal +
+                    ", total_amount=" + newTotal);
         }
+
+
+        System.out.println(" 订单合并完成: orderId=" + orderId +
+                ", 更新=" + itemsToUpdate.size() +
+                ", 新增=" + itemsToInsert.size() +
+                ", isReservationOrder=" + isReservationOrder +
+                ", isReservationSeated=" + isReservationSeated);
     }
 
     /**
@@ -315,8 +500,6 @@ public class OrderService {
         }
         return "订单情况：" + status.getDisplayName();
     }
-
-    // ===== OrderService.java 新增方法 =====
 
     @Transactional
     public void markItemsAsServed(String tableNumber, int itemId, int quantity) throws SQLException {
@@ -453,6 +636,7 @@ public class OrderService {
 
     /**
      * 一鍵標記外賣訂單所有菜品為製作完成
+     * 🔧【新增】如果菜品已全部完成，自动将配送状态从"未配送"改为"送单中"
      */
     @Transactional
     public void markAllTakeoutItemsAsReady(String orderNumber) throws SQLException {
@@ -466,20 +650,143 @@ public class OrderService {
         }
 
         Integer orderId = order.getOrderId();
+
+        // 🔧【核心修改】如果没有待制作的菜品，检查是否需要自动更新配送状态
         if (!orderItemMapper.hasUnservedItems(orderId)) {
-            throw new IllegalStateException("訂單 " + orderNumber + " 沒有待製作的菜品");
+            System.out.println("⚠️ 订单 " + orderNumber + " 所有菜品已制作完成，检查配送状态...");
+
+            // 仅配送订单且状态为"未配送"时，自动推进到"送单中"
+            if ("DELIVERY".equals(order.getDeliveryMethod()) &&
+                    order.getDeliveryStatus() == Order.DeliveryStatus.NOT_DELIVERED) {
+
+                // 自动更新配送状态
+                orderMapper.updateDeliveryStatus(orderId, Order.DeliveryStatus.DELIVERING.name());
+                System.out.println("🚚 自动更新配送状态: " + orderNumber +
+                        " [未配送 → 送单中]");
+
+                // 可选：弹出提示告知用户
+                // JOptionPane.showMessageDialog(..., "菜品已全部完成，已自动更新为【送单中】状态");
+            } else {
+                System.out.println(" 订单 " + orderNumber + " 已制作完成，配送状态: " +
+                        (order.getDeliveryStatus() != null ? order.getDeliveryStatus().getDisplayName() : "N/A"));
+            }
+            return;  //  菜品已完成，直接返回，不抛异常
         }
 
+        // 原有逻辑：标记所有菜品为已制作完成
         int updatedCount = orderItemMapper.markAllItemsAsServed(orderId);
         if (updatedCount <= 0) {
             throw new IllegalStateException("未找到可更新的菜品明細");
         }
-        System.out.println("✅ 外賣訂單全部標記完成 - 訂單號: " + orderNumber + ", 更新菜品數: " + updatedCount);
+
+        // 🔧【新增】如果是配送订单，自动将配送状态更新为"送单中"
+        if ("DELIVERY".equals(order.getDeliveryMethod())) {
+            orderMapper.updateDeliveryStatus(orderId, Order.DeliveryStatus.DELIVERING.name());
+            System.out.println("🚚 配送状态已更新: " + orderNumber + " [未配送 → 送单中]");
+        }
+
+        System.out.println("✅ 外賣訂單全部標記完成 - 訂單號: " + orderNumber +
+                ", 更新菜品數: " + updatedCount);
     }
-    // OrderService.java
+
+
+    /**
+     * 🔧【核心修復】根據 served_quantity 和總數量計算撤銷後的正確狀態
+     * 4 種情況：
+     * 1. 預約訂單（客人未入座）→ PREPARING/PREPARED/UNSERVED
+     * 2. 客人已入座 + 菜品未上桌 → PREPARING/PREPARED/UNSERVED
+     * 3. 客人已入座 + 菜品已上桌 → PARTIALLY_SERVED/SERVED/UNSERVED
+     * 4. 普通堂食訂單 → 根據 servedQty 和 newQty 計算
+     *
+     * @param servedQty          已上桌/已準備數量
+     * @param originalQty        原訂單總數量
+     * @param cancelQuantity     本次撤銷數量
+     * @param originalStatus     數據庫當前狀態
+     * @param isReservationOrder 是否為預約訂單（order_type='RESERVATION'）
+     * @param isReservationSeated 是否為預約入座（currentReservationId 不為空）
+     * @return 撤銷後應使用的狀態字符串
+     */
+    private String calculateCancelledStatus(int servedQty, int originalQty, int cancelQuantity,
+                                            String originalStatus,
+                                            boolean isReservationOrder,
+                                            boolean isReservationSeated) {
+        int newQty = Math.max(0, originalQty - cancelQuantity);      // 撤銷後的新數量
+        int newServedQty = Math.min(servedQty, newQty);              // 已上桌數量不能超過新總數
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情況 1】預約訂單（客人未入座）→ 只能是 PREPARING/PREPARED/UNSERVED
+        // ═══════════════════════════════════════════════════════════
+        if (isReservationOrder && !isReservationSeated) {
+            if (newQty == 0) {
+                return "UNSERVED";                          // 全部撤銷，狀態重置
+            } else if (newServedQty == 0) {
+                return "UNSERVED";                          // 🔧【核心修復】已準備0份 = 未準備
+            } else if (newServedQty >= newQty) {
+                return "PREPARED";                          // 剩餘的全部已準備
+            } else {
+                return "PREPARING";                         // 部分準備中 (0 < served < total)
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情況 2&3】預約入座（currentReservationId 存在）
+        // ═══════════════════════════════════════════════════════════
+        if (isReservationSeated) {
+            // ──【情況 2】原狀態是未上桌（PREPARING/PREPARED/UNSERVED）
+            if ("PREPARING".equals(originalStatus) ||
+                    "PREPARED".equals(originalStatus) ||
+                    "UNSERVED".equals(originalStatus)) {
+
+                if (newQty == 0) {
+                    return "UNSERVED";                      // 全部撤銷
+                } else if (newServedQty == 0) {
+                    return "UNSERVED";                      // 🔧【核心修復】已準備0份 = 未準備
+                } else if (newServedQty >= newQty) {
+                    return "PREPARED";                      // 剩餘的全部已準備
+                } else {
+                    return "PREPARING";                     // 部分準備中
+                }
+            }
+            // ──【情況 3】原狀態是已上桌（PARTIALLY_SERVED/SERVED）
+            else if ("PARTIALLY_SERVED".equals(originalStatus) ||
+                    "SERVED".equals(originalStatus)) {
+
+                if (newQty == 0) {
+                    return "UNSERVED";                      // 全部撤銷
+                } else if (newServedQty >= newQty) {
+                    return "SERVED";                        // 剩餘的全部已上桌
+                } else if (newServedQty > 0) {
+                    return "PARTIALLY_SERVED";              // 部分上桌
+                } else {
+                    return "UNSERVED";                      // 撤銷後沒有已上桌的
+                }
+            }
+            // 兜底
+            else {
+                return "PREPARING";
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 【情況 4】普通堂食訂單（無 currentReservationId）
+        // ═══════════════════════════════════════════════════════════
+        if (newQty == 0) {
+            return "UNSERVED";                              // 全部撤銷
+        } else if (newServedQty == 0) {
+            return "UNSERVED";                              // 🔧【核心修復】沒有已上桌的
+        } else if (newServedQty >= newQty) {
+            return "SERVED";                                // 剩餘的全部已上桌
+        } else if (newServedQty > 0) {
+            return "PARTIALLY_SERVED";                      // 部分上桌
+        } else {
+            return "UNSERVED";                              // 沒有已上桌的
+        }
+    }
 
     /**
      * 撤銷堂食訂單中的菜品（@Transactional 自動管理事務）
+     * 🔧【核心修復】使用 calculateCancelledStatus 計算撤銷後的正確狀態
+     * 🔧【核心修復】只有已上桌的菜品才記錄撤銷審計
      */
     @Transactional
     public void cancelOrderItem(String tableNumber, String itemCode, int cancelQuantity, String cancellationReason) throws SQLException {
@@ -519,39 +826,90 @@ public class OrderService {
             throw new IllegalStateException("訂單中找不到菜品: " + itemCode);
         }
 
-        // ===== 6. 計算新數量和狀態 =====
+        // ===== 6. 🔧【核心】判斷訂單類型和入座狀態（與 mergeOrderItems 一致）=====
+        Order order = orderMapper.findById(orderId);
+        boolean isReservationOrder = "RESERVATION".equals(order.getOrderType());
+        boolean isReservationSeated = false;
+
+        if (order.getTableId() != null) {
+            Tables orderTable = tablesMapper.findById(order.getTableId());
+            if (orderTable != null &&
+                    orderTable.getCurrentReservationId() != null &&
+                    !orderTable.getCurrentReservationId().isEmpty()) {
+                isReservationSeated = true;
+                System.out.println("🔍 检测到预约入座订单: orderId=" + orderId +
+                        ", reservationId=" + orderTable.getCurrentReservationId());
+            }
+        }
+
+        // ===== 7. 計算新數量和狀態 =====
         int totalQty = currentStatus.getQuantity();
         int servedQty = currentStatus.getServedQuantity();
+
+        // 🔧 获取原状态（用於狀態計算和審計記錄）
+        String originalStatus = orderItemMapper.getItemStatus(orderId, itemId);
+
+        // 🔧【核心修复】使用 calculateCancelledStatus 計算新狀態
+        String newStatus = calculateCancelledStatus(
+                servedQty,              // 已上桌數量
+                totalQty,               // 原數量
+                cancelQuantity,         // 撤銷數量
+                originalStatus,         // 原狀態
+                isReservationOrder,     // 是否預約訂單
+                isReservationSeated     // 是否預約入座
+        );
+
         int newQty = Math.max(0, totalQty - cancelQuantity);
         int newServedQty = Math.min(servedQty, newQty);
 
-        // ===== 7. 執行撤銷操作 =====
+        System.out.println("🔧 菜品 " + itemCode +
+                " 原:" + originalStatus + "(" + servedQty + "/" + totalQty + ")" +
+                " - 撤銷:" + cancelQuantity +
+                " → 新狀態:" + newStatus + "(" + newServedQty + "/" + newQty + ")" +
+                " [預約訂單:" + isReservationOrder + ", 預約入座:" + isReservationSeated + "]");
+
+        // ===== 8. 🔧【核心修復】執行撤銷操作 =====
         if (newQty == 0) {
-            // ✅ 完全撤銷：記錄審計 + 刪除明細
-            orderItemMapper.recordCancellation(itemCode, cancelQuantity,
-                    cancellationReason != null ? cancellationReason : "用戶撤銷",
-                    servedQty > 0 ? "SERVED" : "UNSERVED");
-            orderItemMapper.deleteOrderItem(orderId, itemId);  // ✅ 直接 DELETE，不設置 "DELETED" 狀態
+            // ✅ 完全撤銷：刪除明細
+
+            // 🔧【核心修复】只有已上桌的菜品才记录撤销审计
+            // 准备中的菜品（PREPARING/PREPARED/UNSERVED）不需要记录审计
+            if ("SERVED".equals(originalStatus) ||
+                    "PARTIALLY_SERVED".equals(originalStatus)) {
+                // 已上桌菜品：记录审计 + 删除
+                orderItemMapper.recordCancellation(itemCode, cancelQuantity,
+                        cancellationReason != null ? cancellationReason : "用戶撤銷",
+                        originalStatus);  // 使用原状态
+                System.out.println("📝 已记录撤销审计：菜品 " + itemCode +
+                        " 状态=" + originalStatus);
+            } else {
+                // 未上桌菜品（PREPARING/PREPARED/UNSERVED）：直接删除，不记录
+                System.out.println("🗑️ 准备中的菜品直接删除，不记录审计：菜品 " + itemCode +
+                        " 状态=" + originalStatus);
+            }
+
+            // 删除订单项（所有情况都删除）
+            orderItemMapper.deleteOrderItem(orderId, itemId);
+            System.out.println(" 菜品 " + itemCode + " 已完全撤銷並刪除");
         } else {
-            // ✅ 部分撤銷：更新數量和狀態（只用三個合法值）
-            String newStatus = (newServedQty == 0) ? "UNSERVED" :
-                    (newServedQty >= newQty) ? "SERVED" : "PARTIALLY_SERVED";
+            // 部分撤銷：更新數量和狀態（使用 calculateCancelledStatus 計算的新狀態）
             orderItemMapper.updateOrderItemAfterCancel(orderId, itemId, newQty, newServedQty, newStatus);
+            System.out.println(" 菜品 " + itemCode + " 部分撤銷，新狀態: " + newStatus);
         }
 
-        // ===== 8. 重新計算訂單總金額 =====
+        // ===== 9. 重新計算訂單總金額 =====
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
             orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
         }
 
-        // ===== 9. 檢查訂單是否為空 → 刪除空訂單 =====
+        // ===== 10. 檢查訂單是否為空 → 刪除空訂單 =====
         if (!orderItemMapper.hasRemainingItems(orderId)) {
             orderMapper.deleteOrder(orderId);
             System.out.println(" 空訂單已自動刪除: orderId=" + orderId);
         }
 
-        System.out.println(" 撤銷成功 - 餐桌:" + tableNumber + ", 菜品:" + itemCode + ", 數量:" + cancelQuantity);
+        System.out.println("✅ 撤銷成功 - 餐桌:" + tableNumber + ", 菜品:" + itemCode + ", 數量:" + cancelQuantity);
     }
 
     /**
@@ -1027,6 +1385,402 @@ public class OrderService {
             e.printStackTrace();
         }
 
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public Order findPreOrderByReservationId(String reservationId) {
+        return orderMapper.findPreOrderByReservationId(reservationId);
+    }
+
+
+    /**
+     * 🔧 根据 reservation_id 查询订单明细（预约订单专用）
+     */
+    @Transactional(readOnly = true)
+    public List<OrderItem> loadFormalOrderItemsByReservationId(String reservationId) {
+        if (reservationId == null || reservationId.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        return orderMapper.findOrderItemsByReservationId(reservationId);
+    }
+
+
+    @Transactional
+    public void updateReservationOrderItemPrepared(String reservationId, String itemCode, int preparedQty, String newStatus) {
+        if (reservationId == null || reservationId.isEmpty()) throw new IllegalArgumentException("预约号不能为空");
+        if (itemCode == null || itemCode.isEmpty()) throw new IllegalArgumentException("菜品编号不能为空");
+        if (preparedQty < 0) throw new IllegalArgumentException("已准备数量不能为负数");
+
+        Order order = orderMapper.findActiveOrderByReservationId(reservationId);
+        if (order == null) throw new IllegalStateException("未找到预约订单: " + reservationId);
+
+        Integer itemId = menuItemMapper.findItemIdByCode(itemCode.toUpperCase());
+        if (itemId == null) throw new IllegalStateException("菜品不存在: " + itemCode);
+
+        OrderItemServingStatus current = orderItemMapper.getServingStatus(order.getOrderId(), itemId);
+        if (current == null) throw new IllegalStateException("订单中找不到菜品: " + itemCode);
+        if (preparedQty > current.getQuantity()) throw new IllegalArgumentException("已准备数量不能超过总数量");
+
+        orderItemMapper.updateServedQuantityAndStatus(order.getOrderId(), itemId, preparedQty, newStatus);
+        System.out.println(" 菜品准备进度已更新: " + itemCode + " → " + preparedQty + "/" + current.getQuantity() + " (" + newStatus + ")");
+    }
+
+    @Transactional(readOnly = true)
+    public int getOrderItemTotalQuantity(String reservationId, String itemCode) {
+        Order order = orderMapper.findActiveOrderByReservationId(reservationId);
+        if (order == null) return 0;
+        Integer itemId = menuItemMapper.findItemIdByCode(itemCode.toUpperCase());
+        if (itemId == null) return 0;
+        OrderItemServingStatus status = orderItemMapper.getServingStatus(order.getOrderId(), itemId);
+        return status != null ? status.getQuantity() : 0;
+    }
+
+    /**
+     * 🔧 撤销预约订单中的菜品（通过 reservation_id）
+     * @return Map{success: Boolean, needConfirm: Boolean, message: String}
+     *         needConfirm=true 表示需要用户确认是否保留预约
+     */
+    @Transactional
+    public Map<String, Object> cancelReservationOrderItem(String reservationId, int itemId, int quantity, String cancellationReason) throws SQLException {
+        Map<String, Object> result = new HashMap<>();
+
+        // 1. 基础验证
+        if (reservationId == null || reservationId.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "预约号不能为空");
+            return result;
+        }
+        if (itemId <= 0 || quantity <= 0) {
+            result.put("success", false);
+            result.put("message", "无效的菜品 ID 或数量");
+            return result;
+        }
+
+        // 2. 通过 reservation_id 查找预点餐订单
+        Order order = orderMapper.findPreOrderByReservationId(reservationId);
+        if (order == null || order.getOrderId() == null) {
+            result.put("success", false);
+            result.put("message", "预约订单不存在: " + reservationId);
+            return result;
+        }
+        Integer orderId = order.getOrderId();
+
+        // 3. 查询当前菜品状态
+        OrderItemServingStatus currentStatus = orderItemMapper.getServingStatus(orderId, itemId);
+        if (currentStatus == null) {
+            result.put("success", false);
+            result.put("message", "订单中找不到菜品: " + itemId);
+            return result;
+        }
+
+        // 4. 计算新数量和状态
+        int totalQty = currentStatus.getQuantity();
+        int servedQty = currentStatus.getServedQuantity();
+        int newQty = Math.max(0, totalQty - quantity);
+        int newServedQty = Math.min(servedQty, newQty);
+
+        // 🔧【核心修复】检查是否为最后一个菜品
+        boolean isLastItem = false;
+        if (newQty == 0) {
+            // 查询订单中是否还有其他菜品
+            List<OrderItem> remainingItems = orderMapper.findOrderItemsByReservationId(reservationId);
+            if (remainingItems != null) {
+                // 过滤掉当前正在删除的菜品
+                long otherItemCount = remainingItems.stream()
+                        .filter(item -> item.getItemId() != itemId)
+                        .count();
+                isLastItem = (otherItemCount == 0);
+            }
+        }
+
+        // 5. 执行撤销
+        if (newQty == 0) {
+            // ── 完全撤销：删除明细 ──
+            String itemCode = orderItemMapper.getItemCodeByItemId(itemId);
+
+            // 🔧 只有已上桌的菜品才记录撤销审计
+            if ("SERVED".equals(currentStatus) || "PARTIALLY_SERVED".equals(currentStatus)) {
+                orderItemMapper.recordCancellation(itemCode, quantity,
+                        cancellationReason != null ? cancellationReason : "用户撤销",
+                        String.valueOf(currentStatus));
+                System.out.println("📝 已记录撤销审计：菜品 " + itemCode + " 状态=" + currentStatus);
+            } else {
+                System.out.println("🗑️ 准备中/预约订单菜品直接删除，不记录审计：菜品 " + itemCode);
+            }
+
+            // 删除订单项
+            orderItemMapper.deleteOrderItem(orderId, itemId);
+            System.out.println("🗑️ 菜品 " + itemCode + " 已完全撤销并删除");
+
+        } else {
+            // ── 🔧【核心修复】部分撤销：必须调用 Mapper 更新数据库！─
+            String itemCode = orderItemMapper.getItemCodeByItemId(itemId);
+
+            // 计算撤销后的新状态（预约订单专用逻辑）
+            String newStatus = calculateCancelledStatus(
+                    servedQty,              // 已上桌数量
+                    totalQty,               // 原数量
+                    quantity,               // 撤销数量
+                    "UNSERVED",             // 预约订单默认状态
+                    true,                   // isReservationOrder = true
+                    false                   // isReservationSeated = false（预点餐阶段客人未入座）
+            );
+
+            // 🔧【关键】执行数据库更新：数量 + 已上桌数 + 状态
+            orderItemMapper.updateOrderItemAfterCancel(
+                    orderId,
+                    itemId,
+                    newQty,
+                    newServedQty,
+                    newStatus
+            );
+
+            System.out.println("✅ 菜品部分撤销成功 -> " + itemCode +
+                    " 原:" + totalQty + " → 新:" + newQty +
+                    " (状态:" + newStatus + ")");
+        }
+
+        // 6. 重新计算订单总金额
+        Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
+        if (newTotal != null) {
+            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+        }
+
+        // 🔧【核心修复】如果是最后一个菜品，返回需要确认的标志
+        if (isLastItem) {
+            result.put("success", true);
+            result.put("needConfirm", true);  // 需要用户确认
+            result.put("orderId", orderId);
+            result.put("reservationId", reservationId);
+            result.put("message", "这是最后一个菜品，是否保留预约订单？");
+            return result;
+        }
+
+        // 7. 检查订单是否为空 → 删除空订单
+        if (!orderItemMapper.hasRemainingItems(orderId)) {
+            orderMapper.deleteOrder(orderId);
+        }
+
+        result.put("success", true);
+        result.put("needConfirm", false);
+        result.put("message", "预约订单撤销成功");
+        return result;
+    }
+
+    /**
+     * 🔧 确认删除预约订单（用户选择"否"时调用）
+     */
+    @Transactional
+    public Map<String, Object> confirmDeleteReservationOrder(String reservationId, Integer orderId) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // 🔧【核心修复】先更新 total_amount 为 0（在删除前）
+            orderItemMapper.updateOrderTotalAmount(orderId, 0.0);
+            System.out.println(" 已将订单总金额更新为 0: orderId=" + orderId);
+
+            // 1. 删除订单明细
+            orderItemMapper.deleteOrderItemsByOrderId(orderId);
+
+            // 2. 删除订单主表
+            orderMapper.deleteOrder(orderId);
+
+            // 3. 🔧【核心】更新 table_reservations 的 pre_order 从 1 改为 0
+            int updated = reservationMapper.updatePreOrderFlag(reservationId, false);
+
+            result.put("success", true);
+            result.put("message", "预约订单已删除，预约记录已更新");
+            System.out.println(" 预约订单已删除: orderId=" + orderId +
+                    ", reservationId=" + reservationId +
+                    ", pre_order updated=" + (updated > 0));
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("message", "删除预约订单失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return result;
+    }
+
+
+    /**
+     * 🔧 保留預約訂單（用戶選擇"是"時調用）
+     * 刪除所有菜品後，將訂單狀態改為 NO_ORDER，pre_order 保持為 1
+     */
+    @Transactional
+    public Map<String, Object> confirmKeepReservationOrder(String reservationId, Integer orderId) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // 🔧【核心修復 1】先確認訂單確實沒有剩餘菜品（防禦性檢查）
+            boolean hasItems = orderItemMapper.hasRemainingItems(orderId);
+            if (hasItems) {
+                System.out.println(" 訂單 " + orderId + " 仍有菜品，跳過狀態更新");
+            } else {
+                // 🔧【核心修復 2】將訂單狀態從 ORDERED → NO_ORDER
+                int updated = orderMapper.updateOrderStatusOnly(orderId, "NO_ORDER", "ORDERED");
+                if (updated > 0) {
+                    System.out.println(" 訂單狀態已更新: orderId=" + orderId +
+                            ", ORDERED → NO_ORDER");
+                } else {
+                    // 可能狀態已不是 ORDERED，記錄日誌但不拋異常
+                    System.out.println(" 訂單 " + orderId + " 狀態可能已變更，跳過更新");
+                }
+            }
+
+            // 🔧【核心修復 3】可選：將金額也清零（保持一致性）
+            orderItemMapper.updateOrderTotalAmount(orderId, 0.0);
+
+            result.put("success", true);
+            result.put("message", "預約訂單已保留，可以繼續點餐");
+            System.out.println(" 預約訂單已保留: orderId=" + orderId +
+                    ", reservationId=" + reservationId +
+                    ", status=NO_ORDER");
+
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("message", "保留預約訂單失敗: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return result;
+    }
+
+
+    /**
+     * 🔧 撤銷預約訂單中的菜品（支持確認邏輯）
+     * @return Map{success: Boolean, needConfirm: Boolean, orderId: Integer, reservationId: String, message: String}
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> cancelReservationOrderItemWithConfirm(
+            String tableNumber, String itemCode, int cancelQuantity,
+            String cancellationReason, String reservationId) throws SQLException {
+
+        Map<String, Object> result = new HashMap<>();
+
+        // ===== 1. 基礎驗證 =====
+        if (tableNumber == null || tableNumber.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "餐桌號不能為空");
+            return result;
+        }
+        if (itemCode == null || itemCode.trim().isEmpty()) {
+            result.put("success", false);
+            result.put("message", "菜品編號不能為空");
+            return result;
+        }
+        if (cancelQuantity <= 0) {
+            result.put("success", false);
+            result.put("message", "撤銷數量必須大於 0");
+            return result;
+        }
+
+        // ===== 2. 獲取餐桌 → 餐桌 ID =====
+        Tables table = tablesMapper.findByDisplayId(tableNumber.trim());
+        if (table == null) {
+            result.put("success", false);
+            result.put("message", "餐桌不存在: " + tableNumber);
+            return result;
+        }
+        int tableId = table.getTableId();
+
+        // ===== 3. 獲取活躍訂單（通過 reservation_id 查詢）=====
+        Order order = orderMapper.findActiveOrderByReservationId(reservationId);
+        if (order == null || order.getOrderId() == null) {
+            result.put("success", false);
+            result.put("message", "未找到預約訂單: " + reservationId);
+            return result;
+        }
+        Integer orderId = order.getOrderId();
+
+        // ===== 4. 獲取菜品 ID =====
+        Integer itemId = menuItemMapper.findItemIdByCode(itemCode.trim().toUpperCase());
+        if (itemId == null) {
+            result.put("success", false);
+            result.put("message", "菜品 " + itemCode + " 不存在");
+            return result;
+        }
+
+        // ===== 5. 查詢當前菜品狀態 =====
+        OrderItemServingStatus currentStatus = orderItemMapper.getServingStatus(orderId, itemId);
+        if (currentStatus == null) {
+            result.put("success", false);
+            result.put("message", "訂單中找不到菜品: " + itemCode);
+            return result;
+        }
+
+        // 🔧【關鍵修復】額外查詢菜品狀態字符串（OrderItemServingStatus 不包含 status）
+        String currentStatusStr = orderItemMapper.getItemStatus(orderId, itemId);
+
+        // ===== 6. 計算新數量和狀態 =====
+        int totalQty = currentStatus.getQuantity();
+        int servedQty = currentStatus.getServedQuantity();
+        int newQty = Math.max(0, totalQty - cancelQuantity);
+        int newServedQty = Math.min(servedQty, newQty);
+
+        // ===== 7. 執行撤銷操作 =====
+        if (newQty == 0) {
+            // 🔧 完全撤銷：記錄審計 + 刪除明細
+            // 只有已上桌的菜品才記錄審計
+            if ("SERVED".equals(currentStatusStr) || "PARTIALLY_SERVED".equals(currentStatusStr)) {
+                orderItemMapper.recordCancellation(itemCode, cancelQuantity,
+                        cancellationReason != null ? cancellationReason : "用戶撤銷",
+                        currentStatusStr);  // 🔧 使用 currentStatusStr 而非 currentStatus.getStatus()
+                System.out.println("📝 已記錄撤銷審計：菜品 " + itemCode + " 狀態=" + currentStatusStr);
+            } else {
+                // 準備中的菜品直接刪除，不記錄審計
+                System.out.println("🗑️ 準備中的菜品直接刪除，不記錄審計：菜品 " + itemCode + " 狀態=" + currentStatusStr);
+            }
+            orderItemMapper.deleteOrderItem(orderId, itemId);
+        } else {
+            // 🔧 部分撤銷：更新數量和狀態（使用 calculateCancelledStatus）
+            String newStatus = calculateCancelledStatus(
+                    servedQty, totalQty, cancelQuantity, currentStatusStr,  // 🔧 使用 currentStatusStr
+                    "RESERVATION".equals(order.getOrderType()),
+                    table.getCurrentReservationId() != null
+            );
+            orderItemMapper.updateOrderItemAfterCancel(orderId, itemId, newQty, newServedQty, newStatus);
+        }
+
+        // ===== 8. 重新計算訂單總金額 =====
+        Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
+        if (newTotal != null) {
+            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+        }
+
+        // ===== 9. 🔧【核心】檢查是否為預約訂單的最後一個菜品 =====
+        boolean isLastItem = false;
+        if (newQty == 0) {
+            List<OrderItem> remainingItems = orderMapper.findOrderItemsByOrderId(orderId);
+            if (remainingItems != null) {
+                long otherItemCount = remainingItems.stream()
+                        .filter(item -> !item.getItemCode().equalsIgnoreCase(itemCode))
+                        .count();
+                isLastItem = (otherItemCount == 0);
+            }
+        }
+
+        // ===== 10. 如果需要確認，返回標誌 =====
+        if (isLastItem) {
+            result.put("success", true);
+            result.put("needConfirm", true);      // 🔧 關鍵：需要用戶確認
+            result.put("orderId", orderId);
+            result.put("reservationId", reservationId);
+            result.put("currentOrderStatus", order.getStatus());  // 傳遞當前狀態
+            result.put("message", "這是預約訂單的最後一個菜品，是否保留預約？");
+            return result;
+        }
+
+        // ===== 11. 檢查訂單是否為空 → 刪除空訂單 =====
+        if (!orderItemMapper.hasRemainingItems(orderId)) {
+            orderMapper.deleteOrder(orderId);
+            System.out.println(" 空訂單已自動刪除: orderId=" + orderId);
+        }
+
+        result.put("success", true);
+        result.put("needConfirm", false);
+        result.put("message", "撤銷成功");
         return result;
     }
 }

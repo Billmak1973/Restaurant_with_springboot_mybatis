@@ -365,6 +365,7 @@ public class Tables {
         }
         return true;
     }
+
     public CustomerGroup getCurrentGroup() {
         // 如果ID存在但对象为null，尝试重新加载
         if (currentGroupId != null && currentGroup == null) {

@@ -393,7 +393,7 @@
         FROM table_orders o
         LEFT JOIN restaurant_tables t ON o.table_id = t.table_id
         LEFT JOIN order_items oi ON o.order_id = oi.order_id
-        WHERE o.order_type = 'DINE_IN'
+        WHERE o.order_type IN ('DINE_IN','RESERVATION')
         AND o.status = 'ORDERED'
         GROUP BY o.order_id, t.display_id, t.status, o.order_time, o.reorder_time
         ORDER BY COALESCE(o.reorder_time, o.order_time) ASC
@@ -452,7 +452,7 @@
         items_total, delivery_fee, total_amount,
         is_checked_out, is_prepaid, prepaid_amount,
         delivery_status,
-        reorder_time          <!-- ✅ 新增：查询重单时间 -->
+        reorder_time          <!--  新增：查询重单时间 -->
         FROM table_orders
         WHERE order_number = #{orderNumber}
         AND status = 'ORDERED'
@@ -534,11 +534,10 @@
     </select>
 
     <!-- 更新订单的三金额字段 -->
-    <update id="updateOrderItemsTotalAndDeliveryFee">
+    <update id="updateOrderTotals">
         UPDATE table_orders
         SET
         items_total = #{itemsTotal},
-        delivery_fee = #{deliveryFee},
         total_amount = #{totalAmount}
         WHERE order_id = #{orderId}
     </update>
@@ -611,9 +610,10 @@
         UPDATE table_orders
         SET table_id = #{tableId}
         WHERE reservation_id = #{reservationId}
-        AND table_id IS NULL  <!-- 只更新尚未分配餐桌的预点餐订单 -->
-        AND order_type = 'DINE_IN'
+        AND table_id IS NULL
+        AND order_type = 'RESERVATION'  <!--  改为 RESERVATION -->
     </update>
+
 
     <!-- 根据预约 ID 更新订单类型（带原类型校验，防止误更新） -->
     <update id="updateOrderTypeByReservationId">
@@ -622,6 +622,68 @@
         WHERE reservation_id = #{reservationId}
         AND order_type = #{originalType}  <!-- 🔧 确保只更新预点餐订单 -->
         AND status = 'ORDERED'            <!-- 🔧 只更新未结账的订单 -->
+    </update>
+
+    <!-- OrderMapper.xml -->
+    <select id="findPreOrderByReservationId" resultType="Order">
+        SELECT order_id, reservation_id, order_type, status, items_total, total_amount
+        FROM table_orders
+        WHERE reservation_id = #{reservationId}
+        AND order_type = 'RESERVATION'
+<!--        AND status IN ('NO_ORDER', 'ORDERED')  &lt;!&ndash; 🔧 改為 IN 條件 &ndash;&gt;-->
+        LIMIT 1
+    </select>
+
+    <!-- 🔧 根据 reservation_id 查询订单明细（预约订单专用） -->
+    <select id="findOrderItemsByReservationId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_id,
+        oi.quantity,
+        oi.served_quantity,
+        oi.status,
+        oi.price_at_order,
+        mi.item_code,
+        mi.name AS item_name
+        FROM table_orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE o.reservation_id = #{reservationId}
+        AND o.status = 'ORDERED'
+        ORDER BY oi.order_item_id ASC
+    </select>
+
+    <select id="findActiveOrderByReservationId" resultType="Order">
+        SELECT order_id, reservation_id, order_type, status, items_total, total_amount
+        FROM table_orders
+        WHERE reservation_id = #{reservationId}
+        AND order_type IN ('RESERVATION', 'DINE_IN')
+        AND status = 'ORDERED'
+        LIMIT 1
+    </select>
+
+    <update id="updatePrepaidInfoByReservationId">
+        UPDATE table_orders
+        SET
+        is_prepaid = #{isPrepaid},
+        prepaid_amount = #{prepaidAmount}
+        WHERE reservation_id = #{reservationId}
+        AND order_type = 'RESERVATION'
+    </update>
+
+    <update id="updateOrderStatus">
+        UPDATE table_orders
+        SET status = #{status}
+        WHERE order_id = #{orderId}
+        AND status = #{oldStatus}
+    </update>
+
+    <update id="updateOrderStatusOnly">
+        UPDATE table_orders
+        SET status = #{status}
+        WHERE order_id = #{orderId}
+        AND status = #{oldStatus}  <!-- 🔧 樂觀鎖：只更新預期舊狀態 -->
     </update>
 
 </mapper>

@@ -63,11 +63,4 @@ public interface CustomerGroupMapper {
      * 根据 ID 删除
      */
     int delete(@Param("id") int id);
-
-    /**
-     * 批量更新顾客组的餐桌关联
-     */
-    int batchUpdateTableId(@Param("updates") List<Map<String, Object>> updates);
-
-
 }

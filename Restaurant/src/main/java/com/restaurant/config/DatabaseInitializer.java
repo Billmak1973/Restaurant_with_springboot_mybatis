@@ -288,20 +288,22 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
     }
 
-    /**
-     * 插入当天营业状态记录（仅在首次建表时调用）
-     */
     private void insertTodayBusinessStatus() {
-        String sql = "INSERT IGNORE INTO business_status " +
-                "(business_date, is_open, next_call_number, daily_total_customers, daily_revenue, daily_takeout_count) " +
-                "VALUES (CURDATE(), true, 1, 0, 0.00, 0)";
-        try {
+        // 先检查是否存在
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM business_status WHERE business_date = CURDATE()",
+                Integer.class
+        );
+
+        if (count != null && count == 0) {
+            String sql = "INSERT INTO business_status " +
+                    "(business_date, is_open, next_call_number, daily_total_customers, daily_revenue, daily_takeout_count) " +
+                    "VALUES (CURDATE(), true, 1, 0, 0.00, 0)";
             int result = jdbcTemplate.update(sql);
             if (result > 0) {
                 System.out.println("已创建当天营业状态记录：" + java.time.LocalDate.now());
             }
-        } catch (Exception e) {
-            System.err.println("插入当天营业状态失败：" + e.getMessage());
         }
+        // 如果已存在，什么都不做，不消耗 AUTO_INCREMENT
     }
 }

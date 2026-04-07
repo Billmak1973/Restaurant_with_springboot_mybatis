@@ -77,7 +77,4 @@ public interface MenuItemMapper {
      * @return 影响行数
      */
     int deletePhysically(@Param("itemCode") String itemCode);
-
-
-
 }

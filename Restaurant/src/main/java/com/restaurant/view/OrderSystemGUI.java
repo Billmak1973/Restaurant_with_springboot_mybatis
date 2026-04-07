@@ -10,6 +10,7 @@ import com.restaurant.service.OrderService;
 import com.restaurant.service.RestaurantService;
 
 import javax.swing.*;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -164,6 +165,7 @@ public class OrderSystemGUI extends JFrame {
         return orderService.loadFormalOrderItems(tableNumber);
     }
 
+
     public String generateFormalOrderHtml(String tableNumber, boolean includeTotal) {
         List<OrderItem> items = loadFormalOrderItems(tableNumber);
 
@@ -188,7 +190,7 @@ public class OrderSystemGUI extends JFrame {
                 .append("<th style='width:100px; text-align:center;'>状态</th>")
                 .append("<th style='width:80px; text-align:left;'>编号</th>")
                 .append("<th style='width:200px; text-align:left;'>菜品</th>")
-                .append("<th style='width:90px; text-align:center;'>数量（已上/总数）</th>") // ← 优化表头文字
+                .append("<th style='width:90px; text-align:center;'>数量（已上/总数）</th>")
                 .append("<th style='width:90px; text-align:right;'>单价</th>")
                 .append("<th style='width:100px; text-align:right;'>小计</th>")
                 .append("</tr>");
@@ -196,22 +198,27 @@ public class OrderSystemGUI extends JFrame {
         double totalAmount = 0.0;
         int itemNumber = 1;
 
-        // 固定显示顺序
-        for (String status : Arrays.asList("UNSERVED", "PARTIALLY_SERVED", "SERVED")) {
+        // 🔧【核心修改】固定显示顺序：支持5种状态
+        for (String status : Arrays.asList("PREPARING", "PREPARED", "UNSERVED", "PARTIALLY_SERVED", "SERVED")) {
             List<OrderItem> group = grouped.get(status);
             if (group == null || group.isEmpty()) continue;
 
+            // 🔧 状态文本和颜色
             String statusText = switch (status) {
-                case "UNSERVED" -> "🔴 未上桌";
+                case "PREPARING" -> "🟡 准备中";
+                case "PREPARED" -> "🟢 已准备";
+                case "UNSERVED" -> "⚪ 未上桌";
                 case "PARTIALLY_SERVED" -> "🟠 部分上桌";
                 case "SERVED" -> "🟢 已上桌";
                 default -> status;
             };
 
             String statusColor = switch (status) {
-                case "UNSERVED" -> "#ff6b6b";
-                case "PARTIALLY_SERVED" -> "#ffa500";
-                case "SERVED" -> "#4caf50";
+                case "PREPARING" -> "#ffa500";        // 橙色
+                case "PREPARED" -> "#4caf50";         // 绿色
+                case "UNSERVED" -> "#9e9e9e";         // 灰色
+                case "PARTIALLY_SERVED" -> "#ff9800"; // 橙色
+                case "SERVED" -> "#4caf50";           // 绿色
                 default -> "#2196f3";
             };
 
@@ -227,7 +234,7 @@ public class OrderSystemGUI extends JFrame {
                         itemNumber++
                 ));
 
-                // 状态（每一行都输出，绝不 rowspan）
+                // 状态
                 html.append(String.format(
                         "<td style='background-color:%s; color:white; font-weight:bold; text-align:center;'>%s</td>",
                         statusColor, statusText
@@ -241,12 +248,13 @@ public class OrderSystemGUI extends JFrame {
                         item.getItemName()
                 ));
 
-                // ===== 核心修复：数量列显示进度 "已上/总数" =====
+                // 数量列：显示进度 "已上/总数"
                 String quantityProgress = String.format("%d/%d",
                         item.getServedQuantity(),
-                        item.getQuantity());
+                        item.getQuantity()
+                );
 
-                // 部分上桌时高亮背景（浅橙色）+ 加粗
+                // 部分上桌时高亮背景
                 String quantityStyle = "PARTIALLY_SERVED".equals(item.getStatus())
                         ? "background-color:#fff3e0; font-weight:bold;"
                         : "";
@@ -256,7 +264,6 @@ public class OrderSystemGUI extends JFrame {
                         quantityStyle,
                         quantityProgress
                 ));
-                // ============================================
 
                 // 单价 / 小计
                 html.append(String.format(
@@ -285,7 +292,6 @@ public class OrderSystemGUI extends JFrame {
         html.append("</body></html>");
         return html.toString();
     }
-
 
     /**
      * 加载堂食订单列表（供 View 层调用）- 不限制数量
@@ -449,6 +455,32 @@ public class OrderSystemGUI extends JFrame {
      */
     public void updateOrderDeliveryFee(Integer orderId, Double newDeliveryFee) {
         orderService.updateOrderDeliveryFee(orderId, newDeliveryFee);
+    }
+    /**
+     * 🔧 根据预约号查询订单明细（预约订单专用）
+     */
+    public List<OrderItem> loadFormalOrderItemsByReservationId(String reservationId) {
+        return orderService.loadFormalOrderItemsByReservationId(reservationId);
+    }
+
+    /**
+     * 🔧 根据预约号查找预点餐订单（代理到 OrderService）
+     * @param reservationId 预约号
+     * @return 预点餐订单，不存在返回 null
+     */
+    public Order findPreOrderByReservationId(String reservationId) {
+        return orderService.findPreOrderByReservationId(reservationId);
+    }
+
+    /**
+     * 🔧 撤销预约订单中的菜品（通过 reservation_id）
+     * @param reservationId 预约号
+     * @param itemId 菜品ID
+     * @param quantity 撤销数量
+     * @param cancellationReason 撤销原因
+     */
+    public void cancelReservationOrderItem(String reservationId, int itemId, int quantity, String cancellationReason) throws SQLException {
+        orderService.cancelReservationOrderItem(reservationId, itemId, quantity, cancellationReason);
     }
 }
 

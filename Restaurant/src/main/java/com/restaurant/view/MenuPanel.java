@@ -1,22 +1,18 @@
 package com.restaurant.view;
 
 import com.restaurant.controller.RestaurantController;
+import com.restaurant.entity.*;
 import com.restaurant.entity.MenuItem;
-import com.restaurant.entity.OrderItem;
 import com.restaurant.service.MenuItemService;
 import com.restaurant.service.RestaurantService;
-import com.restaurant.entity.OrderType;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
-import java.awt.event.HierarchyEvent;
+import java.awt.event.*;
 import java.sql.SQLException;
-import java.util.Arrays;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -31,6 +27,8 @@ public class MenuPanel extends JPanel {
     private final OrderSystemGUI frame;
     private final MenuItemService menuItemService;  //  新增
     private OrderType currentOrderType = OrderType.DINE_IN;
+    private final RestaurantService service;  // 🔧【新增】声明 service 成员变量
+    private final RestaurantController controller;  // 🔧 新增
 
     // UI 组件
     private JLabel tableNumberDisplay;
@@ -61,8 +59,10 @@ public class MenuPanel extends JPanel {
 
     public MenuPanel(OrderSystemGUI frame, RestaurantService service, RestaurantController controller, MenuItemService menuItemService, int menuType) {
         this.frame = frame;
+        this.service = service;           // 🔧【新增】赋值 service
         this.menuType = menuType;
         this.menuItemService = menuItemService;
+        this.controller=controller;
 
         // ===== 初始化主题颜色 =====
        setupThemeColors();
@@ -525,6 +525,7 @@ public class MenuPanel extends JPanel {
 
     /**
      * 刷新临时订单显示
+     * 🔧 核心：聚餐桌一键点餐使用特殊 Key 格式，普通点餐不显示分配餐桌列
      */
     public void refreshTemporaryOrderDisplay() {
         Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
@@ -539,8 +540,17 @@ public class MenuPanel extends JPanel {
             html.append("<th style='padding: 8px; text-align: left;'>菜品编号</th>");
             html.append("<th style='padding: 8px; text-align: left;'>菜品名称</th>");
             html.append("<th style='padding: 8px; text-align: center;'>数量</th>");
-            html.append("<th style='padding: 8px; text-align: right;'>单价(元)</th>");
-            html.append("<th style='padding: 8px; text-align: right;'>小计(元)</th>");
+
+            // 🔧【核心修改】只有聚餐桌 + 堂食才显示"分配餐桌"列
+            boolean isGroupedTable = isGroupedTable(currentTableNumber);
+            boolean showAssignedTable = (currentOrderType == OrderType.DINE_IN && isGroupedTable);
+
+            if (showAssignedTable) {
+                html.append("<th style='padding: 8px; text-align: left;'>分配餐桌</th>");
+            }
+
+            html.append("<th style='padding: 8px; text-align: right;'>单价 (元)</th>");
+            html.append("<th style='padding: 8px; text-align: right;'>小计 (元)</th>");
             html.append("</tr>");
 
             double[] totalAmount = {0.0};
@@ -548,23 +558,31 @@ public class MenuPanel extends JPanel {
             tempOrder.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(entry -> {
-                        String itemId = entry.getKey();
+                        String itemKey = entry.getKey();
                         int qty = entry.getValue();
 
-                        // 修复：优先通过全局方法查询完整菜品信息
+                        // 🔧【核心】解析特殊 Key 格式：A1[BATCH:13,14,15]
+                        String displayItemId = itemKey;
+                        String assignedTables = "";
+                        boolean isBatchOrder = false;
+
+                        if (itemKey.contains("[BATCH:")) {
+                            isBatchOrder = true;
+                            int batchStart = itemKey.indexOf("[BATCH:");
+                            displayItemId = itemKey.substring(0, batchStart);
+                            assignedTables = itemKey.substring(batchStart + 7, itemKey.length() - 1);
+                        }
+
+                        // 查询菜品信息（使用纯菜品编号）
                         String itemName = "（未知）";
                         double price = 0.0;
-
-                        // 方案1：直接通过frame全局查询（推荐）
-                        com.restaurant.entity.MenuItem item = frame.getMenuItemById(itemId);
+                        com.restaurant.entity.MenuItem item = frame.getMenuItemById(displayItemId);
                         if (item != null) {
                             itemName = item.getName();
                             price = item.getPrice();
-                        }
-                        // 方案2：作为后备，再尝试从当前菜单的menuItems查找
-                        else if (menuItems != null) {
+                        } else if (menuItems != null) {
                             for (com.restaurant.entity.MenuItem mi : menuItems) {
-                                if (itemId.equals(mi.getItemCode())) {
+                                if (displayItemId.equals(mi.getItemCode())) {
                                     itemName = mi.getName();
                                     price = mi.getPrice();
                                     break;
@@ -576,9 +594,31 @@ public class MenuPanel extends JPanel {
                         totalAmount[0] += subtotal;
 
                         html.append("<tr style='border-top: 1px solid #ddd;'>");
-                        html.append("<td style='padding: 8px;'>").append(itemId).append("</td>");
+                        html.append("<td style='padding: 8px;'>").append(displayItemId).append("</td>");
                         html.append("<td style='padding: 8px;'>").append(itemName).append("</td>");
-                        html.append("<td style='padding: 8px; text-align: center;'>").append(qty).append("</td>");
+
+                        // 🔧 数量列：显示"一键点餐"标签
+                        String quantityText = String.valueOf(qty);
+                        if (isBatchOrder) {
+                            quantityText += "<br><small style='color:#1976d2'>一键点餐</small>";
+                        }
+                        html.append("<td style='padding: 8px; text-align: center;'>").append(quantityText).append("</td>");
+
+                        // 🔧 分配餐桌列（仅聚餐桌 + 堂食显示）
+                        if (showAssignedTable) {
+                            if (isBatchOrder && !assignedTables.isEmpty()) {
+                                // 一键点餐：显示所有关联桌号
+                                html.append("<td style='padding: 8px; text-align: left; font-size: 12px; color: #1976d2;'>")
+                                        .append(assignedTables)
+                                        .append("</td>");
+                            } else {
+                                // 普通点餐：显示当前餐桌号
+                                html.append("<td style='padding: 8px; text-align: left; font-size: 12px; color: #999;'>")
+                                        .append(currentTableNumber)
+                                        .append("</td>");
+                            }
+                        }
+
                         html.append("<td style='padding: 8px; text-align: right;'>").append(String.format("%.2f", price)).append("</td>");
                         html.append("<td style='padding: 8px; text-align: right; font-weight: bold; color: #d32f2f;'>")
                                 .append(String.format("%.2f", subtotal)).append("</td>");
@@ -598,7 +638,6 @@ public class MenuPanel extends JPanel {
         html.append("</body></html>");
         temporaryHtmlDisplay.setText(html.toString());
     }
-
 
 
     public void refreshFormalOrderDisplay() {
@@ -637,7 +676,15 @@ public class MenuPanel extends JPanel {
         String htmlContent;
         if (currentOrderType == OrderType.DINE_IN) {
             // 堂食：使用 frame 的方法（顯示"未上桌/已上桌"）
-            htmlContent = frame.generateFormalOrderHtml(currentTableNumber, false);
+            // 🔧【核心修改】堂食：判断是否为聚餐桌 + 传入当前餐桌号
+            boolean isGrouped = isGroupedTable(currentTableNumber);
+//            htmlContent = frame.generateFormalOrderHtml(currentTableNumber, false);
+            htmlContent = frame.generateFormalOrderHtml(
+                    currentTableNumber,
+                    false,
+                    isGrouped,           // 🔧 是否聚餐桌
+                    currentTableNumber   // 🔧 当前餐桌显示ID（用于显示分配餐桌）
+            );
         } else {
             // 🔧 外賣/自取：使用已查詢的 items 數據，自己生成 HTML（顯示"製作中/製作完成"）
             htmlContent = generateTakeoutOrderHtml(items, false);
@@ -1060,29 +1107,53 @@ public class MenuPanel extends JPanel {
     }
 
     /**
-     * 显示点菜对话框（统一简化版 - 仅菜品选择）
-     * 📝 联系电话/配送地址在【确认下单】时收集，不在此处重复输入
+     * 显示点菜对话框（支持聚餐桌一键点餐 → 临时订单）
+     * 🔧 核心：聚餐桌一键点餐使用特殊 Key 格式，避免与普通点餐合并
+     * 特殊格式：A1[BATCH:13,14,15] 表示一键点餐，分配到 13,14,15 桌
      */
+
     private void showOrderDialog() {
         // ===== 1. 验证前置条件 =====
         if (currentOrderType == OrderType.DINE_IN) {
-            // 堂食模式：必须选择餐桌
             if (currentTableNumber == null || currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
                 JOptionPane.showMessageDialog(frame, "请先选择餐桌号！", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
         }
-        // 外卖模式：允许直接点菜，订单号由系统生成或后续输入
 
-        // ===== 2. 创建对话框 =====
+        // ===== 2. 检查是否为聚餐桌（包括：餐桌类型=GROUPED 或 预约类型=GROUP）=====
+        Tables currentTable = service.getTableById(currentTableNumber);
+        boolean isGroupedTable = (currentTable != null &&
+                currentTable.getTableType() == Tables.TableType.GROUPED);
+
+        // 🔧【新增】检查是否为预约订单的聚餐桌（通过 reservation_id 判断）
+        boolean isReservationGrouped = false;
+        if (!isGroupedTable && currentOrderType == OrderType.RESERVATION) {
+            try {
+                // 通过 reservation_id 查询 table_reservations 表
+                TableReservation reservation = controller.getReservationDetail(currentTableNumber);
+                if (reservation != null && "GROUP".equals(reservation.getGroupType())) {
+                    isReservationGrouped = true;
+                    System.out.println("🔧 检测到预约聚餐桌: reservationId=" + currentTableNumber +
+                            ", groupType=GROUP, tableConfig=" + reservation.getTableConfigDesc());
+                }
+            } catch (Exception e) {
+                System.err.println("查询预约详情失败: " + e.getMessage());
+            }
+        }
+
+        // 最终判断：餐桌是聚餐桌 或 预约是聚餐桌
+        boolean shouldShowBatchOption = isGroupedTable || isReservationGrouped;
+
+        // ===== 3. 创建对话框 =====
         JDialog dialog = new JDialog(frame, "点菜 - " + currentOrderType.getDisplayName(), true);
         dialog.setLayout(new BorderLayout(10, 10));
-        dialog.setSize(400, 200);
+        dialog.setSize(450, 300);
         dialog.setLocationRelativeTo(this);
         dialog.getContentPane().setBackground(backgroundColor);
 
-        // ===== 3. 表单面板（仅菜品信息）=====
-        JPanel formPanel = new JPanel(new GridLayout(2, 2, 8, 8));
+        // ===== 4. 表单面板 =====
+        JPanel formPanel = new JPanel(new GridLayout(3, 2, 8, 8));
         formPanel.setBorder(BorderFactory.createEmptyBorder(20, 25, 20, 25));
         formPanel.setBackground(backgroundColor);
 
@@ -1098,49 +1169,66 @@ public class MenuPanel extends JPanel {
         quantityField.setBackground(backgroundColor);
         formPanel.add(quantityField);
 
-        // ===== 4. 按钮面板 =====
+        // 🔧【修改】字段3：点餐方式（聚餐桌或预约聚餐桌都显示）
+        JPanel batchOrderPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        batchOrderPanel.setBackground(backgroundColor);
+        JCheckBox batchOrderCheck = new JCheckBox("一键点餐（所有聚餐桌都点）");
+        batchOrderCheck.setFont(new Font("Microsoft YaHei", Font.PLAIN, 13));
+        batchOrderCheck.setBackground(backgroundColor);
+        batchOrderCheck.setSelected(true);  // 默认勾选
+
+        boolean isForcedBatchOrder = isReservationGrouped;
+        if (isForcedBatchOrder) {
+            // 强制一键点餐：勾选且禁用
+            batchOrderCheck.setSelected(true);
+            batchOrderCheck.setEnabled(false);
+            batchOrderCheck.setToolTipText("预约聚餐桌必须使用一键点餐模式");
+            batchOrderPanel.add(new JLabel("🔒 "));  // 添加锁图标提示
+        }
+
+        batchOrderCheck.setVisible(shouldShowBatchOption);  // 🔧 修改：聚餐桌或预约聚餐桌（訂單）都显示
+        batchOrderPanel.add(batchOrderCheck);
+
+
+        if (shouldShowBatchOption) {  // 🔧 修改：条件判断
+            formPanel.add(new JLabel("点餐方式:"));
+            formPanel.add(batchOrderPanel);
+        }
+
+        // ===== 5. 按钮面板 =====
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
         buttonPanel.setBackground(backgroundColor);
-
-        //  关键：创建按钮后立即添加到 panel
-        JButton confirmBtn = createThemedButton("<html><b>✓</b>&nbsp;确认点菜</html> ", buttonBgColor);
+        JButton confirmBtn = createThemedButton("<html><b>✓</b>&nbsp;确认点菜</html>", buttonBgColor);
         JButton cancelBtn = createThemedButton("<html><b>✗</b>&nbsp;取消</html>", buttonBgColor);
-        buttonPanel.add(confirmBtn);  // ← 必须添加！
-        buttonPanel.add(cancelBtn);   // ← 必须添加！
+        buttonPanel.add(confirmBtn);
+        buttonPanel.add(cancelBtn);
 
-        // ===== 5. 实时验证：输入菜品编号后自动查询信息（完整版）=====
+        // ===== 6. 实时验证：输入菜品编号后自动查询信息 =====
         itemIdField.addFocusListener(new java.awt.event.FocusAdapter() {
             @Override
             public void focusLost(java.awt.event.FocusEvent e) {
                 String itemId = itemIdField.getText().trim().toUpperCase();
                 if (!itemId.isEmpty()) {
-                    // 通过注入的 Service 查询菜品（只读事务）
                     MenuItem item = menuItemService.getMenuItemByCode(itemId);
                     if (item != null && item.isActive()) {
-                        //  完整反馈：显示菜品名称和价格（临时提示，不占用表单空间）
                         String tooltip = String.format("%s - ¥%.2f", item.getName(), item.getPrice());
                         itemIdField.setToolTipText(tooltip);
-
-                        // 可选：在数量框旁显示简短提示（如需更强反馈可启用）
-                        // quantityField.setToolTipText("已验证: " + item.getName());
+                        itemIdField.setBorder(BorderFactory.createLineBorder(new Color(0, 150, 0), 1));
                     } else {
-                        //  完整反馈：明确告知用户菜品状态
                         String errorMsg = (item == null) ? "菜品不存在" : "菜品已售罄";
                         itemIdField.setToolTipText("❌ " + errorMsg);
-
-                        // 可选：高亮输入框提示错误
                         itemIdField.setBorder(BorderFactory.createLineBorder(Color.RED, 2));
-                        SwingUtilities.invokeLater(() -> {
-                            itemIdField.setBorder(BorderFactory.createLineBorder(backgroundColor, 1));
-                        });
                     }
+                    SwingUtilities.invokeLater(() -> {
+                        itemIdField.setBorder(BorderFactory.createLineBorder(backgroundColor, 1));
+                    });
                 } else {
                     itemIdField.setToolTipText(null);
                 }
             }
         });
 
-        // ===== 6. 确认按钮事件处理器（核心逻辑 - 完整版）=====
+        // ===== 7. 确认按钮事件处理器（🔧 核心修改：支持预约聚餐桌）=====
         confirmBtn.addActionListener(ev -> {
             String itemId = itemIdField.getText().trim().toUpperCase();
             String quantityStr = quantityField.getText().trim();
@@ -1154,7 +1242,6 @@ public class MenuPanel extends JPanel {
                 showError(dialog, "菜品编号格式错误（如 A1, B2）", itemIdField);
                 return;
             }
-            // 验证前缀匹配当前菜单
             String expectedPrefix = getPrefixForCurrentMenu();
             if (!itemId.startsWith(expectedPrefix)) {
                 showError(dialog, "当前菜单应为 '" + expectedPrefix + "' 开头", itemIdField);
@@ -1172,28 +1259,93 @@ public class MenuPanel extends JPanel {
                     return;
                 }
 
-                // === 验证菜品可用性（通过 Service）===
+                // === 验证菜品可用性 ===
                 MenuItem item = menuItemService.getMenuItemByCode(itemId);
                 if (item == null || !item.isActive()) {
                     showError(dialog, "菜品 " + itemId + " 不存在或已售罄", itemIdField);
                     return;
                 }
 
-                // === 添加到临时订单缓存（前端逻辑，保持不变）===
-                boolean success = frame.addTemporaryOrder(currentTableNumber, itemId, quantity);
+                // ═══════════════════════════════════════════════════════════
+                // 🔧【核心修改】聚餐桌点餐逻辑（支持餐桌类型和预约类型）
+                // ═══════════════════════════════════════════════════════════
+                boolean success;
+                if (shouldShowBatchOption && batchOrderCheck.isSelected()) {
+                    // 🔹 一键点餐：数量 = 单桌数量 × 桌子数，使用特殊 Key
+                    int tableCount;
+                    List<String> tableIds;
+
+                    if (isGroupedTable) {
+                        // 情况1：餐桌类型是 GROUPED
+                        tableCount = getGroupedTableCount(currentTableNumber);
+                        tableIds = getGroupedTableIds(currentTableNumber);
+                    } else {
+                        // 🔧 情况2：预约类型是 GROUP（通过 reservation_id 查询）
+                        TableReservation reservation = controller.getReservationDetail(currentTableNumber);
+                        if (reservation != null && "GROUP".equals(reservation.getGroupType())) {
+                            // 从 table_config_desc 解析桌子数量（如："6人桌 x3" → 3）
+                            String configDesc = reservation.getTableConfigDesc();
+                            tableCount = frame.parseTableCountFromConfig(configDesc);
+
+                            // 🔧 从 reserved_table_ids 获取桌号列表（如果已分配）
+                            String reservedTableIds = reservation.getReservedTableIds();
+                            if (reservedTableIds != null && !reservedTableIds.isEmpty()) {
+                                tableIds = Arrays.asList(reservedTableIds.split(","));
+                            } else {
+                                // 如果未分配具体桌号，使用预约号作为标识
+                                tableIds = Collections.singletonList(currentTableNumber);
+                            }
+
+                            System.out.println("🔧 预约聚餐桌点餐: tableCount=" + tableCount +
+                                    ", tableIds=" + tableIds);
+                        } else {
+                            // 兜底：默认1张桌子
+                            tableCount = 1;
+                            tableIds = Collections.singletonList(currentTableNumber);
+                        }
+                    }
+
+                    int totalQuantity = quantity * tableCount;
+
+                    // 🔧【关键】使用特殊格式：菜品编号[BATCH:桌号列表]
+                    String batchKey = itemId + "[BATCH:" + String.join(",", tableIds) + "]";
+
+                    success = frame.addTemporaryOrder(currentTableNumber, batchKey, totalQuantity);
+
+                    System.out.println("🔧 聚餐桌一键点餐 → 临时订单: " + batchKey + " × " + totalQuantity + "份");
+                } else {
+                    // 🔹 普通点餐 → 使用普通 Key
+                    success = frame.addTemporaryOrder(currentTableNumber, itemId, quantity);
+                }
 
                 if (success) {
-                    // 记录日志（开发调试用）
-                    System.out.println("临时订单: " + currentOrderType + " #" + currentTableNumber +
-                            " +" + quantity + "x" + itemId + " [" + item.getName() + "]");
-
                     // 成功反馈
-                    JOptionPane.showMessageDialog(dialog,
-                            "✓ 点菜成功！\n" + item.getName() + " x" + quantity + " @ ¥" + String.format("%.2f", item.getPrice()),
-                            "成功", JOptionPane.INFORMATION_MESSAGE);
+                    String msg;
+                    if (shouldShowBatchOption && batchOrderCheck.isSelected()) {
+                        // 🔧 一键点餐特殊提示
+                        int tableCount = isGroupedTable ?
+                                getGroupedTableCount(currentTableNumber) :
+                                frame.parseTableCountFromConfig(
+                                        controller.getReservationDetail(currentTableNumber) != null ?
+                                                controller.getReservationDetail(currentTableNumber).getTableConfigDesc() : null);
+
+                        msg = "<html><b>✓ 一键点餐成功！</b><br><br>" +
+                                "菜品: " + item.getName() + "<br>" +
+                                "单桌数量: <font color='#1976d2'>x" + quantity + "</font><br>" +
+                                "聚餐桌数: <font color='#1976d2'>" + tableCount + "桌</font><br>" +
+                                "<b>总计: " + (quantity * tableCount) + "份</b><br><br>" +
+                                "<font color='#d32f2f'>✅ 已添加到【临时订单】</font><br>" +
+                                "请点击底部【确认下单】按钮提交正式订单</html>";
+                    } else {
+                        msg = "<html><b>✓ 点菜成功！</b><br><br>" +
+                                item.getName() + " x" + quantity + "<br>" +
+                                "<font color='#d32f2f'>✅ 已添加到【临时订单】</font><br>" +
+                                "请点击底部【确认下单】按钮提交正式订单</html>";
+                    }
+                    JOptionPane.showMessageDialog(dialog, msg, "成功", JOptionPane.INFORMATION_MESSAGE);
                     dialog.dispose();
 
-                    // 刷新两个 Panel 的临时订单显示
+                    // 🔧 关键：刷新临时订单显示
                     refreshTemporaryOrderDisplay();
                     frame.refreshHomeTemporaryOrder();
                 } else {
@@ -1212,17 +1364,35 @@ public class MenuPanel extends JPanel {
         // ===== 取消按钮事件 =====
         cancelBtn.addActionListener(ev -> dialog.dispose());
 
-        // ===== 7. 组装对话框 =====
+        // ===== 8. 组装对话框 =====
         dialog.add(formPanel, BorderLayout.CENTER);
         dialog.add(buttonPanel, BorderLayout.SOUTH);
-
-        //  关键：显示前确保组件已添加
         dialog.setVisible(true);
 
-        // 可选：默认聚焦菜品编号输入框，提升用户体验
+        // 默认聚焦菜品编号输入框
         itemIdField.requestFocus();
     }
 
+
+
+
+    /**
+     * 🔧 获取聚餐桌的所有关联桌号列表
+     */
+    private List<String> getGroupedTableIds(String tableDisplayId) {
+        Tables table = service.getTableById(tableDisplayId);
+        List<String> tableIds = new ArrayList<>();
+        if (table != null && table.getGroupWith() != null) {
+            String[] groupIds = table.getGroupWith().split(",");
+            for (String id : groupIds) {
+                tableIds.add(id.trim());
+            }
+        }
+        if (tableIds.isEmpty()) {
+            tableIds.add(tableDisplayId);
+        }
+        return tableIds;
+    }
 
 
     /**
@@ -1237,66 +1407,73 @@ public class MenuPanel extends JPanel {
     }
 
     private void showCancelOrderDialog() {
-        // 1. 验证餐桌选择
-        if (currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
-            JOptionPane.showMessageDialog(this, "请先选择餐桌号", "提示", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
+    // 1. 验证餐桌选择
+    if (currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
+        JOptionPane.showMessageDialog(this, "请先选择餐桌号", "提示", JOptionPane.WARNING_MESSAGE);
+        return;
+    }
 
-        // 2. 获取当前餐桌的临时订单
-        Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
-        if (tempOrder == null || tempOrder.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "当前餐桌没有临时订单可以取消", "提示", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
+    // 2. 获取当前餐桌的临时订单
+    Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
+    if (tempOrder == null || tempOrder.isEmpty()) {
+        JOptionPane.showMessageDialog(this, "当前餐桌没有临时订单可以取消", "提示", JOptionPane.INFORMATION_MESSAGE);
+        return;
+    }
 
-        // 3. 创建取消点菜对话框
-        JDialog dialog = new JDialog(frame, "取消点菜", true);
-        dialog.setLayout(new BorderLayout(15, 15));
-        dialog.setSize(450, 220);
-        dialog.setLocationRelativeTo(this);
+    // 3. 创建取消点菜对话框
+    JDialog dialog = new JDialog(frame, "取消点菜", true);
+    dialog.setLayout(new BorderLayout(15, 15));
+    dialog.setSize(450, 220);
+    dialog.setLocationRelativeTo(this);
 
-        // 4. 构建菜品选择下拉框（显示：编号 - 名称 (当前数量)）
-        JPanel formPanel = new JPanel(new GridLayout(2, 2, 10, 10));
-        formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 10, 20));
+    // 4. 构建菜品选择下拉框（显示：编号 - 名称 (当前数量)）
+    JPanel formPanel = new JPanel(new GridLayout(2, 2, 10, 10));
+    formPanel.setBorder(BorderFactory.createEmptyBorder(20, 20, 10, 20));
 
-        JLabel itemLabel = new JLabel("选择菜品:");
-        JComboBox<String> itemComboBox = new JComboBox<>();
+    JLabel itemLabel = new JLabel("选择菜品:");
+    JComboBox<String> itemComboBox = new JComboBox<>();
 
-        // 填充下拉框选项
-        tempOrder.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> {
-                    String itemId = entry.getKey();
-                    int currentQty = entry.getValue();
-                    String itemName = "（未知）";
+    // 填充下拉框选项
+    tempOrder.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                String itemId = entry.getKey();
+                int currentQty = entry.getValue();
+                String itemName = "（未知）";
 
-                    // 尝试获取菜品名称
-                    com.restaurant.entity.MenuItem item = frame.getMenuItemById(itemId);
-                    if (item != null) {
-                        itemName = item.getName();
-                    }
+                // 🔧【修复】从 batchKey 提取纯菜品编号
+                String pureItemId = itemId;
+                if (itemId.contains("[BATCH:")) {
+                    pureItemId = itemId.substring(0, itemId.indexOf("[BATCH:"));
+                }
 
-                    itemComboBox.addItem(String.format("%s - %s (当前: %d 份)",
-                            itemId, itemName, currentQty));
-                });
+                // 尝试获取菜品名称
+                com.restaurant.entity.MenuItem item = frame.getMenuItemById(pureItemId);
+                if (item != null) {
+                    itemName = item.getName();
+                }
 
-        JLabel qtyLabel = new JLabel("取消数量:");
-        JTextField qtyField = new JTextField("1");
+                itemComboBox.addItem(String.format("%s - %s (当前: %d 份)",
+                        itemId, itemName, currentQty));
+            });
 
-        formPanel.add(itemLabel);
-        formPanel.add(itemComboBox);
-        formPanel.add(qtyLabel);
-        formPanel.add(qtyField);
+    JLabel qtyLabel = new JLabel("取消数量:");
+    JTextField qtyField = new JTextField("1");
 
-        // 5. 按钮面板
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
-        JButton confirmBtn = new JButton("确认取消");
-        JButton cancelBtn = new JButton("取消");
-        buttonPanel.add(confirmBtn);
-        buttonPanel.add(cancelBtn);
+    formPanel.add(itemLabel);
+    formPanel.add(itemComboBox);
+    formPanel.add(qtyLabel);
+    formPanel.add(qtyField);
 
-        // 6. 确认取消逻辑
+    // 5. 按钮面板
+    JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+    JButton confirmBtn = new JButton("确认取消");
+    JButton cancelBtn = new JButton("取消");
+    buttonPanel.add(confirmBtn);
+    buttonPanel.add(cancelBtn);
+
+    // 6. 确认取消逻辑
+// 6. 确认取消逻辑
         confirmBtn.addActionListener(ev -> {
             try {
                 // 解析选中的菜品
@@ -1306,8 +1483,14 @@ public class MenuPanel extends JPanel {
                     return;
                 }
 
-                // 提取菜品编号（格式: "A1 - 宫保鸡丁 (当前: 2 份)"）
-                String itemId = selectedItem.split(" - ")[0].trim().toUpperCase();
+                // 🔧【核心修复】提取菜品编号并处理 batchKey
+                String fullItemId = selectedItem.split(" - ")[0].trim().toUpperCase();
+
+                // 从 batchKey 中提取纯菜品编号（例如：B1[BATCH:13,14,15] → B1）
+                String pureItemId = fullItemId;
+                if (fullItemId.contains("[BATCH:")) {
+                    pureItemId = fullItemId.substring(0, fullItemId.indexOf("[BATCH:"));
+                }
 
                 // 验证数量
                 String qtyStr = qtyField.getText().trim();
@@ -1322,18 +1505,140 @@ public class MenuPanel extends JPanel {
                     return;
                 }
 
+                // 🔧【核心修复】聚餐桌/预约订单一键取消：取消数量需要乘以桌子数量
+                int actualCancelQty = cancelQty;
+                int tableCount = 1;
+                boolean isGroupedOrder = false; // 标记是否为聚餐桌/预约订单
+                List<String> tableIds = new ArrayList<>();
+
+                if (fullItemId.contains("[BATCH:")) {
+                    isGroupedOrder = true;
+
+                    // ═══════════════════════════════════════════════════════════
+                    // 🔧【核心修改】像 showOrderDialog 一样解析桌子数量
+                    // ═══════════════════════════════════════════════════════════
+
+                    // 情况1：检查是否为餐桌类型的聚餐桌（GROUPED）
+                    Tables currentTable = service.getTableById(currentTableNumber);
+                    boolean isGroupedTable = (currentTable != null &&
+                            currentTable.getTableType() == Tables.TableType.GROUPED);
+
+                    if (isGroupedTable) {
+                        // 从餐桌的 group_with 字段获取桌号列表
+                        if (currentTable.getGroupWith() != null) {
+                            String[] groupIds = currentTable.getGroupWith().split(",");
+                            for (String id : groupIds) {
+                                tableIds.add(id.trim());
+                            }
+                        }
+                        tableCount = tableIds.size();
+
+                        System.out.println("🔧 餐桌聚餐桌取消: tableCount=" + tableCount +
+                                ", groupWith=" + currentTable.getGroupWith());
+                    }
+                    // 情况2：检查是否为预约类型的聚餐桌（通过 reservation_id 查询）
+                    else if (currentOrderType == OrderType.RESERVATION) {
+                        try {
+                            TableReservation reservation = controller.getReservationDetail(currentTableNumber);
+                            if (reservation != null && "GROUP".equals(reservation.getGroupType())) {
+                                // 🔧【关键】从 table_config_desc 解析桌子数量（如："6人桌 x3" → 3）
+                                String configDesc = reservation.getTableConfigDesc();
+                                tableCount = frame.parseTableCountFromConfig(configDesc);
+
+                                // 🔧 从 reserved_table_ids 获取桌号列表（如果已分配）
+                                String reservedTableIds = reservation.getReservedTableIds();
+                                if (reservedTableIds != null && !reservedTableIds.isEmpty()) {
+                                    String[] ids = reservedTableIds.split(",");
+                                    for (String id : ids) {
+                                        tableIds.add(id.trim());
+                                    }
+                                } else {
+                                    // 如果未分配具体桌号，使用预约号作为标识
+                                    tableIds.add(currentTableNumber);
+                                }
+
+                                System.out.println("🔧 预约聚餐桌取消: tableCount=" + tableCount +
+                                        ", configDesc=" + configDesc +
+                                        ", tableIds=" + tableIds);
+                            } else {
+                                // 兜底：从 batchKey 解析桌号
+                                int batchStart = fullItemId.indexOf("[BATCH:");
+                                String tableIdsStr = fullItemId.substring(batchStart + 7, fullItemId.length() - 1);
+                                String[] ids = tableIdsStr.split(",");
+                                for (String id : ids) {
+                                    tableIds.add(id.trim());
+                                }
+                                tableCount = tableIds.size();
+                            }
+                        } catch (Exception e) {
+                            System.err.println("查询预约详情失败: " + e.getMessage());
+                            // 兜底：从 batchKey 解析
+                            int batchStart = fullItemId.indexOf("[BATCH:");
+                            String tableIdsStr = fullItemId.substring(batchStart + 7, fullItemId.length() - 1);
+                            String[] ids = tableIdsStr.split(",");
+                            for (String id : ids) {
+                                tableIds.add(id.trim());
+                            }
+                            tableCount = tableIds.size();
+                        }
+                    }
+                    // 情况3：兜底 - 从 batchKey 解析桌号
+                    else {
+                        int batchStart = fullItemId.indexOf("[BATCH:");
+                        String tableIdsStr = fullItemId.substring(batchStart + 7, fullItemId.length() - 1);
+                        String[] ids = tableIdsStr.split(",");
+                        for (String id : ids) {
+                            tableIds.add(id.trim());
+                        }
+                        tableCount = tableIds.size();
+                    }
+
+                    // 🔧【核心】聚餐桌：实际取消数量 = 用户输入 × 桌子数量
+                    actualCancelQty = cancelQty * tableCount;
+
+                    System.out.println("🔧 聚餐桌/预约订单取消: 用户输入=" + cancelQty +
+                            ", 桌子数量=" + tableCount +
+                            ", 实际取消=" + actualCancelQty + "份");
+                }
+
                 // 获取当前数量（双重验证）
-                int currentQty = tempOrder.getOrDefault(itemId, 0);
-                if (cancelQty > currentQty) {
-                    JOptionPane.showMessageDialog(dialog,
-                            String.format("取消数量不能超过当前数量！\n当前 %s 有 %d 份，您输入了 %d 份",
-                                    itemId, currentQty, cancelQty),
+                int currentQty = tempOrder.getOrDefault(fullItemId, 0);
+                if (actualCancelQty > currentQty) {
+                    String errorMsg = String.format("取消数量不能超过当前数量！\n当前 %s 有 %d 份，您输入了 %d 份",
+                            pureItemId, currentQty, actualCancelQty);
+
+                    if (isGroupedOrder) {
+                        errorMsg += String.format("\n\n💡 提示：聚餐桌模式，每桌取消 %d 份 × %d 张桌子 = 共 %d 份",
+                                cancelQty, tableCount, actualCancelQty);
+                    }
+
+                    JOptionPane.showMessageDialog(dialog, errorMsg,
                             "输入错误", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
 
-                // 7. 执行取消操作（核心：添加负数量）
-                frame.addTemporaryOrder(currentTableNumber, itemId, -cancelQty);
+                // 🔧【新增】聚餐桌/预约订单模式二次确认提示
+                if (isGroupedOrder) {
+                    int confirm = JOptionPane.showConfirmDialog(
+                            dialog,
+                            "<html><b>⚠️ 聚餐桌/预约订单模式提示</b><br><br>" +
+                                    "当前订单关联 <b>" + tableCount + "</b> 张桌子。<br>" +
+                                    "您输入的取消数量是 <b>" + cancelQty + "</b> 份/桌。<br>" +
+                                    "系统将总共取消 <b>" + actualCancelQty + "</b> 份<br>" +
+                                    "(计算方式：" + cancelQty + " × " + tableCount + ")<br><br>" +
+                                    "<font color='red'>是否确认在所有桌子上执行取消？</font></html>",
+                            "确认批量取消",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE
+                    );
+
+                    if (confirm != JOptionPane.YES_OPTION) {
+                        return; // 用户点击了"否"或关闭弹窗，终止操作
+                    }
+                }
+
+                // 7. 执行取消操作（使用实际取消数量）
+                frame.addTemporaryOrder(currentTableNumber, fullItemId, -actualCancelQty);
 
                 // 8. 刷新UI
                 refreshTemporaryOrderDisplay();          // 刷新当前MenuPanel
@@ -1341,9 +1646,14 @@ public class MenuPanel extends JPanel {
 
                 // 9. 关闭对话框并提示成功
                 dialog.dispose();
-                JOptionPane.showMessageDialog(frame,
-                        String.format("已取消 %s × %d 份", itemId, cancelQty),
-                        "成功", JOptionPane.INFORMATION_MESSAGE);
+
+                String successMsg = String.format(" 已取消 %s × %d 份", pureItemId, actualCancelQty);
+                if (isGroupedOrder) {
+                    successMsg += String.format("\n\n 详情：每桌取消 %d 份 × %d 张桌子", cancelQty, tableCount);
+                }
+
+                JOptionPane.showMessageDialog(frame, successMsg,
+                        "取消成功", JOptionPane.INFORMATION_MESSAGE);
 
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(dialog, "取消数量必须是有效整数", "输入错误", JOptionPane.ERROR_MESSAGE);
@@ -1353,12 +1663,12 @@ public class MenuPanel extends JPanel {
             }
         });
 
-        cancelBtn.addActionListener(ev -> dialog.dispose());
+    cancelBtn.addActionListener(ev -> dialog.dispose());
 
-        dialog.add(formPanel, BorderLayout.CENTER);
-        dialog.add(buttonPanel, BorderLayout.SOUTH);
-        dialog.setVisible(true);
-    }
+    dialog.add(formPanel, BorderLayout.CENTER);
+    dialog.add(buttonPanel, BorderLayout.SOUTH);
+    dialog.setVisible(true);
+}
 
     private void showRemoveItemDialog() {
         JDialog dialog = new JDialog(frame, "物理删除菜品 - " + getMenuTypeTitle(), true);
@@ -1578,4 +1888,28 @@ public class MenuPanel extends JPanel {
         dialog.add(btnPanel, BorderLayout.SOUTH);
         dialog.setVisible(true);
     }
+
+
+    /**
+     * 🔧 判断是否为聚餐桌
+     */
+    private boolean isGroupedTable(String tableDisplayId) {
+        if (tableDisplayId == null || service == null) return false;
+        Tables table = service.getTableById(tableDisplayId);
+        return table != null && table.getTableType() == Tables.TableType.GROUPED;
+    }
+
+    /**
+     * 获取聚餐桌的桌子数量
+     */
+    private int getGroupedTableCount(String tableDisplayId) {
+        Tables table = service.getTableById(tableDisplayId);
+        if (table == null || table.getGroupWith() == null) {
+            return 1;
+        }
+        String[] groupIds = table.getGroupWith().split(",");
+        return groupIds.length;
+    }
+
+
 }

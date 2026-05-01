@@ -131,9 +131,10 @@ public class Order {
      * @param itemsTotal 菜品总金额
      * @param deliveryFee 配送费
      */
-    public Order(Integer tableId, String orderType, Double itemsTotal, Double deliveryFee) {
+    public Order(Integer tableId, String orderNumber,String orderType, Double itemsTotal, Double deliveryFee) {
         this.tableId = tableId;
         this.orderType = orderType;
+        this.orderNumber = orderNumber;
         this.itemsTotal = itemsTotal != null ? itemsTotal : 0.0;
         this.deliveryFee = deliveryFee != null ? deliveryFee : 0.0;
         this.totalAmount = this.itemsTotal + this.deliveryFee;  // 自动计算
@@ -421,8 +422,7 @@ public class Order {
         return orderId != null ? orderId.hashCode() : 0;
     }
 
-    // Getter/Setter
-    // Getter/Setter
+
     public DeliveryStatus getDeliveryStatus() {
         return deliveryStatus;
     }

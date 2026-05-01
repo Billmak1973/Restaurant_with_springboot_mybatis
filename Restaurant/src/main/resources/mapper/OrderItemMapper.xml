@@ -3,49 +3,82 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.restaurant.mapper.OrderItemMapper">
 
+    <!-- ⃣ 先定义 ResultMap -->
+    <resultMap id="OrderItemResult" type="OrderItem" autoMapping="true">
+        <id property="orderItemId" column="order_item_id"/>
+        <result property="assignedTableDisplayId" column="assigned_table_display_id"/>
+        <result property="servedTableDisplayId" column="served_table_display_id"/>
+    </resultMap>
     <!-- ===== 批量插入 ===== -->
 
     <!-- 1. addOrderItems -->
     <insert id="addOrderItems">
         INSERT INTO order_items (
-        order_id,
-        item_id,
-        quantity,
-        served_quantity,
-        status,
-        price_at_order
+        order_id, item_id, quantity, served_quantity,
+        status, price_at_order, assigned_table_display_id, quantity_distribution
         ) VALUES
         <foreach collection="items" item="item" separator=",">
             (
-            #{orderId},
-            #{item.itemId},
-            #{item.quantity},
-            0,
-            'UNSERVED',
-            #{item.priceAtOrder}
+            #{orderId}, #{item.itemId}, #{item.quantity}, 0,
+            'UNSERVED', #{item.priceAtOrder}, #{item.assignedTableDisplayId}, #{item.quantityDistribution}
             )
         </foreach>
     </insert>
 
     <!-- ===== 合并订单项 ===== -->
-
     <update id="updateExistingOrderItems">
         <foreach collection="items" item="item" separator=";">
             UPDATE order_items oi
             JOIN menu_items mi ON oi.item_id = mi.item_id
             SET
             oi.quantity = oi.quantity + #{item.quantity},
-            <!-- 状态自动计算：新数量 = 已上菜 → SERVED；否则 → PARTIALLY_SERVED -->
             oi.status = CASE
             WHEN oi.served_quantity = (oi.quantity + #{item.quantity}) THEN 'SERVED'
-            WHEN oi.served_quantity &gt; 0 THEN 'PARTIALLY_SERVED'
+            WHEN oi.served_quantity > 0 THEN 'PARTIALLY_SERVED'
             ELSE 'UNSERVED'
             END,
             oi.price_at_order = #{item.priceAtOrder}
+            <if test="item.quantityDistribution != null and item.quantityDistribution != ''">
+                , oi.quantity_distribution = #{item.quantityDistribution, jdbcType=VARCHAR}
+            </if>
             WHERE oi.order_id = #{orderId}
             AND mi.item_code = #{item.itemCode}
+            <!-- 新增：精确匹配 assigned_table_display_id -->
+            <choose>
+                <when test="item.assignedTableDisplayId != null and item.assignedTableDisplayId != ''">
+                    AND oi.assigned_table_display_id = #{item.assignedTableDisplayId}
+                </when>
+                <otherwise>
+                    AND oi.assigned_table_display_id IS NULL
+                </otherwise>
+            </choose>
         </foreach>
     </update>
+<!--    <update id="updateExistingOrderItems">-->
+<!--        <foreach collection="items" item="item" separator=";">-->
+<!--            UPDATE order_items oi-->
+<!--            JOIN menu_items mi ON oi.item_id = mi.item_id-->
+<!--            SET-->
+<!--            oi.quantity = oi.quantity + #{item.quantity},-->
+<!--            oi.status = CASE-->
+<!--            WHEN oi.served_quantity = (oi.quantity + #{item.quantity}) THEN 'SERVED'-->
+<!--            WHEN oi.served_quantity > 0 THEN 'PARTIALLY_SERVED'-->
+<!--            ELSE 'UNSERVED'-->
+<!--            END,-->
+<!--            oi.price_at_order = #{item.priceAtOrder}-->
+<!--            WHERE oi.order_id = #{orderId}-->
+<!--            AND mi.item_code = #{item.itemCode}-->
+<!--            &lt;!&ndash;  新增：精确匹配 assigned_table_display_id &ndash;&gt;-->
+<!--            <choose>-->
+<!--                <when test="item.assignedTableDisplayId != null and item.assignedTableDisplayId != ''">-->
+<!--                    AND oi.assigned_table_display_id = #{item.assignedTableDisplayId}-->
+<!--                </when>-->
+<!--                <otherwise>-->
+<!--                    AND oi.assigned_table_display_id IS NULL-->
+<!--                </otherwise>-->
+<!--            </choose>-->
+<!--        </foreach>-->
+<!--    </update>-->
 
 
     <insert id="insertNewOrderItems">
@@ -56,7 +89,9 @@
             quantity,
             served_quantity,
             status,
-            price_at_order
+            price_at_order,
+            assigned_table_display_id,
+            quantity_distribution  <!-- 🔧 新增字段 -->
             )
             SELECT
             #{orderId},
@@ -64,7 +99,9 @@
             #{item.quantity},
             0,
             'UNSERVED',
-            #{item.priceAtOrder}
+            #{item.priceAtOrder},
+            #{item.assignedTableDisplayId},
+            #{item.quantityDistribution, jdbcType=VARCHAR}  <!-- 🔧 新增字段 -->
             FROM menu_items mi
             WHERE mi.item_code = #{item.itemCode}
         </foreach>
@@ -134,16 +171,18 @@
         served_quantity = quantity,
         status = 'SERVED'
         WHERE order_id = #{orderId}
-        AND status IN ('UNSERVED', 'PARTIALLY_SERVED')
+        AND status IN ('UNSERVED', 'PARTIALLY_SERVED','PREPARED')
     </update>
 
     <!-- 9. hasUnservedItems -->
     <select id="hasUnservedItems" resultType="boolean">
         SELECT EXISTS(
-        SELECT 1
-        FROM order_items
+        SELECT 1 FROM order_items
         WHERE order_id = #{orderId}
-        AND served_quantity &lt; quantity
+        AND (
+        served_quantity &lt; quantity  -- 数量未满
+        OR status IN ('PREPARING', 'PREPARED')  -- 🔧 或状态是准备中
+        )
         )
     </select>
 
@@ -219,16 +258,19 @@
         WHERE order_id = #{orderId}
     </select>
 
+
     <select id="getExistingItemQuantitiesRaw" resultType="java.util.Map">
         SELECT
+        oi.order_item_id AS orderItemId,
         mi.item_code AS itemCode,
         oi.quantity AS quantity,
-        oi.served_quantity AS servedQuantity,  <!-- 🔧 新增：已上桌数量 -->
-        oi.status AS status                     <!-- 🔧 新增：当前状态 -->
+        oi.served_quantity AS servedQuantity,
+        oi.status AS status,
+        oi.assigned_table_display_id AS assignedTableDisplayId, <!-- 🔧 新增这行 -->
+        oi.quantity_distribution AS quantityDistribution  <!-- 🔧 新增：查询 distribution -->
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
         WHERE oi.order_id = #{orderId}
-        <!-- 🔧 利用状态索引优化查询 -->
         <if test="status != null">
             AND oi.status = #{status}
         </if>
@@ -281,4 +323,240 @@
             WHERE mi.item_code = #{item.itemCode}
         </foreach>
     </insert>
+
+    <update id="updateServedById">
+        UPDATE order_items
+        SET served_quantity = #{served},
+        status = #{status}
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <select id="findOrderItemByAssignedTableAndItemId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_id,
+        oi.quantity,
+        oi.served_quantity,
+        oi.status,
+        oi.price_at_order,
+        oi.assigned_table_display_id,
+        oi.quantity_distribution,
+        mi.item_code,
+        mi.name AS item_name
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.item_id = #{itemId}
+        <choose>
+            <when test="assignedTableDisplayId != null and assignedTableDisplayId != ''">
+                AND oi.assigned_table_display_id = #{assignedTableDisplayId}
+            </when>
+            <otherwise>
+                AND oi.assigned_table_display_id IS NULL
+            </otherwise>
+        </choose>
+        AND oi.status IN ('UNSERVED', 'PARTIALLY_SERVED', 'PREPARED')
+        LIMIT 1
+    </select>
+
+
+    <!-- 🔧 聚餐桌專用：同時更新三個字段 -->
+    <update id="updateServedWithTableInfo">
+        UPDATE order_items
+        SET
+        served_quantity = #{newServedQuantity},
+        status = #{newStatus},
+        served_table_display_id = #{newServedTableIds}
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <!-- 根据订单ID查询订单明细 -->
+    <select id="findOrderItemsByOrderId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id, oi.order_id, oi.item_id,
+        oi.quantity, oi.served_quantity, oi.status,
+        oi.price_at_order,
+        mi.item_code, mi.name AS item_name
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_id = #{orderId}
+        ORDER BY oi.order_item_id ASC
+    </select>
+
+    <select id="fetchServingStatusByOrderItem" resultType="OrderItemServingStatus">
+        SELECT quantity, served_quantity
+        FROM order_items
+        WHERE order_id = #{orderId} AND item_id = #{itemId}
+        LIMIT 1  <!-- 🔧 添加 LIMIT 1 防止返回多条 -->
+    </select>
+
+    <update id="updatePreparedQuantity">
+        UPDATE order_items
+        SET
+        prepared_quantity = #{preparedQuantity},
+        status = #{newStatus}
+        WHERE order_item_id = #{orderItemId}  <!-- 🔧 新增：精确匹配主键 -->
+        <!-- 下面的条件其实可以保留作为防御性编程，或者去掉，因为 order_item_id 已经唯一了 -->
+        AND order_id = #{orderId}
+        AND item_id = #{itemId}
+    </update>
+
+
+    <!--聚餐桌共享菜品模糊匹配查询 -->
+    <select id="findSharedOrderItemByFuzzyTableId" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id, oi.item_id, oi.quantity, oi.served_quantity,
+        oi.prepared_quantity, oi.status, oi.price_at_order,
+        oi.assigned_table_display_id, oi.served_table_display_id,
+        oi.quantity_distribution,  <!-- 🔧 新增 -->
+        mi.item_code, mi.name AS item_name
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.item_id = #{itemId}
+        AND FIND_IN_SET(#{tableDisplayId}, oi.assigned_table_display_id)
+        AND oi.status IN ('UNSERVED', 'PARTIALLY_SERVED', 'PREPARED')
+        LIMIT 1
+    </select>
+
+    <update id="updateExistingOrderItemsForGroupedTable">
+        <foreach collection="items" item="item" separator=";">
+            UPDATE order_items oi
+            JOIN menu_items mi ON oi.item_id = mi.item_id
+            SET
+            oi.quantity = oi.quantity + #{item.quantity},
+            oi.status = CASE
+            WHEN oi.served_quantity = (oi.quantity + #{item.quantity}) THEN 'SERVED'
+            WHEN oi.served_quantity > 0 THEN 'PARTIALLY_SERVED'
+            ELSE oi.status
+            END,
+            oi.price_at_order = #{item.priceAtOrder},
+            <!-- 🔧 新增：仅当传入的 distribution 不为空时才更新 -->
+            <if test="item.quantityDistribution != null and item.quantityDistribution != ''">
+                oi.quantity_distribution = #{item.quantityDistribution},
+            </if>
+            oi.quantity_distribution = CASE
+            WHEN #{item.quantityDistribution} IS NOT NULL AND #{item.quantityDistribution} != ''
+            THEN #{item.quantityDistribution}
+            ELSE oi.quantity_distribution
+            END
+            WHERE oi.order_id = #{orderId}
+            AND mi.item_code = #{item.itemCode}
+            <choose>
+                <when test="item.assignedTableDisplayId != null and item.assignedTableDisplayId != ''">
+                    AND oi.assigned_table_display_id = #{item.assignedTableDisplayId}
+                </when>
+                <otherwise>
+                    AND (oi.assigned_table_display_id IS NULL OR oi.assigned_table_display_id = '')
+                </otherwise>
+            </choose>
+            AND oi.status IN ('UNSERVED', 'PREPARING', 'PREPARED')
+        </foreach>
+    </update>
+
+    <select id="selectByPrimaryKey" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id,
+        oi.order_id,
+        oi.item_id,
+        oi.quantity,
+        oi.served_quantity,
+        oi.prepared_quantity,
+        oi.status,
+        oi.price_at_order,
+        oi.assigned_table_display_id,
+        oi.served_table_display_id,
+        oi.quantity_distribution,
+        mi.item_code,
+        mi.name AS item_name
+        FROM order_items oi
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        WHERE oi.order_item_id = #{orderItemId}
+    </select>
+
+    <update id="updatePreparedQuantityById">
+        UPDATE order_items
+        SET
+        prepared_quantity = #{preparedQuantity},
+        status = #{newStatus}
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+<!--    SSOT (Single Source of Truth) 原則。-->
+    <update id="cancelGroupedTableOrderItemByOrderItemId">
+        UPDATE order_items oi
+        JOIN (
+        SELECT
+        order_item_id,
+        <!-- 📦 舊值快照（供字串清理使用） -->
+        quantity AS old_quantity,
+        served_quantity AS old_served_quantity,
+        served_table_display_id AS old_served_table_display_id,
+        assigned_table_display_id AS old_assigned_table_display_id,
+
+        <!-- 📦 新值計算（供欄位與狀態更新使用） -->
+        (quantity - 1) AS new_quantity,
+        CASE
+        WHEN served_table_display_id IS NOT NULL
+        AND FIND_IN_SET(#{tableDisplayId}, served_table_display_id) > 0
+        THEN GREATEST(0, served_quantity - 1)
+        ELSE served_quantity
+        END AS new_served_quantity
+        FROM order_items
+        WHERE order_item_id = #{orderItemId}
+        ) calc ON oi.order_item_id = calc.order_item_id
+        SET
+        <!-- 1️⃣ 數值層：直接寫入新值 -->
+        oi.quantity = calc.new_quantity,
+        oi.served_quantity = calc.new_served_quantity,
+
+        <!-- 2️⃣ 狀態層：緊接其後，純新值對比（零污染） -->
+        oi.status = CASE
+        WHEN calc.new_served_quantity = 0 THEN 'UNSERVED'
+        WHEN calc.new_served_quantity = calc.new_quantity THEN 'SERVED'
+        ELSE 'PARTIALLY_SERVED'
+        END,
+
+        <!-- 3️⃣ 字串層：基於舊值快照進行清理 -->
+        oi.assigned_table_display_id = NULLIF(
+        TRIM(BOTH ',' FROM REPLACE(CONCAT(',', calc.old_assigned_table_display_id, ','), CONCAT(',', #{tableDisplayId}, ','), ',')),
+        ''
+        ),
+        oi.served_table_display_id = NULLIF(
+        TRIM(BOTH ',' FROM REPLACE(CONCAT(',', calc.old_served_table_display_id, ','), CONCAT(',', #{tableDisplayId}, ','), ',')),
+        ''
+        )
+        WHERE oi.quantity > 0
+        AND oi.quantity_distribution IS NULL
+    </update>
+
+    <update id="updateGroupedOrderItemWithDistribution">
+        UPDATE order_items
+        SET
+        quantity = #{newQuantity},
+        status = #{newStatus},
+        <!-- 🔧 防御式：传 null 时保持原值，避免误清空 -->
+        quantity_distribution =
+        CASE WHEN #{newDistribution} IS NULL THEN quantity_distribution ELSE #{newDistribution} END,
+        assigned_table_display_id =
+        CASE WHEN #{newAssignedTableIds} IS NULL THEN assigned_table_display_id ELSE #{newAssignedTableIds} END
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <!-- 🔧 根据主键删除订单项（总数量≤0 时使用）-->
+    <delete id="deleteOrderItemByOrderItemId">
+        DELETE FROM order_items
+        WHERE order_item_id = #{orderItemId}
+    </delete>
+
+    <!-- 🔧 聚餐桌手動指定菜品：嚴格根據4個字段更新上菜狀態 -->
+    <update id="updateServedByExactMatch">
+        UPDATE order_items
+        SET served_quantity = #{newServedQuantity},
+        status = #{newStatus}
+        WHERE order_item_id = #{orderItemId}
+        AND order_id = #{orderId}
+        AND item_id = #{itemId}
+        AND assigned_table_display_id = #{assignedTableDisplayId}
+    </update>
+
 </mapper>

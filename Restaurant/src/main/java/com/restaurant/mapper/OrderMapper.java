@@ -413,4 +413,67 @@ public interface OrderMapper {
             @Param("status") String newStatus,
             @Param("oldStatus") String oldStatus
     );
+
+    // 在 OrderMapper.java 中找到 getNextOrderNumber 方法，添加 orderType 参数
+    Integer getNextOrderNumber(
+            @Param("prefix") String prefix,
+            @Param("dateStr") String dateStr,
+            @Param("deliveryMethod") String deliveryMethod,
+            @Param("orderType") String orderType  // 🔧 新增参数
+    );
+
+    /**
+     * 根据餐桌ID和订单状态查找订单
+     */
+    Order findOrderByTableIdAndStatus(@Param("tableId") int tableId, @Param("status") String status);
+
+    /**
+     * 同时更新订单状态+items_total+total_amount
+     */
+    int updateOrderStatusAndTotals(
+            @Param("orderId") int orderId,
+            @Param("status") String status,
+            @Param("itemsTotal") Double itemsTotal,
+            @Param("totalAmount") Double totalAmount
+    );
+    /**
+     * 根据预约ID清空订单的餐桌ID（释放餐桌时使用）
+     * @param reservationId 预约ID
+     * @return 影响行数
+     */
+    int clearTableIdByReservationId(@Param("reservationId") String reservationId);
+
+    Integer findOrderIdByTableIdAndStatus(
+            @Param("tableId") int tableId,
+            @Param("status") String status
+    );
+
+    /**
+     * 根据多个餐桌显示ID查询订单明细（支持聚餐桌）
+     * @param tableDisplayIds 餐桌显示ID列表
+     * @return OrderItem 列表
+     */
+    List<OrderItem> findOrderItemsByTableDisplayIds(@Param("tableDisplayIds") List<String> tableDisplayIds);
+
+    /**
+     * 根据餐桌ID查询任意状态的订单ID
+     * @param tableId 餐桌ID
+     * @return 订单ID，不存在返回 null
+     */
+    Integer findOrderIdByTableId(@Param("tableId") int tableId);
+
+
+    /**
+     * 🔧 根据 reservation_id 查询订单 ID（预约订单专用）
+     * @param reservationId 预约号
+     * @return 订单 ID，不存在返回 null
+     */
+    Integer findOrderIdByReservationId(@Param("reservationId") String reservationId);
+
+    /**
+     * 🔧 根据 reservation_id 查询活跃订单 ID（预约订单专用）
+     * @param reservationId 预约号
+     * @return 订单 ID，不存在返回 null
+     */
+    Integer findActiveOrderIdByReservationId(@Param("reservationId") String reservationId);
 }

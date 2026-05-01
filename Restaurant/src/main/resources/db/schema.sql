@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS table_reservations (
     customer_name VARCHAR(50) NOT NULL COMMENT '客人姓名',
     customer_phone VARCHAR(20) NOT NULL COMMENT '客人电话',
     reservation_time DATETIME NOT NULL COMMENT '预定入座时间',
+    rescheduled_time DATETIME NULL COMMENT '延迟/改期后的新预约时间（原 reservation_time 无效时使用）',
     table_count INT NOT NULL COMMENT '预定桌子数量',
     table_config_desc VARCHAR(100) NOT NULL COMMENT '桌子配置描述',
     group_type ENUM('MAIN', 'MERGED', 'GROUP') DEFAULT 'MAIN' COMMENT '餐桌类型',
@@ -227,9 +228,13 @@ CREATE TABLE IF NOT EXISTS order_items (
                                            item_id INT NOT NULL COMMENT '菜品 ID',
                                            quantity INT NOT NULL DEFAULT 1 COMMENT '总数量',
                                            served_quantity INT NOT NULL DEFAULT 0 COMMENT '已上菜数量',
+                                           prepared_quantity INT NOT NULL DEFAULT 0 COMMENT '已准备数量',
                                            status ENUM('UNSERVED','PREPARING', 'PREPARED', 'PARTIALLY_SERVED', 'SERVED') DEFAULT 'UNSERVED' COMMENT '上菜状态',
     price_at_order DECIMAL(8,2) NOT NULL COMMENT '下单时价格',
-
+    assigned_table_display_id VARCHAR(10) NULL COMMENT '分配的餐桌显示ID',
+    served_table_display_id VARCHAR(50) NULL COMMENT '实际上菜的餐桌ID列表（如 "16,17"）',
+    -- 🔧 新增：聚餐桌数量分布记录 (JSON 格式)
+    quantity_distribution JSON NULL COMMENT '各桌分配数量分布，如 {"13":4,"14":4,"15":3,"16":4}',
     FOREIGN KEY (order_id) REFERENCES table_orders(order_id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES menu_items(item_id) ON DELETE RESTRICT,
 
@@ -237,7 +242,6 @@ CREATE TABLE IF NOT EXISTS order_items (
     INDEX idx_item_id (item_id),
     INDEX idx_status (status)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细';
-
 
 
 CREATE TABLE IF NOT EXISTS order_cancellations (

@@ -80,4 +80,21 @@ public interface TableReservationMapper {
      */
     int updatePreOrderFlag(@Param("reservationId") String reservationId,
                            @Param("preOrder") boolean preOrder);
+
+    /**
+     * 🔧 延迟预约专用更新方法（新增 newConfigDesc 和 tableSelectionMode 参数）
+     * @param releaseTables 是否释放餐桌（清空 table_config_desc 和 reserved_table_ids）
+     */
+    int updateReservationForDelay(@Param("reservationId") String reservationId,
+                                  @Param("newTime") LocalDateTime newTime,
+                                  @Param("newStatus") String newStatus,
+                                  @Param("within15h") Boolean within15h,
+                                  @Param("newConfigDesc") String newConfigDesc,
+                                  @Param("tableSelectionMode") String tableSelectionMode,  // 🔧 新增
+                                  @Param("releaseTables") boolean releaseTables);
+
+    /**
+     * 🔧 根据 reservation_id 查询预付信息
+     */
+    Map<String, Object> findPrepaidInfoByReservationId(@Param("reservationId") String reservationId);
 }

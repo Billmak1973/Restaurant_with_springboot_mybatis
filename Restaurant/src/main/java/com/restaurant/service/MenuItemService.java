@@ -86,7 +86,6 @@ public class MenuItemService {
         return result > 0;
     }
 
-    // ===== MenuItemService.java 新增方法 =====
     /**
      * 根据菜品编号更新价格
      * @param itemCode 菜品编号（如 "A1"）

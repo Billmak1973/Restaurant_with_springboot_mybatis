@@ -44,7 +44,7 @@
         SELECT reservation_id
         FROM table_reservations
         WHERE FIND_IN_SET(#{tableId}, reserved_table_ids)
-        AND status = 'CONFIRMED'
+        AND status IN ('CONFIRMED', 'DELAYED')  <!-- 支持两种状态 -->
         ORDER BY reservation_time DESC
         LIMIT 1
     </select>
@@ -73,30 +73,30 @@
         SELECT
         reservation_id,
         reservation_time,
+        rescheduled_time,  <!-- 🔧 新增：延迟后的时间 -->
         within_15h,
         customer_name,
         customer_phone,
         table_selection_mode,
         table_config_desc,
         group_type,
-        status  <!-- 🔧 新增：返回状态字段，方便前端区分颜色 -->
+        status
         FROM table_reservations
-        WHERE status IN ('PRE_CONFIRMED', 'DELAYED')  <!-- 🔧 核心修改：只显示待确认/延迟 -->
+        WHERE status IN ('PRE_CONFIRMED', 'DELAYED')
+        AND table_selection_mode = 'QUANTITY'
         ORDER BY
-        -- 🔧 优先级排序：1.5小时内优先 → 时间早的优先
-        CASE
-        WHEN within_15h = 1 THEN 0
-        ELSE 1
-        END,
+        CASE WHEN within_15h = 1 THEN 0 ELSE 1 END,
         reservation_time ASC
     </select>
 
+    <!-- 在 findDetailById 等查询中添加 rescheduled_time 字段 -->
     <select id="findDetailById" resultType="TableReservation">
         SELECT
         reservation_id,
         customer_name,
         customer_phone,
         reservation_time,
+        rescheduled_time,  <!-- 🔧 新增：返回延迟时间 -->
         table_count,
         table_config_desc,
         group_type,
@@ -105,7 +105,7 @@
         manual_table_numbers,
         status,
         within_15h,
-        pre_order AS preOrder,  <!-- 🔧 添加别名，强制映射 -->
+        pre_order AS preOrder,
         is_prepaid AS isPrepaid,
         prepaid_amount AS prepaidAmount,
         notes,
@@ -163,7 +163,7 @@
         notes
         FROM table_reservations
         WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
-        AND status = 'PRE_CONFIRMED'
+        AND status IN ('PRE_CONFIRMED', 'DELAYED')
         ORDER BY reservation_time DESC
     </select>
 
@@ -180,7 +180,7 @@
         notes
         FROM table_reservations
         WHERE customer_phone LIKE CONCAT('%', #{phoneLast4})
-        AND status = 'PRE_CONFIRMED'
+        AND status IN ('PRE_CONFIRMED', 'DELAYED')
         ORDER BY reservation_time DESC
     </select>
 
@@ -207,7 +207,8 @@
         created_at
         FROM table_reservations
         WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
-        AND status = 'PRE_CONFIRMED'
+<!--        AND status = 'PRE_CONFIRMED'-->
+        AND status IN ('PRE_CONFIRMED', 'CONFIRMED')
         ORDER BY reservation_time DESC
     </select>
 
@@ -302,4 +303,30 @@
         SET pre_order = #{preOrder}
         WHERE reservation_id = #{reservationId}
     </update>
+
+    <!-- 🔧 延迟预约：更新预约时间 + 状态 + within_15h + 餐桌配置 + 可选清空餐桌关联 -->
+    <update id="updateReservationForDelay">
+        UPDATE table_reservations
+        SET
+        rescheduled_time = #{newTime},
+        status = #{newStatus},
+        within_15h = #{within15h},
+        table_config_desc = #{newConfigDesc},  <!-- 🔧 新增：更新配置描述 -->
+        <!-- 🔧 如果释放餐桌，清空关联字段 -->
+        <if test="releaseTables">
+            reserved_table_ids = NULL,
+            table_selection_mode = #{tableSelectionMode}  <!-- 🔧 新增：更新选择模式 -->
+        </if>
+        WHERE reservation_id = #{reservationId}
+    </update>
+
+    <!-- 🔧 根据 reservation_id 查询预付信息 -->
+    <select id="findPrepaidInfoByReservationId" resultType="java.util.Map">
+        SELECT
+        is_prepaid,
+        prepaid_amount
+        FROM table_reservations
+        WHERE reservation_id = #{reservationId}
+    </select>
+
 </mapper>

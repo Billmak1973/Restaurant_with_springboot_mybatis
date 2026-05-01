@@ -335,28 +335,24 @@
 
 
     <!-- findOrderItemsByTableDisplayId 查询 - 列名必须与属性名对应 -->
+    <!-- 现有的单个餐桌查询 -->
     <select id="findOrderItemsByTableDisplayId" resultMap="OrderItemResult">
         SELECT
-        oi.order_item_id,      <!-- → orderItemId (id) -->
-        oi.order_id,           <!-- → orderId (auto) -->
-        oi.item_id,            <!-- → itemId (auto) -->
-        oi.quantity,           <!-- → quantity (auto) -->
-        oi.served_quantity,    <!-- → servedQuantity (auto) -->
-        oi.status,             <!-- → status (auto) -->
-        oi.price_at_order,     <!-- → priceAtOrder (auto) -->
-        mi.item_code,          <!-- → itemCode (auto) -->
-        mi.name AS item_name   <!-- → itemName (auto, 注意 AS 别名) -->
+        oi.order_item_id, oi.order_id, oi.item_id,
+        oi.quantity, oi.served_quantity,oi.prepared_quantity,oi.status,
+        oi.price_at_order,
+        oi.assigned_table_display_id,
+        oi.served_table_display_id,  <!-- 🔧 新增 -->
+        oi.quantity_distribution,  <!-- 🔧 新增這一行 -->
+        mi.item_code, mi.name AS item_name
         FROM table_orders o
         JOIN order_items oi ON o.order_id = oi.order_id
         JOIN menu_items mi ON oi.item_id = mi.item_id
         JOIN restaurant_tables t ON o.table_id = t.table_id
         WHERE t.display_id = #{displayId}
         AND o.status = 'ORDERED'
-        ORDER BY oi.order_item_id ASC
+        ORDER BY oi.assigned_table_display_id, oi.order_item_id ASC
     </select>
-
-
-    <!-- com.restaurant.mapper.OrderMapper.xml -->
 
     <!-- ===== 修正后的 OrderItemResult：纯 Setter 映射 ===== -->
     <resultMap id="OrderItemResult" type="OrderItem" autoMapping="true">
@@ -376,7 +372,6 @@
     </resultMap>
 
 
-    <!-- ===== com.restaurant.mapper.OrderMapper.xml ===== -->
     <!-- 查询堂食订单 - 显示餐桌号和订单状态 -->
     <select id="findDineInOrders" resultType="java.util.Map">
         SELECT
@@ -460,6 +455,7 @@
 
 
     <!-- 新增：获取下一个外卖订单序号（格式：P-20260305-001） -->
+    <!-- 在 OrderMapper.xml 中找到 getNextOrderNumber，修改为支持堂食 -->
     <select id="getNextOrderNumber" resultType="java.lang.Integer">
         SELECT COALESCE(
         MAX(CAST(SUBSTRING_INDEX(order_number, '-', -1) AS UNSIGNED)),
@@ -467,11 +463,14 @@
         ) + 1
         FROM table_orders
         WHERE order_number LIKE CONCAT(#{prefix}, '-', #{dateStr}, '-%')
-        AND order_type = 'TAKEOUT'
+        <if test="orderType != null">
+            AND order_type = #{orderType}
+        </if>
         <if test="deliveryMethod != null">
             AND delivery_method = #{deliveryMethod}
         </if>
     </select>
+
 
 
     <!-- 在 OrderMapper.xml 末尾添加 -->
@@ -504,15 +503,13 @@
     <!-- 根据订单ID查询订单明细 -->
     <select id="findOrderItemsByOrderId" resultMap="OrderItemResult">
         SELECT
-        oi.order_item_id,
-        oi.order_id,
-        oi.item_id,
-        oi.quantity,
-        oi.served_quantity,
-        oi.status,
+        oi.order_item_id, oi.order_id, oi.item_id,
+        oi.quantity, oi.served_quantity, oi.prepared_quantity, oi.status,
         oi.price_at_order,
-        mi.item_code,
-        mi.name AS item_name
+        oi.assigned_table_display_id,
+        oi.served_table_display_id,
+        oi.quantity_distribution,  <!-- 🔧 新增这行 -->
+        mi.item_code, mi.name AS item_name
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
         WHERE oi.order_id = #{orderId}
@@ -528,7 +525,7 @@
         items_total, delivery_fee, total_amount,
         is_checked_out, is_prepaid, prepaid_amount,
         delivery_status,
-        reorder_time          <!-- ✅ 新增：查询重单时间 -->
+        reorder_time
         FROM table_orders
         WHERE order_id = #{orderId}
     </select>
@@ -621,10 +618,10 @@
         SET order_type = #{newType}
         WHERE reservation_id = #{reservationId}
         AND order_type = #{originalType}  <!-- 🔧 确保只更新预点餐订单 -->
-        AND status = 'ORDERED'            <!-- 🔧 只更新未结账的订单 -->
+<!--        AND status = 'ORDERED'            &lt;!&ndash; 🔧 只更新未结账的订单 &ndash;&gt;-->
+        AND status IN ('NO_ORDER', 'ORDERED')
     </update>
 
-    <!-- OrderMapper.xml -->
     <select id="findPreOrderByReservationId" resultType="Order">
         SELECT order_id, reservation_id, order_type, status, items_total, total_amount
         FROM table_orders
@@ -642,8 +639,11 @@
         oi.item_id,
         oi.quantity,
         oi.served_quantity,
+        oi.prepared_quantity,    <!-- 🔧 新增：已準備數量 -->
         oi.status,
         oi.price_at_order,
+        oi.assigned_table_display_id,        <!-- 🔧 新增这行 -->
+        oi.served_table_display_id,          <!-- 🔧 新增这行 -->
         mi.item_code,
         mi.name AS item_name
         FROM table_orders o
@@ -659,7 +659,14 @@
         FROM table_orders
         WHERE reservation_id = #{reservationId}
         AND order_type IN ('RESERVATION', 'DINE_IN')
-        AND status = 'ORDERED'
+        <!-- 🔧 改为查预点餐或已下单状态，优先返回预点餐 -->
+        AND status IN ('NO_ORDER', 'ORDERED')
+        ORDER BY
+        CASE status
+        WHEN 'NO_ORDER' THEN 1  -- 优先返回预点餐
+        WHEN 'ORDERED' THEN 2
+        END,
+        order_time DESC
         LIMIT 1
     </select>
 
@@ -685,5 +692,100 @@
         WHERE order_id = #{orderId}
         AND status = #{oldStatus}  <!-- 🔧 樂觀鎖：只更新預期舊狀態 -->
     </update>
+
+    <!-- OrderMapper.xml - 新增：根据餐桌ID和状态查找订单 -->
+    <select id="findOrderByTableIdAndStatus" resultType="Order">
+        SELECT
+        order_id, order_number, table_id, reservation_id,
+        order_type, delivery_method, delivery_address, customer_phone,
+        order_time, status,
+        items_total, delivery_fee, total_amount,
+        is_checked_out, is_prepaid, prepaid_amount,
+        delivery_status, reorder_time
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        AND status = #{status}
+        LIMIT 1
+    </select>
+
+    <!-- 新增：同时更新订单状态+items_total+total_amount -->
+    <update id="updateOrderStatusAndTotals">
+        UPDATE table_orders
+        SET
+        status = #{status},
+        items_total = #{itemsTotal},
+        total_amount = #{totalAmount}
+        WHERE order_id = #{orderId}
+    </update>
+
+    <update id="clearTableIdByReservationId">
+        UPDATE table_orders
+        SET table_id = NULL
+        WHERE reservation_id = #{reservationId}
+        AND table_id IS NOT NULL
+    </update>
+
+    <!-- OrderMapper.xml -->
+    <select id="findOrderIdByTableIdAndStatus" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        AND status = #{status}
+        LIMIT 1
+    </select>
+
+    <!-- 新增的多个餐桌查询（聚餐桌用） -->
+    <select id="findOrderItemsByTableDisplayIds" resultMap="OrderItemResult">
+        SELECT
+        oi.order_item_id, oi.order_id, oi.item_id,
+        oi.quantity, oi.served_quantity,oi.prepared_quantity, oi.status,
+        oi.price_at_order,
+        oi.assigned_table_display_id,
+        oi.served_table_display_id,  <!-- 🔧 新增 -->
+        oi.quantity_distribution,  <!-- 🔧 新增这行 -->
+        mi.item_code, mi.name AS item_name
+        FROM table_orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        JOIN menu_items mi ON oi.item_id = mi.item_id
+        JOIN restaurant_tables t ON o.table_id = t.table_id
+        WHERE t.display_id IN
+        <foreach collection="tableDisplayIds" item="displayId" open="(" separator="," close=")">
+            #{displayId}
+        </foreach>
+        AND o.status = 'ORDERED'
+        ORDER BY oi.assigned_table_display_id, oi.order_item_id ASC
+    </select>
+
+    <select id="findOrderIdByTableId" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE table_id = #{tableId}
+        LIMIT 1
+    </select>
+
+    <!-- OrderMapper.xml 添加 -->
+    <!--  新增：根据 reservation_id 查询活跃订单（预点餐/已下单）-->
+    <select id="findActiveOrderIdByReservationId" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE reservation_id = #{reservationId}
+        AND status IN ('NO_ORDER', 'ORDERED')  <!-- 🔧 活跃状态 -->
+        ORDER BY
+        CASE status
+        WHEN 'NO_ORDER' THEN 1  <!-- 优先返回预点餐订单 -->
+        WHEN 'ORDERED' THEN 2
+        END,
+        order_time DESC
+        LIMIT 1
+    </select>
+
+    <select id="findOrderIdByReservationId" resultType="java.lang.Integer">
+        SELECT order_id
+        FROM table_orders
+        WHERE reservation_id = #{reservationId}
+        AND status = 'CHECKED_OUT'
+        LIMIT 1
+    </select>
+
 
 </mapper>

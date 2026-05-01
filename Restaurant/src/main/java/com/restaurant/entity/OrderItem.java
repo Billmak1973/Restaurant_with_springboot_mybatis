@@ -11,8 +11,14 @@ public class OrderItem {
     private String itemName;
     private int quantity;
     private int servedQuantity;
+    private int preparedQuantity;  // 🔧 已準備數量（廚房進度）
     private String status;      // "UNSERVED", "PARTIALLY_SERVED", "SERVED"
     private double priceAtOrder; // 使用 double
+    //  新增：菜品归属的具体餐桌（合并桌/聚餐桌场景）
+    private String assignedTableDisplayId;
+    private String servedTableDisplayId;  // 实际上菜的餐桌ID列表
+    private String quantityDistribution;    // 如 {"13":4,"14":4,"15":3}
+    private String servedDistribution;      // 如 {"13":4,"14":4,"15":2}
 
     public OrderItem() {
         // MyBatis 必需
@@ -140,7 +146,42 @@ public class OrderItem {
         return quantity - servedQuantity;
     }
 
+    public String getAssignedTableDisplayId() { return assignedTableDisplayId; }
 
+    public void setAssignedTableDisplayId(String assignedTableDisplayId) {
+        this.assignedTableDisplayId = assignedTableDisplayId;
+    }
+
+    public String getServedTableDisplayId() {
+        return servedTableDisplayId;
+    }
+
+    public void setServedTableDisplayId(String servedTableDisplayId) {
+        this.servedTableDisplayId = servedTableDisplayId;
+    }
+    public int getPreparedQuantity() {
+        return preparedQuantity;
+    }
+
+    public void setPreparedQuantity(int preparedQuantity) {
+        this.preparedQuantity = preparedQuantity;
+    }
+
+    public String getQuantityDistribution() {
+        return quantityDistribution;
+    }
+
+    public void setQuantityDistribution(String quantityDistribution) {
+        this.quantityDistribution = quantityDistribution;
+    }
+
+    public String getServedDistribution() {
+        return servedDistribution;
+    }
+
+    public void setServedDistribution(String servedDistribution) {
+        this.servedDistribution = servedDistribution;
+    }
     @Override
     public String toString() {
         return String.format("OrderItem[itemCode=%s, quantity=%d, served=%d, price=%.2f, status=%s]",

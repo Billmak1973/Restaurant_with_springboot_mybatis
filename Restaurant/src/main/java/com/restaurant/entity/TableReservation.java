@@ -20,6 +20,8 @@ public class TableReservation {
     // ===== 预定时间 =====
     private LocalDateTime reservationTime;
 
+    private LocalDateTime rescheduledTime;  // 🔧 延迟后的新预约时间
+
     // ===== 桌子配置 =====
     private Integer tableCount;
     private String tableConfigDesc;
@@ -103,6 +105,14 @@ public class TableReservation {
 
     public void setReservationTime(LocalDateTime reservationTime) {
         this.reservationTime = reservationTime;
+    }
+
+    public LocalDateTime getRescheduledTime() {
+        return rescheduledTime;
+    }
+
+    public void setRescheduledTime(LocalDateTime rescheduledTime) {
+        this.rescheduledTime = rescheduledTime;
     }
 
     public Integer getTableCount() {

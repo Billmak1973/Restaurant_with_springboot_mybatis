@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS order_items (
                                            prepared_quantity INT NOT NULL DEFAULT 0 COMMENT '已准备数量',
                                            status ENUM('UNSERVED','PREPARING', 'PREPARED', 'PARTIALLY_SERVED', 'SERVED') DEFAULT 'UNSERVED' COMMENT '上菜状态',
     price_at_order DECIMAL(8,2) NOT NULL COMMENT '下单时价格',
-    assigned_table_display_id VARCHAR(10) NULL COMMENT '分配的餐桌显示ID',
+    assigned_table_display_id VARCHAR(50) NULL COMMENT '分配的餐桌显示ID',
     served_table_display_id VARCHAR(50) NULL COMMENT '实际上菜的餐桌ID列表（如 "16,17"）',
     -- 🔧 新增：聚餐桌数量分布记录 (JSON 格式)
     quantity_distribution JSON NULL COMMENT '各桌分配数量分布，如 {"13":4,"14":4,"15":3,"16":4}',

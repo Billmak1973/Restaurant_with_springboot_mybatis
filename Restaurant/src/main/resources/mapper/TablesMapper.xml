@@ -239,13 +239,13 @@
         table_type = 'MAIN',
         status = 'VACANT',
         current_group_id = NULL,
+        current_reservation_id = NULL,
         start_time = NULL,
         end_time = NULL,
         actual_seats = 0
         WHERE table_id IN (#{tableId1}, #{tableId2})
     </update>
 
-    <!-- 16. updateTableStatusForDeparture -->
     <!-- 16. updateTableStatusForDeparture -->
     <update id="updateTableStatusForDeparture">
         UPDATE restaurant_tables SET
@@ -457,4 +457,30 @@
         actual_seats = 0                      -- 清空入座人数
         WHERE table_id = #{tableId}
     </update>
+
+    <update id="resetGroupedTableToVacant">
+        UPDATE restaurant_tables SET
+        group_with = NULL,
+        table_type = 'MAIN',
+        status = 'VACANT',
+        current_group_id = NULL,
+        current_reservation_id = NULL,
+        start_time = NULL,
+        end_time = NULL,
+        actual_seats = 0
+        WHERE table_id = #{tableId}
+    </update>
+
+    <update id="clearCurrentReservationId">
+        UPDATE restaurant_tables
+        SET current_reservation_id = NULL
+        WHERE table_id = #{tableId}
+    </update>
+
+    <!-- 检查餐桌是否有任何订单记录 -->
+    <select id="hasAnyOrders" resultType="boolean">
+        SELECT COUNT(*) &gt; 0
+        FROM table_orders
+        WHERE table_id = #{tableId}
+    </select>
 </mapper>

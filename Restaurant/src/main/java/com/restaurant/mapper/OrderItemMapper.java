@@ -303,60 +303,64 @@ public interface OrderItemMapper {
 
 
     /**
-     * 🔧 聚餐桌专用：根据 order_item_id 撤销菜品（只针对 quantity_distribution 为 null 的场景） 其餘情況不能引用
-     *
-     * 业务规则：
-     * 1. quantity 始终 -1
-     * 2. 如果 served_table_display_id 包含当前餐桌号：served_quantity 也 -1
-     * 3. 根据新的 served_quantity 和 quantity 重新计算 status
-     *
-     * @param orderItemId 订单项主键
-     * @param tableDisplayId 当前操作的餐桌显示编号（用于判断 served_table_display_id）
-     * @param cancellationReason 撤销原因（用于日志，SQL 中暂不使用）
-     * @return 影响行数
-     */
-    int cancelGroupedTableOrderItemByOrderItemId(
-            @Param("orderItemId") int orderItemId,
-            @Param("tableDisplayId") String tableDisplayId,
-            @Param("cancellationReason") String cancellationReason);
-
-    /**
-     * 🔧 聚餐桌专用：更新有 quantity_distribution 的订单项
-     *
-     * ⚠️ 调用顺序要求（由 Service 层保证）：
-     * 1. 先计算 newQuantity（总数量 - 撤销数量）
-     * 2. 再计算 newDistribution（JSON，只包含 quantity>0 的桌号）
-     * 3. 最后计算 newAssignedTableIds（由 distribution.keySet() 排序后生成）
-     *
-     * @param orderItemId         订单项主键
-     * @param newQuantity         新的总数量
-     * @param newStatus           新的状态
-     * @param newDistribution     新的 distribution JSON（如 {"14":2,"15":2}）
-     * @param newAssignedTableIds 新的 assigned_table_display_id（如 "14,15"）
-     */
-    int updateGroupedOrderItemWithDistribution(
-            @Param("orderItemId") int orderItemId,
-            @Param("newQuantity") int newQuantity,
-            @Param("newStatus") String newStatus,
-            @Param("newDistribution") String newDistribution,
-            @Param("newAssignedTableIds") String newAssignedTableIds
-    );
-
-    /**
      * 🔧 聚餐桌专用：根据 order_item_id 删除订单项
      */
     int deleteOrderItemByOrderItemId(@Param("orderItemId") int orderItemId);
 
     /**
-     * 🔧 聚餐桌精確上菜更新（嚴格匹配4個字段，防止誤改）
+     * 🔧 聚餐桌专用：更新订单项数量 + 已上桌数量 + 状态（聚餐桌中的單桌專用）
+     * @param orderItemId      订单项主键
+     * @param newQuantity      新总数量
+     * @param newServedQuantity 新已上桌数量
+     * @param newStatus        新状态
+     * @return 影响行数
      */
-    int updateServedByExactMatch(
+    int updateGroupedOrderItemQuantity(
             @Param("orderItemId") int orderItemId,
-            @Param("orderId") int orderId,
-            @Param("itemId") int itemId,
-            @Param("assignedTableDisplayId") String assignedTableDisplayId,
+            @Param("newQuantity") int newQuantity,
             @Param("newServedQuantity") int newServedQuantity,
             @Param("newStatus") String newStatus
     );
 
+    /**
+     * 🔧 聚餐桌共同菜品专用：智能更新 quantity + served_quantity + status + distribution
+     */
+    int updateSharedDishOrderItem(
+            @Param("orderItemId") int orderItemId,
+            @Param("newQuantity") int newQuantity,
+            @Param("newServedQuantity") int newServedQuantity,
+            @Param("newStatus") String newStatus,
+            @Param("newAssignedTableIds") String newAssignedTableIds,
+            @Param("newDistribution") String newDistribution
+    );
+
+    /**
+     * 🔧 更新订单项的 assigned_table_display_id 和 quantity_distribution
+     * @param orderItemId 订单项主键
+     * @param assignedTableDisplayId 分配的餐桌显示ID列表（如 "13,14,15"）
+     * @param quantityDistribution quantity_distribution JSON字符串（如 {"13":2,"14":2,"15":2}）
+     * @return 影响行数
+     */
+    int updateOrderItemDistribution(
+            @Param("orderItemId") int orderItemId,
+            @Param("assignedTableDisplayId") String assignedTableDisplayId,
+            @Param("quantityDistribution") String quantityDistribution
+    );
+
+    List<OrderItem> findOrderItemsByOrderId(@Param("orderId") int orderId);
+
+    /**
+     * 🔧 聚餐桌延迟释放专用：清除订单明细中的分配信息
+     * 将 assigned_table_display_id 和 quantity_distribution 设置为 NULL
+     *
+     * @param orderId 订单ID
+     * @return 影响行数
+     */
+    int clearDistributionByOrderId(@Param("orderId") int orderId);
+
+    /**
+     * 🔧 聚餐桌专用：更新订单项数量
+     */
+    int updateOrderItemQuantity(@Param("orderItemId") int orderItemId,
+                                @Param("newQuantity") int newQuantity);
 }

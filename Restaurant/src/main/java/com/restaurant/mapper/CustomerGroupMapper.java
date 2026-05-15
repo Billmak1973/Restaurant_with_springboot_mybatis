@@ -54,8 +54,16 @@ public interface CustomerGroupMapper {
             @Param("isAssigned") boolean isAssigned,
             @Param("shownWaitMessage") boolean shownWaitMessage);
 
-    // CustomerGroupMapper.java - 已有方法，无需新增
     int updateTableId(@Param("groupId") int groupId, @Param("tableId") int tableId);
+
+
+    /**
+     * 更新顧客組人數
+     * @param groupId 顧客組 ID
+     * @param newSize 新的人數
+     * @return 影響行數
+     */
+    int updateGroupSize(@Param("groupId") int groupId, @Param("newSize") int newSize);
 
     // ===== 删除操作 =====
 

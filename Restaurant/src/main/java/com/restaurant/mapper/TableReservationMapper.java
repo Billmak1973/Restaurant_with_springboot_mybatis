@@ -97,4 +97,18 @@ public interface TableReservationMapper {
      * 🔧 根据 reservation_id 查询预付信息
      */
     Map<String, Object> findPrepaidInfoByReservationId(@Param("reservationId") String reservationId);
+
+
+    /**
+     * 根据时间范围和状态列表查询预约记录
+    *
+    * @param startTime 查询开始时间（包含）
+    * @param endTime   查询结束时间（包含）
+    * @param statuses  预约状态列表（可选，传 null 或空列表则查询所有状态）
+    * @return 符合条件的预约记录列表
+    */
+    List<TableReservation> findReservationsByTimeRange(
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime,
+            @Param("statuses") List<String> statuses);
 }

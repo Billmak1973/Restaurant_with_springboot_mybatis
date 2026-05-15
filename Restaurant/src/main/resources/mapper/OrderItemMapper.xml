@@ -481,66 +481,6 @@
         WHERE order_item_id = #{orderItemId}
     </update>
 
-<!--    SSOT (Single Source of Truth) 原則。-->
-    <update id="cancelGroupedTableOrderItemByOrderItemId">
-        UPDATE order_items oi
-        JOIN (
-        SELECT
-        order_item_id,
-        <!-- 📦 舊值快照（供字串清理使用） -->
-        quantity AS old_quantity,
-        served_quantity AS old_served_quantity,
-        served_table_display_id AS old_served_table_display_id,
-        assigned_table_display_id AS old_assigned_table_display_id,
-
-        <!-- 📦 新值計算（供欄位與狀態更新使用） -->
-        (quantity - 1) AS new_quantity,
-        CASE
-        WHEN served_table_display_id IS NOT NULL
-        AND FIND_IN_SET(#{tableDisplayId}, served_table_display_id) > 0
-        THEN GREATEST(0, served_quantity - 1)
-        ELSE served_quantity
-        END AS new_served_quantity
-        FROM order_items
-        WHERE order_item_id = #{orderItemId}
-        ) calc ON oi.order_item_id = calc.order_item_id
-        SET
-        <!-- 1️⃣ 數值層：直接寫入新值 -->
-        oi.quantity = calc.new_quantity,
-        oi.served_quantity = calc.new_served_quantity,
-
-        <!-- 2️⃣ 狀態層：緊接其後，純新值對比（零污染） -->
-        oi.status = CASE
-        WHEN calc.new_served_quantity = 0 THEN 'UNSERVED'
-        WHEN calc.new_served_quantity = calc.new_quantity THEN 'SERVED'
-        ELSE 'PARTIALLY_SERVED'
-        END,
-
-        <!-- 3️⃣ 字串層：基於舊值快照進行清理 -->
-        oi.assigned_table_display_id = NULLIF(
-        TRIM(BOTH ',' FROM REPLACE(CONCAT(',', calc.old_assigned_table_display_id, ','), CONCAT(',', #{tableDisplayId}, ','), ',')),
-        ''
-        ),
-        oi.served_table_display_id = NULLIF(
-        TRIM(BOTH ',' FROM REPLACE(CONCAT(',', calc.old_served_table_display_id, ','), CONCAT(',', #{tableDisplayId}, ','), ',')),
-        ''
-        )
-        WHERE oi.quantity > 0
-        AND oi.quantity_distribution IS NULL
-    </update>
-
-    <update id="updateGroupedOrderItemWithDistribution">
-        UPDATE order_items
-        SET
-        quantity = #{newQuantity},
-        status = #{newStatus},
-        <!-- 🔧 防御式：传 null 时保持原值，避免误清空 -->
-        quantity_distribution =
-        CASE WHEN #{newDistribution} IS NULL THEN quantity_distribution ELSE #{newDistribution} END,
-        assigned_table_display_id =
-        CASE WHEN #{newAssignedTableIds} IS NULL THEN assigned_table_display_id ELSE #{newAssignedTableIds} END
-        WHERE order_item_id = #{orderItemId}
-    </update>
 
     <!-- 🔧 根据主键删除订单项（总数量≤0 时使用）-->
     <delete id="deleteOrderItemByOrderItemId">
@@ -548,15 +488,73 @@
         WHERE order_item_id = #{orderItemId}
     </delete>
 
-    <!-- 🔧 聚餐桌手動指定菜品：嚴格根據4個字段更新上菜狀態 -->
-    <update id="updateServedByExactMatch">
+    <!-- 🔧 聚餐桌专用：更新订单项数量（智能撤销用） -->
+    <update id="updateGroupedOrderItemQuantity">
         UPDATE order_items
-        SET served_quantity = #{newServedQuantity},
+        SET
+        quantity = #{newQuantity},
+        served_quantity = #{newServedQuantity},
         status = #{newStatus}
         WHERE order_item_id = #{orderItemId}
-        AND order_id = #{orderId}
-        AND item_id = #{itemId}
-        AND assigned_table_display_id = #{assignedTableDisplayId}
     </update>
 
+    <!-- 🔧 聚餐桌共同菜品专用更新 -->
+    <update id="updateSharedDishOrderItem">
+        UPDATE order_items
+        SET
+        quantity = #{newQuantity},
+        served_quantity = #{newServedQuantity},
+        status = #{newStatus},
+        <if test="newAssignedTableIds != null">
+            assigned_table_display_id = #{newAssignedTableIds},
+        </if>
+        <if test="newDistribution != null">
+            quantity_distribution = #{newDistribution, jdbcType=VARCHAR},
+        </if>
+        <if test="newDistribution == null">
+            quantity_distribution = NULL,
+        </if>
+        served_table_display_id = CASE
+        WHEN #{newServedQuantity} = 0 THEN NULL
+        ELSE served_table_display_id
+        END
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <!-- 🔧 更新订单项的 assigned_table_display_id 和 quantity_distribution -->
+    <update id="updateOrderItemDistribution">
+        UPDATE order_items
+        SET
+        assigned_table_display_id = #{assignedTableDisplayId}
+        <if test="quantityDistribution != null">
+            , quantity_distribution = #{quantityDistribution, jdbcType=VARCHAR}
+        </if>
+        <if test="quantityDistribution == null">
+            , quantity_distribution = NULL
+        </if>
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <!-- 🔧 聚餐桌延迟释放专用：清除订单明细中的分配信息 -->
+    <update id="clearDistributionByOrderId">
+        UPDATE order_items
+        SET
+        assigned_table_display_id = NULL,
+        quantity_distribution = NULL
+        WHERE order_id = #{orderId}
+    </update>
+
+    <!-- 🔧 聚餐桌专用：更新订单项数量 -->
+    <update id="updateQuantityByOrderItemId">
+        UPDATE order_items
+        SET quantity = #{newQuantity}
+        WHERE order_item_id = #{orderItemId}
+    </update>
+
+    <!-- 🔧 聚餐桌专用：更新订单项数量 -->
+    <update id="updateOrderItemQuantity">
+        UPDATE order_items
+        SET quantity = #{newQuantity}
+        WHERE order_item_id = #{orderItemId}
+    </update>
 </mapper>

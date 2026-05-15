@@ -88,4 +88,12 @@
         WHERE group_id = #{groupId}
     </update>
 
+
+    <!-- 更新顧客組人數 -->
+    <update id="updateGroupSize">
+        UPDATE customer_groups
+        SET group_size = #{newSize}
+        WHERE group_id = #{groupId}
+    </update>
+
 </mapper>

@@ -225,6 +225,9 @@
             <if test="tableConfigDesc != null and tableConfigDesc != ''">
                 table_config_desc = #{tableConfigDesc},
             </if>
+            <if test="groupType != null and groupType != ''">
+                group_type = #{groupType},
+            </if>
             <if test="preOrder != null">
                 pre_order = #{preOrder},
             </if>
@@ -329,4 +332,13 @@
         WHERE reservation_id = #{reservationId}
     </select>
 
+    <select id="findReservationsByTimeRange" resultType="TableReservation">
+        SELECT * FROM table_reservations
+        WHERE reservation_time BETWEEN #{startTime} AND #{endTime}
+        AND status IN
+        <foreach collection="statuses" item="s" open="(" separator="," close=")">
+            #{s}
+        </foreach>
+        ORDER BY reservation_time ASC
+    </select>
 </mapper>

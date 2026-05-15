@@ -351,4 +351,18 @@ public interface TablesMapper {
      * 🔧 取消预约时还原餐桌：状态改VACANT + 类型重置MAIN + 清空关联字段
      */
     int resetTableAfterReservationCancel(@Param("tableId") int tableId);
+
+    int resetGroupedTableToVacant(@Param("tableId") int tableId);
+
+    /**
+     * 清空餐桌的 current_reservation_id
+     */
+    int clearCurrentReservationId(@Param("tableId") int tableId);
+
+    /**
+     * 检查餐桌是否有任何订单记录
+     * @param tableId 餐桌ID
+     * @return true=有记录，false=无记录
+     */
+    boolean hasAnyOrders(@Param("tableId") int tableId);
 }

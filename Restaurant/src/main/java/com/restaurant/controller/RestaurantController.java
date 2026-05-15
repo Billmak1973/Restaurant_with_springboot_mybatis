@@ -4,7 +4,9 @@ import com.restaurant.entity.*;
 import com.restaurant.service.MenuItemService;
 import com.restaurant.service.OrderService;
 import com.restaurant.service.RestaurantService;
+import com.restaurant.util.OperationResult;
 import com.restaurant.view.OrderSystemGUI;
+import com.restaurant.view.ReservationMatchCallback;
 import com.restaurant.view.RestaurantView;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -25,7 +27,7 @@ import java.util.stream.Collectors;
 @Component
 public class RestaurantController {
 
-    private final RestaurantService service;
+    public final RestaurantService service;
     private RestaurantView view;
     private OrderSystemGUI frame;
     private final MenuItemService menuItemService;  //  新增注入
@@ -42,6 +44,12 @@ public class RestaurantController {
     public void setView(RestaurantView view) {
         this.view = view;
         view.setController(this);
+        // 🔧【新增】建立 Service ↔ View 的回调连接
+        if (service != null && view instanceof ReservationMatchCallback) {
+            service.setReservationMatchCallback((ReservationMatchCallback) view);
+            System.out.println("✅ 预约匹配回调已连接");
+        }
+
         bindEvents();
         initializeTablesDisplay();
     }
@@ -68,6 +76,7 @@ public class RestaurantController {
     }
 
     private void bindEvents() {
+        view.updateTableStatusDisplay(service.getAllTables());
         view.setAddGroupListener(e -> handleAddGroup(e));
         view.setSplitTableListener(e -> handleSplitTable(e));
         view.setRecombineTableListener(e -> handleRecombineTable(e));
@@ -78,9 +87,9 @@ public class RestaurantController {
         view.setCloseDayListener(e -> handleCloseDay(e));
         view.setReportListener(e -> handleShowBusinessReport());
         view.setReserveTableListener(e -> handleReserveTable(e));
-
+        view.setQueueManagementListener(e -> view.showQueueManagementDialog());
+        view.setSelectTableListener(e -> view.showSelectTableDialog());
     }
-
 
     private void handleAddGroup(ActionEvent e) {
         try {
@@ -96,6 +105,9 @@ public class RestaurantController {
 
             if (groupSize <= 0) {
                 view.showError("人数必须大于 0");
+                return;
+            }else if(groupSize > 12) {
+                view.showError("人数大于12,需要提前訂餐");
                 return;
             }
 
@@ -121,7 +133,7 @@ public class RestaurantController {
                 view.appendToLog(message);
                 view.clearGroupSizeInput();
                 refreshTablesDisplay();
-                //view.updateQueueDisplay(); // 如有队列UI，同步更新
+                view.updateTableStatusDisplay(service.getAllTables());
 
             } else {
                 // 添加失败：餐厅未营业或系统异常
@@ -185,6 +197,8 @@ public class RestaurantController {
             SwingUtilities.invokeLater(() -> {
                 // 🔧 選項 1: 全面刷新（簡單可靠）
                 refreshTablesDisplay();
+                //如果需要单独更新状态面板
+                view.updateTableStatusDisplay(service.getAllTables());
 
                 //lambda 表达式中使用的变量应为 final 或有效 final
                 view.appendToLog(" 餐桌 #" + displayId +
@@ -264,6 +278,7 @@ public class RestaurantController {
                         view.refreshTableButton(mainTableDisplayId, restoredTable);
                         service.refreshTableCache();
                         view.updateTablesDisplay(service.getAllTables());
+                        view.updateTableStatusDisplay(service.getAllTables());
 
                         // 🔧【關鍵】使用預先收集的子桌信息（不再查詢數據庫）
                         String subTableNames = subTableDisplayIds.isEmpty() ? "無" :
@@ -315,6 +330,7 @@ public class RestaurantController {
                 // 3. 刷新显示 + 记录日志
                 SwingUtilities.invokeLater(() -> {
                     refreshTablesDisplay();
+                    view.updateTableStatusDisplay(service.getAllTables());
                     view.appendToLog("✓ 已将餐桌 #" + fromInput + " 的顾客组转移到餐桌 #" + toInput);
                     view.showInfo("换桌成功！");
                 });
@@ -334,17 +350,189 @@ public class RestaurantController {
     }
 
 
-    private void handleClearAll(ActionEvent e) {
+
+    public boolean hasWaitingCustomers() {
+        return service.hasWaitingCustomers();
     }
 
+
+    private void handleClearAll(ActionEvent e) {
+        try {
+            // 🔧 调用 Service 获取结果对象
+            Map<String, Object> result = service.clearAllTables();
+            boolean success = (Boolean) result.getOrDefault("success", false);
+            String message = (String) result.getOrDefault("message", "");
+            boolean hasWaiting = (Boolean) result.getOrDefault("hasWaitingCustomers", false);
+            boolean hasError = (Boolean) result.getOrDefault("error", false);
+
+            // 🔧 所有 JOptionPane 移到此处，通过 View 显示
+            if (hasError) {
+                view.showError("清空餐桌时发生系统错误: " + message);
+                return;
+            }
+
+            if (success) {
+                // 🔧【核心】根据详情构建清理摘要
+                StringBuilder summary = new StringBuilder("清理完成:\n");
+                @SuppressWarnings("unchecked")
+                Map<String, Boolean> details = (Map<String, Boolean>) result.get("cleanedDetails");
+
+                if (details != null) {
+                    if (Boolean.TRUE.equals(details.get("subTables"))) {
+                        summary.append("✓ 子桌已清理\n");
+                    }
+                    if (Boolean.TRUE.equals(details.get("mergedTables"))) {
+                        summary.append("✓ 合并桌已清理\n");
+                    }
+                    if (Boolean.TRUE.equals(details.get("groupedTables"))) {
+                        summary.append("✓ 聚餐桌已清理\n");
+                    }
+                    if (Boolean.TRUE.equals(details.get("mainTables"))) {
+                        summary.append("✓ 主桌已清理");
+                    }
+                }
+
+                // 🔧 通过 View 显示成功消息（移除末尾多余换行）
+                String summaryText = summary.toString().trim();
+                if (!summaryText.equals("清理完成:")) {
+                    view.showInfo(summaryText);
+                } else {
+                    view.showInfo(message);
+                }
+
+                // 🔧 仅当有排队顾客时才询问自动入座（通过 View 交互）
+                if (hasWaiting) {
+                    int response = view.showConfirmDialog(
+                            "📋 有顾客在排队，是否自动安排入座？",
+                            "自动入座");
+                    if (response == JOptionPane.YES_OPTION) {
+                        service.checkAndAssignWaitingCustomers();
+                        view.showInfo("已自动安排等待顾客入座");
+                    }
+                }
+            } else {
+                view.showInfo(message);
+            }
+
+            // 刷新界面
+            refreshTablesDisplay();
+            view.updateTableStatusDisplay(service.getAllTables());
+
+        } catch (Exception ex) {
+            // ✅ 保留 try-catch
+            view.showError("清空餐桌时发生错误: " + ex.getMessage());
+            ex.printStackTrace();
+        }
+    }
+
+    /**
+     * 🔧 處理結束營業/開始營業事件（核心協調邏輯）
+     */
     private void handleCloseDay(ActionEvent e) {
+        if (service == null || view == null) return;
+
+        try {
+            if (service.isOpenForBusiness()) {
+                // ═══════════════════════════════════════════════════════════
+                // 【打烊流程】
+                // ═══════════════════════════════════════════════════════════
+
+                // 1️⃣ 純內存查詢未結賬餐桌（零 SQL，避免 UI 卡頓）
+                List<String> unpaidTables = service.getTablesWithUnpaidOrdersInMemory();
+
+                // 2️⃣ 未結賬訂單提醒（不阻止打烊，僅提示）
+                if (!unpaidTables.isEmpty()) {
+                    boolean confirmed = view.showUnpaidWarningDialog(unpaidTables);
+                    if (!confirmed) {
+                        view.appendToLog("✗ 打烊操作已取消");
+                        return; // 用戶取消，直接返回
+                    }
+                }
+
+                // 3️⃣ 二次確認（防止誤操作）
+                int confirm = JOptionPane.showConfirmDialog(
+                        view,
+                        "<html><b>確定要結束營業嗎？</b><br><br>" +
+                                "🔒 此操作將：<br>" +
+                                "• 停止接待新顧客<br>" +
+                                "• 保留未結賬訂單至次日<br>" +
+                                "• 記錄當日營業數據</html>",
+                        "確認結束營業",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.QUESTION_MESSAGE
+                );
+
+                if (confirm != JOptionPane.YES_OPTION) {
+                    view.appendToLog("✗ 打烊操作已取消");
+                    return;
+                }
+
+                // 4️⃣ 調用 Service 執行打烊（事務內完成）
+                service.closeForDayWithPersistence();
+
+                // 5️⃣ 更新 UI（僅負責顯示，不處理業務）
+                SwingUtilities.invokeLater(() -> {
+                    view.appendToLog("✓ 餐廳已打烊，停止接待新顧客。");
+                    if (!unpaidTables.isEmpty()) {
+                        view.appendToLog("⚠️ 提醒：未結賬餐桌：" + String.join(", ", unpaidTables));
+                    }
+                    view.clearGroupSizeInput();
+                    refreshTablesDisplay(); // 刷新餐桌狀態
+                    view.setCloseDayButtonText(false); // 按鈕變為「開始營業」
+                    view.updateBusinessStatusDisplay(false); // 狀態欄變紅
+                });
+
+            } else {
+                // ═══════════════════════════════════════════════════════════
+                // 【開業流程】（對稱設計）
+                // ═══════════════════════════════════════════════════════════
+
+                int confirm = JOptionPane.showConfirmDialog(
+                        view,
+                        "<html><b>確定要開始營業嗎？</b><br><br>" +
+                                "🟢 餐廳將恢復：<br>" +
+                                "• 接待新顧客<br>" +
+                                "• 處理排隊隊列<br>" +
+                                "• 初始化當日營業狀態</html>",
+                        "確認開始營業",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.QUESTION_MESSAGE
+                );
+
+                if (confirm != JOptionPane.YES_OPTION) {
+                    view.appendToLog("✗ 開業操作已取消");
+                    return;
+                }
+
+                // 調用 Service 執行開業
+                service.openForBusinessWithPersistence();
+
+                // 更新 UI
+                SwingUtilities.invokeLater(() -> {
+                    view.appendToLog("✓ 餐廳重新開始營業");
+                    refreshTablesDisplay();
+                    view.setCloseDayButtonText(true); // 按鈕變為「結束營業」
+                    view.updateBusinessStatusDisplay(true); // 狀態欄變綠
+                });
+            }
+
+        } catch (Exception ex) {
+            // 統一錯誤處理
+            ex.printStackTrace();
+            SwingUtilities.invokeLater(() -> {
+                String action = service.isOpenForBusiness() ? "打烊" : "開業";
+                view.appendToLog("❌ " + action + "失敗：" + ex.getMessage());
+                JOptionPane.showMessageDialog(view,
+                        action + "失敗：" + ex.getMessage(),
+                        "操作錯誤",
+                        JOptionPane.ERROR_MESSAGE);
+            });
+        }
     }
 
     private void handleShowBusinessReport() {
     }
 
-    public void updateView() {
-    }
 
     public void updateQueueDisplay() {
         if (view != null && service != null) {
@@ -500,6 +688,7 @@ public class RestaurantController {
                         refreshSingleTable(partner.getDisplayId());
                     }
                     view.appendToLog("餐桌 #" + displayId + " 顾客已离店，状态更新为「准备中」");
+                    view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
                 showError("离店操作失败: " + e.getMessage());
@@ -633,6 +822,7 @@ public class RestaurantController {
                             .map(Tables::getDisplayId)
                             .collect(Collectors.joining(","));
                     view.appendToLog("聚餐桌组 [" + tableList + "] 顾客已离店，状态更新为「准备中」");
+                    view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
                 showError("离店操作失败: " + e.getMessage());
@@ -696,6 +886,7 @@ public class RestaurantController {
                 SwingUtilities.invokeLater(() -> {
                     refreshSingleTable(displayId);
                     view.appendToLog("餐桌 #" + displayId + " 顾客已离店，状态更新为「准备中」");
+                    view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
                 showError("离店操作失败: " + e.getMessage());
@@ -705,7 +896,7 @@ public class RestaurantController {
     }
 
     /**
-     * 处理准备中餐桌的清理逻辑
+     * 处理准备中餐桌的清理逻辑（修复版）
      */
     private void handleSettingUpTable(Tables table) {
         String displayId = table.getDisplayId();
@@ -719,9 +910,26 @@ public class RestaurantController {
 
         if (confirm == JOptionPane.YES_OPTION) {
             try {
+                // 🔧【关键1】先记录是否是子桌（用点击时的对象判断）
+                boolean isSubTable =
+                        table.getSubTableSuffix() != null &&
+                                !table.getSubTableSuffix().isEmpty();
+
+                // 🔧【关键2】执行清理（数据库+内存同步更新）
                 service.cleanTable(displayId);
+
+                // 🔧【关键3】刷新界面
                 refreshSingleTable(displayId);
                 view.appendToLog("餐桌 #" + displayId + " 已清理完成，恢复为空闲状态");
+                view.updateTableStatusDisplay(service.getAllTables());
+
+                // 🔧【关键4】清理后检查合并机会（⚠️ 必须在Controller层执行！）
+                if (isSubTable) {
+                    handleSubTableMergeCheck(displayId);
+                } else {
+                    service.checkAndAssignWaitingCustomers();
+                }
+
             } catch (Exception e) {
                 showError("清理失败: " + e.getMessage());
                 e.printStackTrace();
@@ -729,6 +937,39 @@ public class RestaurantController {
         }
     }
 
+    public void handleSubTableMergeCheck(String cleanedTableDisplayId) {
+        try {
+            // ✅ 直接调用 Service，由 Service 负责查库 + 业务判断
+            RestaurantService.MergeOpportunity opportunity =
+                    service.checkSubTableMergeOpportunity(cleanedTableDisplayId);
+
+            if (!opportunity.isAvailable()) {
+                service.checkAndAssignWaitingCustomers();
+                return;
+            }
+
+            // ✅ 只负责视图交互
+            boolean userConfirmed = view.showMergeConfirmationDialog(
+                    opportunity.getSubTableA(),
+                    opportunity.getSubTableB(),
+                    opportunity.getMainTableDisplayId()
+            );
+
+            if (userConfirmed) {
+                Tables mergedTable = service.recombineTables(opportunity.getMainTableDisplayId());
+                view.showMergeResult(true, "✅ 合并成功！\n子桌 #" + opportunity.getSubTableA() +
+                        " + #" + opportunity.getSubTableB() +
+                        " → 主桌 #" + opportunity.getMainTableDisplayId());
+                refreshTablesDisplay();  // ✅ 刷新视图
+                service.checkAndAssignWaitingCustomers();
+            } else {
+                service.checkAndAssignWaitingCustomers();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            view.showMergeResult(false, "❌ 合并失败: " + e.getMessage());
+        }
+    }
 
     private void handleCheckoutAction(ActionEvent e) {
         // 显示结账对话框
@@ -760,6 +1001,255 @@ public class RestaurantController {
         if ("DINE_IN".equals(orderType)) {
             handleDineInCheckout(identifier);
         }
+    }
+
+    /**
+     * 处理队列管理操作（增加/编辑/删除顾客组）
+     *
+     * @param callNumber    排队号码（编辑/删除时需要）
+     * @param customerCount 客户数量（增加/编辑时需要）
+     * @param isAdd         是否增加新顾客组
+     * @param isEdit        是否编辑现有顾客组人数
+     * @param isDelete      是否删除顾客组
+     */
+    public void handleQueueManagementAction(int callNumber, int customerCount,
+                                            boolean isAdd, boolean isEdit, boolean isDelete) {
+        try {
+            // ═══════════════════════════════════════════════════════════
+            // 【场景 1】增加新顾客组
+            // ═══════════════════════════════════════════════════════════
+            if (isAdd) {
+                // 1. 参数验证
+                if (customerCount <= 0 || customerCount > 12) {
+                    view.showError("客户数量必须在1-12之间！");
+                    return;
+                }
+
+                // 2. 调用 Service 层添加顾客组（已包含完整业务逻辑）
+                CustomerGroup newGroup = service.addCustomerGroup(customerCount);
+
+                if (newGroup != null) {
+                    // 3. 根据分配状态给出差异化反馈
+                    if (newGroup.isAssigned()) {
+                        view.appendToLog("✓ 顾客组 #" + newGroup.getCallNumber() +
+                                " (" + customerCount + "人) 已直接入座餐桌 #" +
+                                newGroup.getTableId());
+                    } else {
+                        view.appendToLog("✓ 顾客组 #" + newGroup.getCallNumber() +
+                                " (" + customerCount + "人) 已加入等待队列");
+                    }
+                    // 4. 检查并分配等待顾客（触发队列调度）
+                    service.checkAndAssignWaitingCustomers();
+                } else {
+                    view.showError("添加顾客组失败：餐厅未营业或系统错误");
+                    return;
+                }
+            }
+            // ═══════════════════════════════════════════════════════════
+            // 【场景 2】编辑或删除现有顾客组
+            // ═══════════════════════════════════════════════════════════
+            else {
+                // 1. 通过 Service 层查找顾客组
+                CustomerGroup targetGroup = service.findCustomerGroupByCallNumber(callNumber);
+                if (targetGroup == null) {
+                    view.showError("未找到排队号码 #" + callNumber + " 的顾客组！");
+                    return;
+                }
+
+                // ── 删除操作 ──
+                if (isDelete) {
+                    // 获取顾客组所在队列类型
+                    String queueType = service.getQueueTypeByGroupId(targetGroup.getGroup_id());
+                    if (queueType == null) {
+                        view.showError("顾客组 #" + callNumber + " 不在队列中，无法删除");
+                        return;
+                    }
+
+                    // 执行删除（事务内完成）
+                    service.removeFromQueue(targetGroup.getGroup_id(), queueType);
+                    view.appendToLog(" 已删除排队号 #" + callNumber + " 的顾客组");
+
+                    // 删除后释放资源，重新检查队列分配
+                    service.checkAndAssignWaitingCustomers();
+                }
+
+                // ── 编辑操作 ──
+                if (isEdit) {
+                    // 参数验证
+                    if (customerCount <= 0 || customerCount > 12) {
+                        view.showError("客户数量必须在1-12之间！");
+                        return;
+                    }
+                    // 已入座顾客组不能修改人数
+                    if (targetGroup.isAssigned()) {
+                        view.showError("已入座的顾客组不能修改人数！");
+                        return;
+                    }
+
+                    // 执行人数变更
+                    int originalSize = targetGroup.getGroupSize();
+                    service.updateCustomerGroupSize(targetGroup, customerCount);
+                    view.appendToLog("✏️ 排队号 #" + callNumber + " 人数变更: " +
+                            originalSize + "人 → " + customerCount + "人");
+
+                    // 人数变更后重新评估餐桌分配
+                    service.checkAndAssignWaitingCustomers();
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // 【统一刷新界面】
+            // ═══════════════════════════════════════════════════════════
+            refreshTablesDisplay();      // 刷新餐桌显示
+            updateQueueDisplay();        // 刷新队列显示
+
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // 业务规则验证失败 → 友好提示
+            view.showError(e.getMessage());
+        } catch (Exception e) {
+            // 系统异常 → 兜底处理
+            view.showError("操作失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+
+    public void handleManualTableAssignment(
+            String tableIdInput,
+            int peopleCount,
+            boolean isFromQueue,
+            int callNumber,
+            boolean isMerge,
+            boolean isTwoSeat,
+            boolean isFourSeat,
+            boolean isSixSeat,
+            boolean isAddGuests,
+            boolean isShare,
+            boolean isGrouped,
+            int groupedTableCount
+            ) {
+
+        // ═══════════════════════════════════════════════════════════
+        // 【步骤1】参数验证（保持在前端）
+        // ═══════════════════════════════════════════════════════════
+        if (tableIdInput == null || tableIdInput.trim().isEmpty()) {
+            view.showError("餐桌编号不能为空");
+            return;
+        }
+
+
+        try {
+            // ═══════════════════════════════════════════════════════════
+            // 🔧【新增】添加客人场景：预先检查并显示确认对话框
+            // ═══════════════════════════════════════════════════════════
+            if (isAddGuests && !isFromQueue ) {
+                // 只读查询餐桌状态（不修改数据）
+                Tables table = service.getTableById(tableIdInput.trim());
+
+                // 仅当餐桌已被占用时才显示确认
+                if (table != null && table.getStatus() == Tables.TableStatus.OCCUPIED) {
+                    // 获取当前顾客组人数（通过 Service 的只读方法）
+                    Integer groupId = table.getCurrentGroupId();
+                    int currentSize = 0;
+
+                    if (groupId != null) {
+                        CustomerGroup group = service.getCustomerGroupById(groupId);
+                        if (group != null) {
+                            currentSize = group.getGroupSize();
+                        }
+                    }
+
+                    int remainingSeats = table.getPhysicalCapacity() - currentSize;
+
+                    // 🔧 通过 View 显示确认对话框（MVC：View 负责交互）
+                    boolean confirmed = view.showAddGuestsConfirmationDialog(
+                            table.getDisplayId(),
+                            currentSize,
+                            remainingSeats,
+                            peopleCount
+                    );
+
+                    if (!confirmed) {
+                        view.showInfo("操作已取消");
+                        return;  // 用户取消，直接返回，不调用 Service
+                    }
+                }
+            }
+            // ═══════════════════════════════════════════════════════════
+            // 【步骤2】调用 Service 层执行业务逻辑（事务由 @Transactional 管理）
+            // ═══════════════════════════════════════════════════════════
+            // 注意：tryAssignCustomerToTable 方法需迁移到 RestaurantService 中
+            OperationResult<Boolean>  result = service.tryAssignCustomerToTable(
+                    tableIdInput, peopleCount, isFromQueue, callNumber,
+                    isMerge, isTwoSeat, isFourSeat, isSixSeat,
+                    isAddGuests, isShare, isGrouped,groupedTableCount
+            );
+
+            if (result.isSuccess()) {
+                // ═══════════════════════════════════════════════════════════
+                // 【步骤3】成功：同步内存缓存 + 刷新视图
+                // ═══════════════════════════════════════════════════════════
+                // syncMemoryAfterAddGuests 也需迁移到 Service 层
+                service.syncMemoryAfterAddGuests(tableIdInput);
+
+                // 显示成功消息
+                view.showInfo(buildSuccessMessage(
+                        isFromQueue, callNumber, peopleCount,
+                        isMerge, isAddGuests, isShare, isGrouped, groupedTableCount
+                ));
+
+                // 刷新餐桌显示（关键：确保界面同步）
+                refreshTablesDisplay();
+                view.updateTableStatusDisplay(service.getAllTables());
+            }
+            else {
+                // 🔧【核心修改】显示详细错误消息
+                String errorMsg = result.getErrorMessage();
+
+                if (errorMsg != null && !errorMsg.isEmpty()) {
+                    // 优先显示业务层返回的详细错误
+                    view.showError(errorMsg);
+                } else {
+                    // 兜底：通用错误消息
+                    view.showError("餐桌分配失败，请检查输入参数或餐桌状态");
+                }
+            }
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // ═══════════════════════════════════════════════════════════
+            // 【步骤5】业务规则验证失败（用户输入问题）
+            // ═══════════════════════════════════════════════════════════
+            view.showError(e.getMessage());
+
+        } catch (Exception e) {
+            // ═══════════════════════════════════════════════════════════
+            // 【步骤6】系统异常（兜底处理）
+            // ═══════════════════════════════════════════════════════════
+            e.printStackTrace();
+            view.showError("系统错误: " + e.getMessage());
+        }
+    }
+
+    private String buildSuccessMessage(boolean isFromQueue, int callNumber, int peopleCount,
+                                       boolean isMerge, boolean isAddGuests, boolean isShare,
+                                       boolean isGrouped, int groupedTableCount) {  // ← 新增参数
+        StringBuilder msg = new StringBuilder();
+
+        if (isFromQueue) {
+            msg.append("排队号 #").append(callNumber).append(" 已成功就座");
+        } else {
+            msg.append("新顾客组（").append(peopleCount).append("人）已成功就座");
+        }
+
+        // 🔧 聚餐桌特殊处理（优先级最高）
+        if (isGrouped && groupedTableCount >= 3) {
+            msg.append("（聚餐桌：").append(groupedTableCount).append("张6人桌）");
+        }
+        // 其他模式（互斥）
+        else if (isMerge) msg.append("（合并桌子）");
+        else if (isAddGuests) msg.append("（添加客人）");
+        else if (isShare) msg.append("（共享餐桌）");
+
+        return msg.append("。").toString();
     }
 
     /**
@@ -834,6 +1324,7 @@ public class RestaurantController {
                 }
                 JOptionPane.showMessageDialog(view, baseMessage, "结账成功", JOptionPane.INFORMATION_MESSAGE);
                 refreshTablesDisplay();
+                view.updateTableStatusDisplay(service.getAllTables());
             });
         } else {
             String message = (String) result.get("message");
@@ -944,10 +1435,10 @@ public class RestaurantController {
             try {
                 Map<String, Object> serviceResult = service.createReservation(result);
                 if ((Boolean) serviceResult.get("success")) {
-                    view.showInfo("✅ 预约成功！预约号：" + serviceResult.get("reservationId"));
+                    view.showInfo(" 预约成功！预约号：" + serviceResult.get("reservationId"));
                     view.appendToLog("新增预约：" + serviceResult.get("reservationId"));
                     refreshTablesDisplay();
-
+                    view.updateTableStatusDisplay(service.getAllTables());
                     String tableSelectionMode = (String) result.get("tableSelectionMode");
                     if ("QUANTITY".equals(tableSelectionMode)) {
                         view.refreshQuantityReservationsLog();
@@ -1012,25 +1503,25 @@ public class RestaurantController {
         // ═══════════════════════════════════════════════════════════
         else if ("CANCEL".equals(mode)) {
             try {
-                // 1️⃣ 获取预约号
+                // 1 获取预约号
                 String reservationId = (String) result.get("reservationId");
 
-                // 2️⃣ 基础验证
+                // 2 基础验证
                 if (reservationId == null || reservationId.isEmpty()) {
                     view.showError("⚠️ 预约号不能为空！");
                     return;
                 }
 
-                // 3️⃣ 弹窗获取取消原因
+                // 3 弹窗获取取消原因
                 String cancellationReason = view.showCancelReasonDialog(reservationId);
                 if (cancellationReason == null) {
                     return;  // 用户点击取消，终止操作
                 }
 
-                // 4️⃣ 🔧【核心】调用 Service 层执行取消逻辑（传入原因）
+                // 4 🔧【核心】调用 Service 层执行取消逻辑（传入原因）
                 Map<String, Object> cancelResult = service.cancelReservation(reservationId, cancellationReason);
 
-                // 5️⃣ 处理返回结果
+                // 5 处理返回结果
                 if ((Boolean) cancelResult.get("success")) {
                     // 🔧【核心修改】优先使用 Service 返回的用户友好消息
                     String message = (String) cancelResult.get("userMessage");
@@ -1062,28 +1553,29 @@ public class RestaurantController {
                 ex.printStackTrace();
                 view.showError("系统错误: " + ex.getMessage());
             }
-        } else if ("EDIT_TIME".equals(mode)) {
-            try {
+        }
+        else if ("EDIT_TIME".equals(mode)) {
+            try {  // 🔧 新增：外层 try 捕获业务异常
                 // 1️ 获取参数
                 String reservationId = (String) result.get("reservationId");
                 @SuppressWarnings("unchecked")
                 Map<String, Object> edits = (Map<String, Object>) result.get("edits");
 
-                // 2 基础验证
+                // 2️ 基础验证
                 if (reservationId == null || reservationId.isEmpty()) {
-                    view.showError(" 预约号不能为空！");
+                    view.showError("⚠️ 预约号不能为空！");
                     return;
                 }
                 if (edits == null || edits.isEmpty()) {
-                    view.showError(" 请至少勾选一项修改内容！");
+                    view.showError("⚠️ 请至少勾选一项修改内容！");
                     return;
                 }
 
-                // 3 调用 Service 层执行修改（事务由 Service 管理）
+                // 3️ 调用 Service 层执行修改（事务由 Service 管理）
                 service.updateReservation(reservationId, edits);
 
-                // 4 成功反馈 + 刷新界面
-                view.showInfo(" 预约修改成功！\n预约号：" + reservationId);
+                // 4️ 成功反馈 + 刷新界面
+                view.showInfo("✅ 预约修改成功！\n预约号：" + reservationId);
                 view.appendToLog("预约 " + reservationId + " 已修改");
                 refreshTablesDisplay();
 
@@ -1094,12 +1586,31 @@ public class RestaurantController {
                 }
 
             } catch (IllegalArgumentException | IllegalStateException ex) {
-                // 业务规则验证失败 → 友好提示
-                view.showError("修改失败: " + ex.getMessage());
+                // 🔧【核心】业务规则验证失败 → 显示 ERROR 弹窗
+                SwingUtilities.invokeLater(() -> {
+                    // 使用 JOptionPane 显示标准错误弹窗
+                    JOptionPane.showMessageDialog(
+                            view,                                    // 父窗口
+                            ex.getMessage(),                        // 错误消息（含换行和 emoji）
+                            " 修改失败",                           // 弹窗标题
+                            JOptionPane.ERROR_MESSAGE,              // 🔴 错误图标
+                            null                                     // 自定义图标（可选）
+                    );
+                    // 同时记录到系统日志
+                    view.appendToLog(" 预约修改失败: " + ex.getMessage());
+                });
+
             } catch (Exception ex) {
-                // 系统异常 → 记录日志 + 提示
+                // 系统异常 → 记录堆栈 + 提示
                 ex.printStackTrace();
-                view.showError("系统错误: " + ex.getMessage());
+                SwingUtilities.invokeLater(() -> {
+                    JOptionPane.showMessageDialog(
+                            view,
+                            "系统错误: " + ex.getMessage(),
+                            " 系统异常",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                });
             }
         }
     }
@@ -1134,6 +1645,7 @@ public class RestaurantController {
                     // 將預定 ID 傳入 Service 層進行入座處理
                     service.processGuestCheckIn(table.getDisplayId(), actualSeats, reservationId);
                     refreshTablesDisplay();  // 刷新界面
+                    view.updateTableStatusDisplay(service.getAllTables());
                     view.showInfo(" 客人已入座！\n餐桌 #" + table.getDisplayId() +
                             " 状态已更新为【占用中】");
                 } catch (Exception ex) {
@@ -1243,6 +1755,7 @@ public class RestaurantController {
                         // 🔹 🔧【修复】刷新界面：调用本类方法
                         SwingUtilities.invokeLater(() -> {
                             refreshTablesDisplay();  // ← 直接调用本类方法，不加 controller.
+                            view.updateTableStatusDisplay(service.getAllTables());
                         });
 
                     } else {
@@ -1295,7 +1808,7 @@ public class RestaurantController {
 
             // 刷新界面
             refreshTablesDisplay();
-
+            view.updateTableStatusDisplay(service.getAllTables());
             // 刷新预约监控面板（如果是数量模式）
             TableReservation reservation = service.getReservationDetail(reservationId);
             if (reservation != null && "QUANTITY".equals(reservation.getTableSelectionMode())) {
@@ -1570,7 +2083,7 @@ public class RestaurantController {
 
                     // 3.3 根据订单类型获取标识 → 🔧 只查找 existingOrderId，不执行合并！
                     if (finalOrderType == OrderType.DINE_IN) {
-                        // 堂食：生成订单号 + 获取 tableId
+                        // 1. 生成订单号 + 获取 tableId
                         String prefix = "T";
                         String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                         Integer seq = orderService.getNextDineInOrderNumber(dateStr);
@@ -1582,32 +2095,84 @@ public class RestaurantController {
                         }
                         tableId = table.getTableId();
 
-                        // 🔧【核心修改】RESERVED 状态餐桌：只查找订单，不合并！
-                        if (table.getStatus() == Tables.TableStatus.RESERVED) {
-                            // 先找预点餐订单（NO_ORDER 状态）
-                            Order preOrder = orderService.findOrderByTableIdAndStatus(tableId, "NO_ORDER");
-                            if (preOrder != null && preOrder.getOrderId() != null) {
-                                existingOrderId = preOrder.getOrderId();
-                                System.out.println("🔧 找到预点餐订单: orderId=" + existingOrderId);
-                            } else {
-                                // 再找活跃订单
-                                existingOrderId = orderService.findActiveOrderIdByTableId(tableId);
-                                if (existingOrderId != null) {
-                                    System.out.println("🔧 找到活跃订单: orderId=" + existingOrderId);
-                                } else {
-                                    throw new RuntimeException(
-                                            "餐桌 " + finalIdentifier + " 尚未添加预点餐菜品！\n\n" +
-                                                    "请先在【预定餐桌】→【修改资料】中为该预约添加菜品，\n" +
-                                                    "或联系管理员确认预约配置。"
-                                    );
+                        // 2. 🔧【核心修复】查找现有订单逻辑优化
+                        // 优先查找状态为 ORDERED 的活跃订单
+                        existingOrderId = orderService.findActiveOrderIdByTableId(tableId);
+
+                        // 🔧 如果没找到活跃订单，检查是否关联了预约（预点餐场景）
+                        // 场景：客人刚入座，预点餐订单状态可能还是 NO_ORDER，findActiveOrderIdByTableId 查不到
+                        if (existingOrderId == null && table.getCurrentReservationId() != null && !table.getCurrentReservationId().isEmpty()) {
+                            String reservationId = table.getCurrentReservationId();
+                            // 尝试通过 reservation_id 查找关联的订单（支持 NO_ORDER 和 ORDERED 状态）
+                            Order linkedOrder = orderService.findActiveOrderByReservationId(reservationId);
+
+                            if (linkedOrder != null) {
+                                existingOrderId = linkedOrder.getOrderId();
+                                System.out.println("🔧 [修复重复订单] 找到关联的预点餐订单 (orderId=" + existingOrderId +
+                                        ", status=" + linkedOrder.getStatus() + ")，将复用该订单。");
+                            }
+                            // 🔧【核心修復】立即升級預點餐訂單狀態：NO_ORDER → ORDERED
+                            if ("NO_ORDER".equals(linkedOrder.getStatus())) {
+                                boolean upgraded = orderService.upgradePreOrderStatus(existingOrderId);
+                                if (upgraded) {
+                                    // 🔧 同時更新內存中的 order 對象狀態（供後續邏輯使用）
+                                    linkedOrder.setStatus("ORDERED");
                                 }
                             }
-                        } else {
-                            // OCCUPIED 状态：直接找活跃订单
-                            existingOrderId = orderService.findActiveOrderIdByTableId(tableId);
                         }
 
-                    } else if (finalOrderType == OrderType.PICKUP || finalOrderType == OrderType.DELIVERY) {
+                        // 3. 如果仍然没找到订单，且不是预点餐场景，才报错或创建新订单
+                        // (注意：你的原代码里如果是 RESERVED 状态会抛异常，这里逻辑要兼容)
+                        if (existingOrderId == null) {
+                            // 这里保留你原有的逻辑，如果是 RESERVED 状态报错，或者创建新订单
+                            // 但根据你的日志，此时 table 状态应该是 OCCUPIED
+                            if (table.getStatus() == Tables.TableStatus.RESERVED) {
+                                throw new RuntimeException("餐桌 " + finalIdentifier + " 尚未添加预点餐菜品！...");
+                            }
+                            // 如果是 OCCUPIED 但没找到订单，说明是普通入座后首次点餐，existingOrderId 保持 null，下面会创建新订单
+                        }
+                    }
+// ================= 修改后的代码结束 =================
+//                    if (finalOrderType == OrderType.DINE_IN) {
+//                        // 堂食：生成订单号 + 获取 tableId
+//                        String prefix = "T";
+//                        String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+//                        Integer seq = orderService.getNextDineInOrderNumber(dateStr);
+//                        orderNumber = String.format("%s-%s-%03d", prefix, dateStr, seq);
+//
+//                        Tables table = service.getTableById(finalIdentifier);
+//                        if (table == null) {
+//                            throw new RuntimeException("未找到餐桌：" + finalIdentifier);
+//                        }
+//                        tableId = table.getTableId();
+//
+//                        // 🔧【核心修改】RESERVED 状态餐桌：只查找订单，不合并！
+//                        if (table.getStatus() == Tables.TableStatus.RESERVED) {
+//                            // 先找预点餐订单（NO_ORDER 状态）
+//                            Order preOrder = orderService.findOrderByTableIdAndStatus(tableId, "NO_ORDER");
+//                            if (preOrder != null && preOrder.getOrderId() != null) {
+//                                existingOrderId = preOrder.getOrderId();
+//                                System.out.println("🔧 找到预点餐订单: orderId=" + existingOrderId);
+//                            } else {
+//                                // 再找活跃订单
+//                                existingOrderId = orderService.findActiveOrderIdByTableId(tableId);
+//                                if (existingOrderId != null) {
+//                                    System.out.println("🔧 找到活跃订单: orderId=" + existingOrderId);
+//                                } else {
+//                                    throw new RuntimeException(
+//                                            "餐桌 " + finalIdentifier + " 尚未添加预点餐菜品！\n\n" +
+//                                                    "请先在【预定餐桌】→【修改资料】中为该预约添加菜品，\n" +
+//                                                    "或联系管理员确认预约配置。"
+//                                    );
+//                                }
+//                            }
+//                        } else {
+//                            // OCCUPIED 状态：直接找活跃订单
+//                            existingOrderId = orderService.findActiveOrderIdByTableId(tableId);
+//                        }
+//
+//                    }
+                    else if (finalOrderType == OrderType.PICKUP || finalOrderType == OrderType.DELIVERY) {
                         // 外卖/配送：通过订单号获取
                         if (finalIdentifier != null && !finalIdentifier.isEmpty() && !"待下单".equals(finalIdentifier)) {
                             Order existingOrder = orderService.findActiveOrderByOrderNumber(finalIdentifier);
@@ -1783,7 +2348,10 @@ public class RestaurantController {
                     get();
                     if (finalOnSuccess != null) {
                         SwingUtilities.invokeLater(() -> {
-                            service.refreshTableCache();
+                            if (finalOrderType == OrderType.DINE_IN && view != null) {
+                                service.refreshTableCache();
+                                view.updateTableStatusDisplay(service.getAllTables());
+                            }
                             finalOnSuccess.run();
                         });
                     }
@@ -1817,6 +2385,7 @@ public class RestaurantController {
             // 2. 成功後刷新餐桌緩存（可選）
             service.refreshTableCache();
 
+            view.updateTableStatusDisplay(service.getAllTables());
             // 🔧【日誌】記錄操作成功
 //            System.out.println(" [SUCCESS] 標記上桌成功 - 餐桌:" + tableNumber +
 //                    ", 菜品:" + itemId + ", 數量:" + quantity +
@@ -1850,6 +2419,7 @@ public class RestaurantController {
             throw new RuntimeException("系統異常: " + e.getMessage(), e);
         }
     }
+
     /**
      * 一鍵標記所有菜品為已上桌（Controller 層 - 僅轉發 + UI 處理）
      */
@@ -1861,7 +2431,9 @@ public class RestaurantController {
             // 成功後刷新餐桌緩存
             service.refreshTableCache();
 
-            System.out.println(" Controller: 全部上桌成功 - " + tableNumber);
+            view.updateTableStatusDisplay(service.getAllTables());
+
+          //  System.out.println(" Controller: 全部上桌成功 - " + tableNumber);
 
         } catch (IllegalArgumentException | SQLException e) {
             // 異常統一拋出，由 View 層顯示錯誤
@@ -1875,7 +2447,7 @@ public class RestaurantController {
     public void handleMarkReadyForTakeout(String orderNumber, int itemId, int quantity) throws SQLException {
         try {
             orderService.markTakeoutItemsAsReady(orderNumber, itemId, quantity);
-            System.out.println(" Controller: 外賣製作完成標記成功 - " + orderNumber);
+            //System.out.println(" Controller: 外賣製作完成標記成功 - " + orderNumber);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw e;
         } catch (SQLException e) {
@@ -1910,23 +2482,43 @@ public class RestaurantController {
     }
 
 
+
     /**
-     * 撤銷堂食訂單中的菜品（Controller 層 - 支持预约订单确认逻辑）
+     * 撤销堂食订单中的菜品（支持选择删除已上桌/未上桌部分）
+     *
+     * <p>当菜品状态为 { PARTIALLY_SERVED} 时，通过 {@code deleteServedPart} 参数区分：
+     * <ul>
+     *   <li>{@code true}：删除已上桌部分 → 减少 {@code served_quantity}</li>
+     *   <li>{@code false}：删除未上桌部分 → 减少 {@code quantity}（总数量）</li>
+     * </ul>
+     *
+     * @param tableNumber 餐桌显示编号（如 "7" 或 "7a"）
+     * @param itemCode 菜品编号（如 "A1"）
+     * @param cancelQuantity 要撤销的数量
+     * @param cancellationReason 撤销原因
+     * @param  {@code true}=删除已上桌部分，{@code false}=删除未上桌部分
+     * @throws SQLException 操作失败时抛出
+     * @throws IllegalArgumentException 参数验证失败时抛出
      */
-    public void handleCancelOrderItem(String tableNumber, String itemCode, int cancelQuantity, String cancellationReason) throws SQLException {
+    public void handleCancelOrderItem(String tableNumber, String itemCode, int cancelQuantity,
+                                      String cancellationReason, String cancelPart) throws SQLException {
         try {
             // 🔧【核心】判断是否为预约关联的餐桌
             Tables table = service.getTableById(tableNumber);
             String reservationId = (table != null) ? table.getCurrentReservationId() : null;
 
             if (reservationId != null && !reservationId.isEmpty()) {
-                // 🔧 预约订单：调用支持确认逻辑的方法
-                handleCancelReservationOrderItem(tableNumber, itemCode, cancelQuantity, cancellationReason, reservationId);
+                // 🔧 预约订单：调用支持确认逻辑的方法（同步添加 cancelPart 参数）
+                handleCancelReservationOrderItem(tableNumber, itemCode, cancelQuantity,
+                        cancellationReason, reservationId, cancelPart);
             } else {
-                // 🔧 普通堂食订单：直接调用原有方法
-                orderService.cancelOrderItem(tableNumber, itemCode, cancelQuantity, cancellationReason);
+                // 🔧 普通堂食订单：调用支持 cancelPart 的 Service 方法
+                orderService.cancelOrderItem(tableNumber, itemCode, cancelQuantity,
+                        cancellationReason, cancelPart);
                 service.refreshTableCache();
-                System.out.println(" Controller: 堂食撤銷成功 - " + tableNumber);
+                view.updateTableStatusDisplay(service.getAllTables());
+                System.out.println(" Controller: 堂食撤銷成功 - " + tableNumber +
+                        " | cancelPart=" + cancelPart);
             }
         } catch (IllegalArgumentException | IllegalStateException e) {
             // 業務驗證異常，直接拋出給 View 層處理
@@ -1938,24 +2530,33 @@ public class RestaurantController {
     }
 
     /**
-     * 🔧 新增：處理預約訂單的菜品撤銷（帶確認對話框）
+     * 🔧 新增：處理預約訂單的菜品撤銷（帶確認對話框 + 支持選擇刪除部分）
      * 當撤銷最後一個菜品時，彈窗詢問是否保留預約記錄
+     *
+     * @param tableNumber 餐桌顯示編號
+     * @param itemCode 菜品編號
+     * @param cancelQuantity 撤銷數量
+     * @param cancellationReason 撤銷原因
+     * @param reservationId 預約號
+     * @param cancelPart true=刪除已上桌部分，false=刪除未上桌部分
      */
     private void handleCancelReservationOrderItem(String tableNumber, String itemCode, int cancelQuantity,
-                                                  String cancellationReason, String reservationId) throws SQLException {
+                                                  String cancellationReason, String reservationId,
+                                                  String cancelPart) throws SQLException {
         // 1. 調用 Service 執行撤銷，返回結果（含是否需要確認的標誌）
+        // 🔧【關鍵】傳入 cancelPart 參數
         Map<String, Object> result = orderService.cancelReservationOrderItemWithConfirm(
-                tableNumber, itemCode, cancelQuantity, cancellationReason, reservationId);
+                tableNumber, itemCode, cancelQuantity, cancellationReason, reservationId, cancelPart);
 
         // 2. 檢查是否需要用戶確認
         if (Boolean.TRUE.equals(result.get("needConfirm"))) {
             // 🔧 彈出確認對話框
             int confirm = JOptionPane.showConfirmDialog(
                     view,
-                    "<html><b> 這是預約訂單的最後一個菜品！</b><br><br>" +
+                    "<html><b>⚠️ 這是預約訂單的最後一個菜品！</b><br><br>" +
                             "是否保留預約記錄？<br><br>" +
                             "<font color='blue'>是</font>：保留預約訂單，pre_order 保持為 1，可繼續點餐<br>" +
-                            "<font color='red'> 否</font>：刪除預約訂單，pre_order 改為 0</html>",
+                            "<font color='red'>否</font>：刪除預約訂單，pre_order 改為 0</html>",
                     "確認保留預約",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE
@@ -1964,22 +2565,23 @@ public class RestaurantController {
             Integer orderId = (Integer) result.get("orderId");
 
             if (confirm == JOptionPane.YES_OPTION) {
-                //  用戶選擇"是"：保留預約訂單
+                // 用戶選擇"是"：保留預約訂單
                 orderService.confirmKeepReservationOrder(reservationId, orderId);
                 service.refreshTableCache();
-                System.out.println(" 預約訂單已保留: reservationId=" + reservationId);
+                System.out.println("✅ 預約訂單已保留: reservationId=" + reservationId);
             } else {
-                //  用戶選擇"否"：刪除預約訂單
+                // 用戶選擇"否"：刪除預約訂單
                 orderService.confirmDeleteReservationOrder(reservationId, orderId);
                 service.refreshTableCache();
-                System.out.println(" 預約訂單已刪除: reservationId=" + reservationId);
+                System.out.println("🗑️ 預約訂單已刪除: reservationId=" + reservationId);
             }
         } else {
             // 不需要確認，直接刷新
             service.refreshTableCache();
         }
 
-        System.out.println(" Controller: 預約訂單撤銷處理完成 - " + tableNumber);
+        System.out.println("🔄 Controller: 預約訂單撤銷處理完成 - " + tableNumber +
+                " | cancelPart=" + cancelPart);
     }
 
     /**
@@ -2023,15 +2625,16 @@ public class RestaurantController {
 
         // 2. 🔧 如果成功，刷新餐桌缓存（由 RestaurantService 管理）
         if (Boolean.TRUE.equals(result.get("success"))) {
-            service.refreshTableCache();  // ← 使用 RestaurantService 刷新缓存
-            System.out.println(" 已刷新餐桌缓存: " + tableNumber);
+            service.refreshTableCache();
+            view.updateTableStatusDisplay(service.getAllTables());
+         //   System.out.println(" 已刷新餐桌缓存: " + tableNumber);
         }
 
         return result;
     }
 
 
-public void updateReservationOrderItemPrepared(String reservationId, int orderItemId,
+    public void updateReservationOrderItemPrepared(String reservationId, int orderItemId,
                                                String itemCode, int preparedQty,
                                                String newStatus, String assignedTableDisplayId) {
     try {
@@ -2056,38 +2659,88 @@ public void updateReservationOrderItemPrepared(String reservationId, int orderIt
 
 
     /**
-     * 🔧 聚餐桌专用：撤销菜品（通过 orderItemId 精确撤销）
+     * 🔧 聚餐桌专用：智能撤销菜品（数量=0时删除，否则更新）
      *
-     * @param tableNumber 餐桌显示编号
-     * @param orderItemId 订单项主键（精确标识）
+     * @param tableNumber        餐桌显示编号
+     * @param orderItemId        订单项主键
+     * @param cancelQuantity     撤销数量
      * @param cancellationReason 撤销原因
+     * @param cancelPart         🔧 新增：撤销部分（"SERVED"=已上桌部分 / "UNSERVED"=未上桌部分 / "ALL"=全部）
      * @throws SQLException 操作失败时抛出
      */
-    public void handleCancelGroupedTableOrderItem(String tableNumber, int orderItemId, String cancellationReason) throws SQLException {
+    public void handleCancelGroupedTableOrderItemSmart(String tableNumber, int orderItemId,
+                                                       int cancelQuantity, String cancellationReason,
+                                                       String cancelPart) throws SQLException {
         if (tableNumber == null || tableNumber.trim().isEmpty()) {
             throw new IllegalArgumentException("餐桌号不能为空");
         }
         if (orderItemId <= 0) {
-            throw new IllegalArgumentException("订单项 ID 无效");
+            throw new IllegalArgumentException("订单项ID无效");
+        }
+        if (cancelQuantity <= 0) {
+            throw new IllegalArgumentException("撤销数量必须大于0");
+        }
+        // 🔧 参数校验：cancelPart 必须为有效值
+        if (cancelPart != null && !List.of("SERVED", "UNSERVED", "ALL").contains(cancelPart)) {
+            throw new IllegalArgumentException("撤销部分参数无效，必须为: SERVED / UNSERVED / ALL");
         }
 
-        // 直接调用 Service 层方法（事务由 @Transactional 管理）
-        orderService.cancelGroupedTableOrderItemByOrderItemId(orderItemId, cancellationReason);
+        // 直接调用Service层方法（事务由@Transactional管理）
+        // 🔧 传递新增的 cancelPart 参数
+        orderService.cancelGroupedTableOrderItemSmart(orderItemId, cancelQuantity, cancellationReason, cancelPart);
 
         // 成功后刷新餐桌缓存
         service.refreshTableCache();
-        System.out.println(" Controller: 聚餐桌菜品撤销成功 - orderItemId=#" + orderItemId);
+        System.out.println("🗑️ 聚餐桌菜品撤销完成: orderItemId=#" + orderItemId +
+                ", 撤销数量=" + cancelQuantity + ", 撤销部分=" + cancelPart);
     }
 
     /**
-     * 🔧 聚餐桌专用：撤销有 quantity_distribution 的菜品（Controller 层代理）
+     * 🔧 聚餐桌共同菜品撤销（智能更新 quantity/served_quantity/status/distribution）
+     *
+     * @param orderItemId         订单项主键
+     * @param cancelQuantity      撤销数量
+     * @param newQuantity         新总数量
+     * @param newServedQuantity   新已上桌数量
+     * @param newStatus           新状态
+     * @param newAssignedTableIds 新 assigned_table_display_id
+     * @param newDistribution     新 quantity_distribution
+     * @param cancellationReason  撤销原因
+     * @param cancelPart          🔧 撤销部分：SERVED/UNSERVED（仅用于业务逻辑，不持久化）
+     * @throws SQLException 操作失败时抛出
      */
-    public void handleCancelGroupedTableOrderItemWithDistribution(
-            String tableDisplayId, int orderItemId, String cancelTableId, int cancelQuantity) throws SQLException {
-        orderService.cancelGroupedTableOrderItemWithDistribution(
-                tableDisplayId, orderItemId, cancelTableId, cancelQuantity);
-    }
+    public void handleCancelSharedDishOrderItem(
+            int orderItemId, int cancelQuantity, int newQuantity,
+            int newServedQuantity, String newStatus,
+            String newAssignedTableIds, String newDistribution,
+            String cancellationReason, String cancelPart) throws SQLException {
 
+        if (orderItemId <= 0) {
+            throw new IllegalArgumentException("订单项ID无效");
+        }
+        if (cancelQuantity <= 0) {
+            throw new IllegalArgumentException("撤销数量必须大于0");
+        }
+
+        // 直接调用 Service 层方法（事务由 @Transactional 管理）
+        // cancelPart 仅用于业务逻辑判断，不持久化，故不传入 Mapper
+        orderService.cancelSharedDishOrderItem(
+                orderItemId, cancelQuantity, newQuantity,
+                newServedQuantity, newStatus,
+                newAssignedTableIds, newDistribution,
+                cancellationReason, cancelPart
+        );
+
+        // 成功后刷新餐桌缓存
+        service.refreshTableCache();
+
+        System.out.println("🗑️ 共同菜品撤销完成: orderItemId=#" + orderItemId +
+                ", cancelQty=" + cancelQuantity +
+                ", newQty=" + newQuantity +
+                ", newStatus=" + newStatus +
+                ", assignedTables=" + newAssignedTableIds +
+                ", cancelPart=" + cancelPart);
+    }
 
     private void showError(String message) {
         if (view != null) {
@@ -2100,5 +2753,6 @@ public void updateReservationOrderItemPrepared(String reservationId, int orderIt
     public OrderService getOrderService() {
         return orderService;
     }
+
 
 }

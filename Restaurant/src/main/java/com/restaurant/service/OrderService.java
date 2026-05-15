@@ -627,8 +627,6 @@ public class OrderService {
     }
 
 
-
-
     /**
      * 🔧 辅助方法：排序餐桌ID（确保 "14,13,15" = "13,14,15"）
      */
@@ -855,7 +853,7 @@ public class OrderService {
         int perTableQuantity;  // 每桌应上桌的份额
 
         String quantityDistribution = item.getQuantityDistribution();
-            // 🔧【DEBUG 1】打印原始 distribution 值
+        // 🔧【DEBUG 1】打印原始 distribution 值
 //        System.out.println("🔍 [DEBUG] itemCode=" + item.getItemCode() +
 //                ", quantityDistribution=[" + quantityDistribution + "]");
 
@@ -1136,106 +1134,85 @@ public class OrderService {
     }
 
 
+
     /**
-     * 🔧【核心修復】根據 served_quantity 和總數量計算撤銷後的正確狀態
-     * 4 種情況：
-     * 1. 預約訂單（客人未入座）→ PREPARING/PREPARED/UNSERVED
-     * 2. 客人已入座 + 菜品未上桌 → PREPARING/PREPARED/UNSERVED
-     * 3. 客人已入座 + 菜品已上桌 → PARTIALLY_SERVED/SERVED/UNSERVED
-     * 4. 普通堂食訂單 → 根據 servedQty 和 newQty 計算
-     *
-     * @param servedQty           已上桌/已準備數量
-     * @param originalQty         原訂單總數量
-     * @param cancelQuantity      本次撤銷數量
-     * @param originalStatus      數據庫當前狀態
-     * @param isReservationOrder  是否為預約訂單（order_type='RESERVATION'）
-     * @param isReservationSeated 是否為預約入座（currentReservationId 不為空）
-     * @return 撤銷後應使用的狀態字符串
+     * 🔧【核心修复】根据 served_quantity 和总数量计算撤销后的正确状态
      */
     private String calculateCancelledStatus(int servedQty, int originalQty, int cancelQuantity,
                                             String originalStatus,
                                             boolean isReservationOrder,
-                                            boolean isReservationSeated) {
-        int newQty = Math.max(0, originalQty - cancelQuantity);      // 撤銷後的新數量
-        int newServedQty = Math.min(servedQty, newQty);              // 已上桌數量不能超過新總數
+                                            boolean isReservationSeated,
+                                            boolean cancelServedPart) {
+        int newQty = Math.max(0, originalQty - cancelQuantity);
+
+        // 🔧【核心修复】计算新的已上桌数量，确保与 cancelOrderItem 中的逻辑完全一致
+        int newServedQty;
+        if ("PARTIALLY_SERVED".equals(originalStatus)) {
+            if (cancelServedPart) {
+                // 撤销已上桌部分：直接减少 served_quantity
+                newServedQty = Math.max(0, servedQty - cancelQuantity);
+            } else {
+                // 撤销未上桌部分：served_quantity 保持不变
+                newServedQty = servedQty;
+            }
+        } else {
+            // 其他状态（SERVED/UNSERVED/PREPARING等）：已上桌数量不能超过新总数量
+            newServedQty = Math.min(servedQty, newQty);
+        }
 
         // ═══════════════════════════════════════════════════════════
-        // 【情況 1】預約訂單（客人未入座）→ 只能是 PREPARING/PREPARED/UNSERVED
+        // 【情况 1】预约订单（客人未入座）→ 只能是 PREPARING/PREPARED/UNSERVED
         // ═══════════════════════════════════════════════════════════
         if (isReservationOrder && !isReservationSeated) {
             if (newQty == 0) {
-                return "UNSERVED";                          // 全部撤銷，狀態重置
+                return "UNSERVED";                          // 全部撤销，状态重置
             } else if (newServedQty == 0) {
-                return "UNSERVED";                          // 🔧【核心修復】已準備0份 = 未準備
+                return "UNSERVED";                          // 🔧 已准备 0 份 = 未准备
             } else if (newServedQty >= newQty) {
-                return "PREPARED";                          // 剩餘的全部已準備
+                return "PREPARED";                          // 剩余的全部已准备
             } else {
-                return "PREPARING";                         // 部分準備中 (0 < served < total)
+                return "PREPARING";                         // 部分准备中 (0 < served < total)
             }
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 【情況 2&3】預約入座（currentReservationId 存在）
+        // 【情况 2&3】预约入座（currentReservationId 存在）
         // ═══════════════════════════════════════════════════════════
         if (isReservationSeated) {
-            // ──【情況 2】原狀態是未上桌（PREPARING/PREPARED/UNSERVED）
-            if ("PREPARING".equals(originalStatus) ||
-                    "PREPARED".equals(originalStatus) ||
-                    "UNSERVED".equals(originalStatus)) {
-
-                if (newQty == 0) {
-                    return "UNSERVED";                      // 全部撤銷
-                } else if (newServedQty == 0) {
-                    return "UNSERVED";                      // 🔧【核心修復】已準備0份 = 未準備
-                } else if (newServedQty >= newQty) {
-                    return "PREPARED";                      // 剩餘的全部已準備
-                } else {
-                    return "PREPARING";                     // 部分準備中
-                }
-            }
-            // ──【情況 3】原狀態是已上桌（PARTIALLY_SERVED/SERVED）
-            else if ("PARTIALLY_SERVED".equals(originalStatus) ||
-                    "SERVED".equals(originalStatus)) {
-
-                if (newQty == 0) {
-                    return "UNSERVED";                      // 全部撤銷
-                } else if (newServedQty >= newQty) {
-                    return "SERVED";                        // 剩餘的全部已上桌
-                } else if (newServedQty > 0) {
-                    return "PARTIALLY_SERVED";              // 部分上桌
-                } else {
-                    return "UNSERVED";                      // 撤銷後沒有已上桌的
-                }
-            }
-            // 兜底
-            else {
+            if ("PREPARING".equals(originalStatus) || "PREPARED".equals(originalStatus) || "UNSERVED".equals(originalStatus)) {
+                if (newQty == 0) return "UNSERVED";
+                if (newServedQty == 0) return "UNSERVED";
+                if (newServedQty >= newQty) return "PREPARED";
+                return "PREPARING";
+            } else if ("PARTIALLY_SERVED".equals(originalStatus) || "SERVED".equals(originalStatus)) {
+                if (newQty == 0) return "UNSERVED";
+                if (newServedQty >= newQty) return "SERVED";
+                if (newServedQty > 0) return "PARTIALLY_SERVED";
+                return "UNSERVED";
+            } else {
                 return "PREPARING";
             }
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 【情況 4】普通堂食訂單（無 currentReservationId）
+        // 【情况 4】普通堂食订单（无 currentReservationId）
         // ═══════════════════════════════════════════════════════════
         if (newQty == 0) {
-            return "UNSERVED";                              // 全部撤銷
+            return "UNSERVED";                              // 全部撤销
         } else if (newServedQty == 0) {
-            return "UNSERVED";                              // 🔧【核心修復】沒有已上桌的
+            return "UNSERVED";                              // 🔧【核心修复】没有已上桌的 -> UNSERVED
         } else if (newServedQty >= newQty) {
-            return "SERVED";                                // 剩餘的全部已上桌
+            return "SERVED";                                // 剩余的全部已上桌
         } else if (newServedQty > 0) {
             return "PARTIALLY_SERVED";                      // 部分上桌
         } else {
-            return "UNSERVED";                              // 沒有已上桌的
+            return "UNSERVED";                              // 没有已上桌的
         }
     }
 
-    /**
-     * 撤銷堂食訂單中的菜品（@Transactional 自動管理事務）
-     * 🔧【核心修復】使用 calculateCancelledStatus 計算撤銷後的正確狀態
-     * 🔧【核心修復】只有已上桌的菜品才記錄撤銷審計
-     */
     @Transactional
-    public void cancelOrderItem(String tableNumber, String itemCode, int cancelQuantity, String cancellationReason) throws SQLException {
+    public void cancelOrderItem(String tableNumber, String itemCode, int cancelQuantity,
+                                String cancellationReason, String cancelServedPart) throws SQLException {
         // ===== 1. 基礎驗證 =====
         if (tableNumber == null || tableNumber.trim().isEmpty()) {
             throw new IllegalArgumentException("餐桌號不能为空");
@@ -1246,6 +1223,17 @@ public class OrderService {
         if (cancelQuantity <= 0) {
             throw new IllegalArgumentException("撤銷數量必須大於 0");
         }
+
+        // 🔧 验证 cancelServedPart 参数
+        if (cancelServedPart == null || cancelServedPart.trim().isEmpty()) {
+            throw new IllegalArgumentException("cancelServedPart 参数不能为空");
+        }
+
+        // 🔧 将字符串转换为 boolean 逻辑
+        // 支持值: "SERVED"/"true"/"1" 表示删除已上桌部分；其他值表示删除未上桌部分
+        boolean shouldCancelServed = "SERVED".equalsIgnoreCase(cancelServedPart.trim()) ||
+                "true".equalsIgnoreCase(cancelServedPart.trim()) ||
+                "1".equals(cancelServedPart.trim());
 
         // ===== 2. 獲取餐桌 → 餐桌 ID =====
         Tables table = tablesMapper.findByDisplayId(tableNumber.trim());
@@ -1272,7 +1260,7 @@ public class OrderService {
             throw new IllegalStateException("訂單中找不到菜品: " + itemCode);
         }
 
-        // ===== 6. 🔧【核心】判斷訂單類型和入座狀態（與 mergeOrderItems 一致）=====
+        // ===== 6. 🔧【核心】判斷訂單類型和入座狀態 =====
         Order order = orderMapper.findById(orderId);
         boolean isReservationOrder = "RESERVATION".equals(order.getOrderType());
         boolean isReservationSeated = false;
@@ -1291,72 +1279,79 @@ public class OrderService {
         // ===== 7. 計算新數量和狀態 =====
         int totalQty = currentStatus.getQuantity();
         int servedQty = currentStatus.getServedQuantity();
+        int unservedQty = totalQty - servedQty;
 
-        // 🔧 获取原状态（用於狀態計算和審計記錄）
         String originalStatus = orderItemMapper.getItemStatus(orderId, itemId);
 
-        // 🔧【核心修复】使用 calculateCancelledStatus 計算新狀態
+        // 🔧【核心修复】处理 PARTIALLY_SERVED 状态的撤销逻辑
+        if ("PARTIALLY_SERVED".equals(originalStatus)) {
+            if (shouldCancelServed) {
+                if (cancelQuantity > servedQty) {
+                    throw new IllegalArgumentException(
+                            "菜品 " + itemCode + " 已上桌數量為 " + servedQty +
+                                    "，撤銷數量 (" + cancelQuantity + ") 不能超過已上桌數量！");
+                }
+            } else {
+                if (cancelQuantity > unservedQty) {
+                    throw new IllegalArgumentException(
+                            "菜品 " + itemCode + " 未上桌數量為 " + unservedQty +
+                                    "，撤銷數量 (" + cancelQuantity + ") 不能超過未上桌數量！");
+                }
+            }
+        }
+
+        // 🔧【核心修复】使用 calculateCancelledStatus 計算新狀態 应为5 个实参，但实际为 7 个
         String newStatus = calculateCancelledStatus(
-                servedQty,              // 已上桌數量
-                totalQty,               // 原數量
-                cancelQuantity,         // 撤銷數量
-                originalStatus,         // 原狀態
-                isReservationOrder,     // 是否預約訂單
-                isReservationSeated     // 是否預約入座
-        );
+                servedQty, totalQty, cancelQuantity, originalStatus,
+                isReservationOrder, isReservationSeated, shouldCancelServed);
 
         int newQty = Math.max(0, totalQty - cancelQuantity);
-        int newServedQty = Math.min(servedQty, newQty);
+        // 🔧【核心】根据取消部分计算新的已上桌数量
+        int newServedQty;
+        if ("PARTIALLY_SERVED".equals(originalStatus)) {
+            if (shouldCancelServed) {
+                // 🔹 撤銷已上桌部分：直接減少 served_quantity
+                newServedQty = Math.max(0, servedQty - cancelQuantity);
+            } else {
+                // 🔹 撤銷未上桌部分：served_quantity 保持不變
+                newServedQty = servedQty;
+            }
+        } else {
+            // 其他狀態的兜底邏輯
+            newServedQty = Math.min(servedQty, newQty);
+        }
 
         System.out.println("🔧 菜品 " + itemCode +
                 " 原:" + originalStatus + "(" + servedQty + "/" + totalQty + ")" +
-                " - 撤銷:" + cancelQuantity +
-                " → 新狀態:" + newStatus + "(" + newServedQty + "/" + newQty + ")" +
-                " [預約訂單:" + isReservationOrder + ", 預約入座:" + isReservationSeated + "]");
+                " - 撤銷:" + cancelQuantity + " (cancelServedPart=" + cancelServedPart + ")" +
+                " → 新狀態:" + newStatus + "(" + newServedQty + "/" + newQty + ")");
 
         // ===== 8. 🔧【核心修復】執行撤銷操作 =====
         if (newQty == 0) {
-            //  完全撤銷：刪除明細
-
-            // 🔧【核心修复】只有已上桌的菜品才记录撤销审计
-            // 准备中的菜品（PREPARING/PREPARED/UNSERVED）不需要记录审计
-            if ("SERVED".equals(originalStatus) ||
-                    "PARTIALLY_SERVED".equals(originalStatus)) {
-                // 已上桌菜品：记录审计 + 删除
+            if ("SERVED".equals(originalStatus) || "PARTIALLY_SERVED".equals(originalStatus)) {
                 orderItemMapper.recordCancellation(itemCode, cancelQuantity,
                         cancellationReason != null ? cancellationReason : "用戶撤銷",
-                        originalStatus);  // 使用原状态
-                System.out.println(" 已记录撤销审计：菜品 " + itemCode +
-                        " 状态=" + originalStatus);
-            } else {
-                // 未上桌菜品（PREPARING/PREPARED/UNSERVED）：直接删除，不记录
-                System.out.println(" 准备中的菜品直接删除，不记录审计：菜品 " + itemCode +
-                        " 状态=" + originalStatus);
+                        originalStatus);
             }
-
-            // 删除订单项（所有情况都删除）
             orderItemMapper.deleteOrderItem(orderId, itemId);
-            System.out.println(" 菜品 " + itemCode + " 已完全撤銷並刪除");
         } else {
-            // 部分撤銷：更新數量和狀態（使用 calculateCancelledStatus 計算的新狀態）
             orderItemMapper.updateOrderItemAfterCancel(orderId, itemId, newQty, newServedQty, newStatus);
-            System.out.println(" 菜品 " + itemCode + " 部分撤銷，新狀態: " + newStatus);
         }
 
         // ===== 9. 重新計算訂單總金額 =====
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
-            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+            orderMapper.updateOrderTotals(orderId, newTotal, newTotal); // ✅ 同步更新 items_total
         }
 
         // ===== 10. 檢查訂單是否為空 → 刪除空訂單 =====
         if (!orderItemMapper.hasRemainingItems(orderId)) {
             orderMapper.deleteOrder(orderId);
-            System.out.println(" 空訂單已自動刪除: orderId=" + orderId);
         }
 
         System.out.println(" 撤銷成功 - 餐桌:" + tableNumber + ", 菜品:" + itemCode + ", 數量:" + cancelQuantity);
     }
+
 
     /**
      * 撤銷外賣訂單中的菜品（@Transactional，原因可選）
@@ -1408,7 +1403,7 @@ public class OrderService {
         // 6. 重新計算訂單總金額
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
-            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+            orderMapper.updateOrderTotals(orderId, newTotal, newTotal);
         }
 
         // 7. 檢查訂單是否為空 → 刪除空訂單
@@ -1457,7 +1452,6 @@ public class OrderService {
 
         System.out.println(" 外卖整单撤销成功 - 订单号:" + orderNumber);
     }
-
 
 
     @Transactional
@@ -1523,168 +1517,6 @@ public class OrderService {
                 ", 新配送费=" + newDeliveryFee + ", 新总金额=" + totalAmount);
     }
 
-    @Transactional(rollbackFor = Exception.class)
-    public void cancelGroupedTableOrderItemByOrderItemId(int orderItemId, String cancellationReason) throws SQLException {
-        // ===== 1. 基础验证 =====
-        if (orderItemId <= 0) {
-            throw new IllegalArgumentException("订单项 ID 无效：" + orderItemId);
-        }
-
-        // ===== 2. 查询订单项（获取餐桌信息）=====
-        OrderItem orderItem = orderItemMapper.selectByPrimaryKey(orderItemId);
-        if (orderItem == null) {
-            throw new IllegalStateException("订单项不存在：" + orderItemId);
-        }
-
-        // ===== 3. 验证是否为聚餐桌订单 =====
-        Order order = orderMapper.findById(orderItem.getOrderId());
-        if (order == null || order.getTableId() == null) {
-            throw new IllegalStateException("订单或餐桌不存在");
-        }
-
-        Tables table = tablesMapper.findById(order.getTableId());
-        if (table == null || table.getTableType() != Tables.TableType.GROUPED) {
-            throw new IllegalStateException("此方法仅支持聚餐桌（GROUPED）订单，当前餐桌类型：" +
-                    (table != null ? table.getTableType() : "null"));
-        }
-
-        // ===== 4. 🔧【核心】执行聚餐桌专用撤销（只处理 quantity_distribution 为 null 的场景）=====
-        // 如果 quantity_distribution 不为 null，说明是一键点餐菜品，不走此逻辑
-        if (orderItem.getQuantityDistribution() != null) {
-            throw new IllegalStateException("一键点餐菜品（有 quantity_distribution）请使用普通撤销逻辑");
-        }
-
-        // 🔧【修复】提取要撤销的桌号
-        String tableDisplayIdToCancel = extractTableDisplayIdToCancel(orderItem, cancellationReason);
-
-        // 🔧【修复】使用提取出的桌号
-        int updated = orderItemMapper.cancelGroupedTableOrderItemByOrderItemId(
-                orderItemId,
-                tableDisplayIdToCancel,  // ← 使用提取的桌号
-                cancellationReason
-        );
-
-        if (updated == 0) {
-            throw new RuntimeException("聚餐桌菜品撤销失败：可能数量已为 0 或数据不匹配");
-        }
-
-        // ===== 5. 🔧【新增】记录撤销审计日志 =====
-        try {
-            // 计算撤销金额（撤销 1 份）
-            double cancelledAmount = orderItem.getPriceAtOrder();
-
-            // 记录到 order_cancellations 表
-            orderMapper.recordCancellation(
-                    "ITEM",                          // cancellationType: 菜品撤销
-                    order.getOrderId(),              // orderId
-                    order.getOrderNumber(),          // orderNumber
-                    orderItem.getItemCode(),         // itemCode
-                    1,                               // cancelledQuantity: 撤销 1 份
-                    orderItem.getStatus(),           // beforeStatus: 撤销前状态
-                    cancelledAmount,                 // cancelledAmount: 撤销金额
-                    cancellationReason != null ? cancellationReason : "用户撤销"  // reason
-            );
-
-            System.out.println("📝 已记录撤销审计：orderItemId=#" + orderItemId +
-                    ", itemCode=" + orderItem.getItemCode() +
-                    ", amount=" + cancelledAmount);
-        } catch (Exception e) {
-            // 审计记录失败不影响主流程，但记录日志
-            System.err.println("⚠️ 记录撤销审计失败：" + e.getMessage());
-            e.printStackTrace();
-        }
-
-        // ===== 6. 记录日志 =====
-        System.out.println("🗑️ 聚餐桌菜品撤销成功: orderItemId=#" + orderItemId +
-                ", table=" + tableDisplayIdToCancel +  // ← 使用提取的桌号
-                ", reason=" + (cancellationReason != null ? cancellationReason : "用户撤销"));
-    }
-    /**
-     * 🔧 提取要撤销的桌号
-     */
-    private String extractTableDisplayIdToCancel(OrderItem orderItem, String cancellationReason) {
-        // 如果 cancellationReason 本身就是桌号（如 "16"），直接使用
-        if (cancellationReason != null && cancellationReason.matches("\\d+")) {
-            return cancellationReason;
-        }
-
-        // 否则从 assigned_table_display_id 中取第一个桌号
-        if (orderItem.getAssignedTableDisplayId() != null &&
-                !orderItem.getAssignedTableDisplayId().isEmpty()) {
-            String[] tables = orderItem.getAssignedTableDisplayId().split(",");
-            if (tables.length > 0) {
-                return tables[0].trim();
-            }
-        }
-
-        return cancellationReason;  // 兜底
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void cancelGroupedTableOrderItemWithDistribution(
-            String tableDisplayId, int orderItemId, String cancelTableId, int cancelQuantity) {
-
-        OrderItem item = orderItemMapper.selectByPrimaryKey(orderItemId);
-        if (item == null) throw new IllegalStateException("订单项不存在: #" + orderItemId);
-
-        // 🔧【修复 1】解析 + 空值校验
-        Map<String, Integer> distribution = parseQuantityDistribution(item.getQuantityDistribution());
-        if (distribution == null || distribution.isEmpty()) {
-            throw new IllegalStateException("❌ distribution 解析失败或为空！原始值: " + item.getQuantityDistribution());
-        }
-
-        Integer tableQty = distribution.get(cancelTableId);
-        if (tableQty == null) {
-            throw new IllegalStateException("❌ 桌号 " + cancelTableId + " 不在 distribution 中");
-        }
-        if (cancelQuantity > tableQty) {
-            throw new IllegalArgumentException("撤销数量 " + cancelQuantity + " > 分配数量 " + tableQty);
-        }
-
-        // 🔧【修复 2】更新 distribution
-        int newTableQty = tableQty - cancelQuantity;
-        int newTotalQty = item.getQuantity() - cancelQuantity;
-
-        if (newTableQty <= 0) {
-            distribution.remove(cancelTableId);
-            System.out.println("🗑️ 移除桌号: " + cancelTableId);
-        } else {
-            distribution.put(cancelTableId, newTableQty);
-            System.out.println("✏️ 更新桌号 " + cancelTableId + ": " + tableQty + " → " + newTableQty);
-        }
-
-        // 🔧【修复 3】按桌号数字升序排序（关键！）
-        Map<String, Integer> sortedMap = distribution.entrySet().stream()
-                .sorted(Comparator.comparingInt(e ->
-                        Integer.parseInt(e.getKey().replaceAll("[^0-9]", ""))))
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey, Map.Entry::getValue,
-                        (a, b) -> a, LinkedHashMap::new));
-
-        // 🔧【修复 4】生成新值（用排序后的 Map）
-        String newDistributionStr = sortedMap.isEmpty() ? null : formatQuantityDistribution(sortedMap);
-        String newAssignedTableIds = sortedMap.isEmpty() ? null :
-                String.join(",", sortedMap.keySet());
-
-        // 🔧【修复 5】计算新状态
-        String newStatus = calculateStatusAfterCancel(newTotalQty, item.getServedQuantity());
-
-        // 🔧【修复 6】调试日志（必须加！）
-        System.out.println("🔥 DEBUG BEFORE SQL:");
-        System.out.println("  orderItemId: " + orderItemId);
-        System.out.println("  newTotalQty: " + newTotalQty);
-        System.out.println("  newStatus: " + newStatus);
-        System.out.println("  newDistribution: " + newDistributionStr);
-        System.out.println("  newAssignedIds: " + newAssignedTableIds);
-
-        // 🔧【修复 7】执行更新/删除
-        if (newTotalQty <= 0) {
-            orderItemMapper.deleteOrderItemByOrderItemId(orderItemId);
-        } else {
-            orderItemMapper.updateGroupedOrderItemWithDistribution(
-                    orderItemId, newTotalQty, newStatus, newDistributionStr, newAssignedTableIds);
-        }
-    }
 
     // 辅助方法：计算撤销后状态
     private String calculateStatusAfterCancel(int newTotalQty, int servedQty) {
@@ -1694,47 +1526,6 @@ public class OrderService {
         return "UNSERVED";
     }
 
-
-    /**
-     * 🔧 解析 quantity_distribution JSON 字符串
-     */
-    private Map<String, Integer> parseQuantityDistribution(String jsonStr) {
-        Map<String, Integer> result = new LinkedHashMap<>();
-        if (jsonStr == null || jsonStr.isEmpty()) return result;
-        try {
-            String content = jsonStr.replaceAll("[{}\\s]", "");
-            if (content.isEmpty()) return result;
-            String[] pairs = content.split(",");
-            for (String pair : pairs) {
-                String[] kv = pair.split(":");
-                if (kv.length == 2) {
-                    String tableId = kv[0].replaceAll("\"", "").trim();
-                    int qty = Integer.parseInt(kv[1].trim());
-                    result.put(tableId, qty);
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("解析 quantity_distribution 失败: " + jsonStr);
-            e.printStackTrace();
-        }
-        return result;
-    }
-
-    /**
-     * 🔧 格式化 distribution 为 JSON 字符串
-     */
-    private String formatQuantityDistribution(Map<String, Integer> distribution) {
-        if (distribution == null || distribution.isEmpty()) return null;
-        StringBuilder json = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, Integer> entry : distribution.entrySet()) {
-            if (!first) json.append(",");
-            json.append("\"").append(entry.getKey()).append("\":").append(entry.getValue());
-            first = false;
-        }
-        json.append("}");
-        return json.toString();
-    }
 
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> processTakeoutCheckout(String orderNumber, double paymentAmount) {
@@ -2129,17 +1920,17 @@ public class OrderService {
     }
 
 
-    /**
-     * 🔧 撤销预约订单中的菜品（通过 reservation_id）
-     *
-     * @return Map{success: Boolean, needConfirm: Boolean, message: String}
-     * needConfirm=true 表示需要用户确认是否保留预约
-     */
-    @Transactional
-    public Map<String, Object> cancelReservationOrderItem(String reservationId, int itemId, int quantity, String cancellationReason) throws SQLException {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> cancelReservationOrderItem(
+            String reservationId,
+            int itemId,
+            int quantity,
+            String cancellationReason,
+            String cancelPart) throws SQLException {  // 🔧 参数类型改为 String
+
         Map<String, Object> result = new HashMap<>();
 
-        // 1. 基础验证
+        // ===== 1-4. 基础验证 + 查询订单 + 计算新数量（保持不变）=====
         if (reservationId == null || reservationId.trim().isEmpty()) {
             result.put("success", false);
             result.put("message", "预约号不能为空");
@@ -2151,7 +1942,6 @@ public class OrderService {
             return result;
         }
 
-        // 2. 通过 reservation_id 查找预点餐订单
         Order order = orderMapper.findPreOrderByReservationId(reservationId);
         if (order == null || order.getOrderId() == null) {
             result.put("success", false);
@@ -2160,7 +1950,6 @@ public class OrderService {
         }
         Integer orderId = order.getOrderId();
 
-        // 3. 查询当前菜品状态
         OrderItemServingStatus currentStatus = orderItemMapper.getServingStatus(orderId, itemId);
         if (currentStatus == null) {
             result.put("success", false);
@@ -2168,90 +1957,66 @@ public class OrderService {
             return result;
         }
 
-        // 4. 计算新数量和状态
         int totalQty = currentStatus.getQuantity();
         int servedQty = currentStatus.getServedQuantity();
         int newQty = Math.max(0, totalQty - quantity);
         int newServedQty = Math.min(servedQty, newQty);
 
-        // 🔧【核心修复】检查是否为最后一个菜品
-        boolean isLastItem = false;
+        // ===== 5. 执行撤销（保持不变）=====
         if (newQty == 0) {
-            // 查询订单中是否还有其他菜品
-            List<OrderItem> remainingItems = orderMapper.findOrderItemsByReservationId(reservationId);
-            if (remainingItems != null) {
-                // 过滤掉当前正在删除的菜品
-                long otherItemCount = remainingItems.stream()
-                        .filter(item -> item.getItemId() != itemId)
-                        .count();
-                isLastItem = (otherItemCount == 0);
-            }
-        }
-
-        // 5. 执行撤销
-        if (newQty == 0) {
-            // ── 完全撤销：删除明细 ──
             String itemCode = orderItemMapper.getItemCodeByItemId(itemId);
-
-            // 🔧 只有已上桌的菜品才记录撤销审计
             if ("SERVED".equals(currentStatus) || "PARTIALLY_SERVED".equals(currentStatus)) {
                 orderItemMapper.recordCancellation(itemCode, quantity,
                         cancellationReason != null ? cancellationReason : "用户撤销",
                         String.valueOf(currentStatus));
-                System.out.println(" 已记录撤销审计：菜品 " + itemCode + " 状态=" + currentStatus);
-            } else {
-                System.out.println("🗑准备中/预约订单菜品直接删除，不记录审计：菜品 " + itemCode);
             }
-
-            // 删除订单项
             orderItemMapper.deleteOrderItem(orderId, itemId);
-            System.out.println(" 菜品 " + itemCode + " 已完全撤销并删除");
-
         } else {
-            // ── 🔧【核心修复】部分撤销：必须调用 Mapper 更新数据库！─
             String itemCode = orderItemMapper.getItemCodeByItemId(itemId);
-
-            // 计算撤销后的新状态（预约订单专用逻辑）
-            String newStatus = calculateCancelledStatus(
-                    servedQty,              // 已上桌数量
-                    totalQty,               // 原数量
-                    quantity,               // 撤销数量
-                    "UNSERVED",             // 预约订单默认状态
-                    true,                   // isReservationOrder = true
-                    false                   // isReservationSeated = false（预点餐阶段客人未入座）
-            );
-
-            // 🔧【关键】执行数据库更新：数量 + 已上桌数 + 状态
+            // 🔧 将 String 转为 boolean 传入（支持 "true"/"false" 或 "1"/"0"）
+            boolean isCancelPart = Boolean.parseBoolean(cancelPart);
+            String newStatus = calculateCancelledStatus(servedQty, totalQty, quantity,
+                    "UNSERVED", true, false, isCancelPart);
             orderItemMapper.updateOrderItemAfterCancel(
-                    orderId,
-                    itemId,
-                    newQty,
-                    newServedQty,
-                    newStatus
-            );
-
+                    orderId, itemId, newQty, newServedQty, newStatus);
             System.out.println(" 菜品部分撤销成功 -> " + itemCode +
                     " 原:" + totalQty + " → 新:" + newQty +
-                    " (状态:" + newStatus + ")");
+                    " (状态:" + newStatus + ", cancelPart:" + cancelPart + ")");
         }
 
-        // 6. 重新计算订单总金额
+        // ===== 6. 重新计算订单总金额（保持不变）=====
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
             orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
         }
 
-        // 🔧【核心修复】如果是最后一个菜品，返回需要确认的标志
-        if (isLastItem) {
-            result.put("success", true);
-            result.put("needConfirm", true);  // 需要用户确认
-            result.put("orderId", orderId);
-            result.put("reservationId", reservationId);
-            result.put("message", "这是最后一个菜品，是否保留预约订单？");
-            return result;
+        // ═══════════════════════════════════════════════════════════
+        // 🔧【核心修改】7. 检查是否为最后一个菜品（仅当 cancelPart=false 时执行）
+        // ═══════════════════════════════════════════════════════════
+        // 🔧 将 String 转为 boolean 进行判断
+        boolean shouldCheckLastItem = !Boolean.parseBoolean(cancelPart);
+        if (shouldCheckLastItem) {  // 🔑 关键：只有非部分撤销时才检查确认
+            boolean isLastItem = false;
+            if (newQty == 0) {
+                List<OrderItem> remainingItems = orderMapper.findOrderItemsByReservationId(reservationId);
+                if (remainingItems != null) {
+                    long otherItemCount = remainingItems.stream()
+                            .filter(item -> item.getItemId() != itemId)
+                            .count();
+                    isLastItem = (otherItemCount == 0);
+                }
+            }
+            if (isLastItem) {
+                result.put("success", true);
+                result.put("needConfirm", true);
+                result.put("orderId", orderId);
+                result.put("reservationId", reservationId);
+                result.put("message", "这是最后一个菜品，是否保留预约订单？");
+                return result;
+            }
         }
 
-        // 7. 检查订单是否为空 → 删除空订单
+        // ===== 8. 检查订单是否为空 → 删除空订单（保持不变）=====
         if (!orderItemMapper.hasRemainingItems(orderId)) {
             orderMapper.deleteOrder(orderId);
         }
@@ -2261,6 +2026,7 @@ public class OrderService {
         result.put("message", "预约订单撤销成功");
         return result;
     }
+
 
     /**
      * 🔧 确认删除预约订单（用户选择"否"时调用）
@@ -2342,16 +2108,10 @@ public class OrderService {
     }
 
 
-    /**
-     * 🔧 撤銷預約訂單中的菜品（支持確認邏輯）
-     *
-     * @return Map{success: Boolean, needConfirm: Boolean, orderId: Integer, reservationId: String, message: String}
-     * 当被注解的方法在执行过程中抛出任何异常（包括受检异常和运行时异常）时，Spring 都会自动回滚当前数据库事务。
-     */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> cancelReservationOrderItemWithConfirm(
             String tableNumber, String itemCode, int cancelQuantity,
-            String cancellationReason, String reservationId) throws SQLException {
+            String cancellationReason, String reservationId, String cancelServedPart) throws SQLException {
 
         Map<String, Object> result = new HashMap<>();
 
@@ -2406,46 +2166,62 @@ public class OrderService {
             return result;
         }
 
-        // 🔧【關鍵修復】額外查詢菜品狀態字符串（OrderItemServingStatus 不包含 status）
+        // 🔧【關鍵修復】額外查詢菜品狀態字符串
         String currentStatusStr = orderItemMapper.getItemStatus(orderId, itemId);
 
-        // ===== 6. 計算新數量和狀態 =====
+        // ===== 6. 解析 cancelServedPart 字符串為布爾值 =====
+        // 支持："true"/"false", "YES"/"NO", "1"/"0" 等格式
+        boolean shouldCancelServed = parseBooleanString(cancelServedPart);
+
+        // ===== 7. 計算新數量和狀態 =====
         int totalQty = currentStatus.getQuantity();
         int servedQty = currentStatus.getServedQuantity();
         int newQty = Math.max(0, totalQty - cancelQuantity);
-        int newServedQty = Math.min(servedQty, newQty);
 
-        // ===== 7. 執行撤銷操作 =====
+        // 🔧【核心】计算新的已上桌数量（根据 shouldCancelServed 参数）
+        int newServedQty;
+        if ("PARTIALLY_SERVED".equals(currentStatusStr) && !shouldCancelServed) {
+            // 删除未上桌部分：已上桌数量保持不变
+            newServedQty = servedQty;
+        } else {
+            // 删除已上桌部分或其他情况：已上桌数量不能超过新总数量
+            newServedQty = Math.min(servedQty, newQty);
+        }
+
+        // ===== 8. 執行撤銷操作 =====
         if (newQty == 0) {
             // 🔧 完全撤銷：記錄審計 + 刪除明細
-            // 只有已上桌的菜品才記錄審計
             if ("SERVED".equals(currentStatusStr) || "PARTIALLY_SERVED".equals(currentStatusStr)) {
                 orderItemMapper.recordCancellation(itemCode, cancelQuantity,
                         cancellationReason != null ? cancellationReason : "用戶撤銷",
-                        currentStatusStr);  // 🔧 使用 currentStatusStr 而非 currentStatus.getStatus()
+                        currentStatusStr);
                 System.out.println(" 已記錄撤銷審計：菜品 " + itemCode + " 狀態=" + currentStatusStr);
             } else {
-                // 準備中的菜品直接刪除，不記錄審計
                 System.out.println(" 準備中的菜品直接刪除，不記錄審計：菜品 " + itemCode + " 狀態=" + currentStatusStr);
             }
             orderItemMapper.deleteOrderItem(orderId, itemId);
         } else {
-            // 🔧 部分撤銷：更新數量和狀態（使用 calculateCancelledStatus）
+            // 🔧 部分撤銷：更新數量和狀態
             String newStatus = calculateCancelledStatus(
-                    servedQty, totalQty, cancelQuantity, currentStatusStr,  //  使用 currentStatusStr
+                    servedQty,
+                    totalQty,
+                    cancelQuantity,
+                    currentStatusStr,
                     "RESERVATION".equals(order.getOrderType()),
-                    table.getCurrentReservationId() != null
+                    table.getCurrentReservationId() != null,
+                    shouldCancelServed  // 🔧 传入解析后的布尔值
             );
             orderItemMapper.updateOrderItemAfterCancel(orderId, itemId, newQty, newServedQty, newStatus);
         }
 
-        // ===== 8. 重新計算訂單總金額 =====
+        // ===== 9. 重新計算訂單總金額 =====
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
-            orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
+            orderMapper.updateOrderTotals(orderId, newTotal, newTotal);
+
         }
 
-        // ===== 9. 【核心】檢查是否為預約訂單的最後一個菜品 =====
+        // ===== 10. 檢查是否為最後一個菜品 =====
         boolean isLastItem = false;
         if (newQty == 0) {
             List<OrderItem> remainingItems = orderMapper.findOrderItemsByOrderId(orderId);
@@ -2457,18 +2233,18 @@ public class OrderService {
             }
         }
 
-        // ===== 10. 如果需要確認，返回標誌 =====
+        // ===== 11. 如果需要確認，返回標誌 =====
         if (isLastItem) {
             result.put("success", true);
-            result.put("needConfirm", true);      //  關鍵：需要用戶確認
+            result.put("needConfirm", true);
             result.put("orderId", orderId);
             result.put("reservationId", reservationId);
-            result.put("currentOrderStatus", order.getStatus());  // 傳遞當前狀態
+            result.put("currentOrderStatus", order.getStatus());
             result.put("message", "這是預約訂單的最後一個菜品，是否保留預約？");
             return result;
         }
 
-        // ===== 11. 檢查訂單是否為空 → 刪除空訂單 =====
+        // ===== 12. 檢查訂單是否為空 → 刪除空訂單 =====
         if (!orderItemMapper.hasRemainingItems(orderId)) {
             orderMapper.deleteOrder(orderId);
             System.out.println(" 空訂單已自動刪除: orderId=" + orderId);
@@ -2479,6 +2255,22 @@ public class OrderService {
         result.put("message", "撤銷成功");
         return result;
     }
+
+    /**
+     * 🔧 輔助方法：將字符串解析為布爾值
+     * 支持格式："true"/"false", "YES"/"NO", "1"/"0", "Y"/"N"
+     *
+     * @param value 字符串值
+     * @return 解析後的布爾值，無法解析時返回 false
+     */
+    private boolean parseBooleanString(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return false;
+        }
+        String trimmed = value.trim().toUpperCase();
+        return "TRUE".equals(trimmed) || "YES".equals(trimmed) || "1".equals(trimmed) || "Y".equals(trimmed);
+    }
+
 
     @Transactional(readOnly = true)
     public Order findOrderByTableIdAndStatus(Integer tableId, String status) {
@@ -2502,6 +2294,26 @@ public class OrderService {
         return next != null ? next : 1;
     }
 
+    /**
+     * 🔧 將預點餐訂單狀態從 NO_ORDER 升級為 ORDERED
+     * @param orderId 訂單ID
+     * @return true=更新成功，false=訂單不存在或狀態已變更
+     */
+    @Transactional
+    public boolean upgradePreOrderStatus(Integer orderId) {
+        if (orderId == null) return false;
+
+        // 使用樂觀鎖更新：只有當前狀態是 NO_ORDER 時才更新
+        int updated = orderMapper.updateOrderStatus(orderId, "ORDERED", "NO_ORDER");
+
+        if (updated > 0) {
+            System.out.println(" 預點餐訂單狀態已升級: orderId=" + orderId + " [NO_ORDER → ORDERED]");
+            return true;
+        } else {
+            System.out.println(" 訂單 " + orderId + " 狀態可能已被其他請求更新，跳過狀態升級");
+            return false;
+        }
+    }
     //  外卖订单号获取（如果有调用3参版本的地方）
     @Transactional(readOnly = true)
     public Integer getNextTakeoutOrderNumber(String prefix, String dateStr, String deliveryMethod) {
@@ -2978,5 +2790,308 @@ public class OrderService {
     }
 
 
+    /**
+     * 🔧 聚餐桌专用：智能撤销菜品（数量=0时删除，否则更新）
+     *
+     * @param orderItemId        订单项主键
+     * @param cancelQuantity     撤销数量
+     * @param cancellationReason 撤销原因
+     * @throws SQLException 操作失败时抛出
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelGroupedTableOrderItemSmart(int orderItemId, int cancelQuantity,
+                                                 String cancellationReason, String cancelPart) throws SQLException {
+        // ===== 1. 查询订单项（获取当前状态）=====
+        OrderItem orderItem = orderItemMapper.selectByPrimaryKey(orderItemId);
+        if (orderItem == null) {
+            throw new IllegalStateException("订单项不存在：" + orderItemId);
+        }
 
+        // ===== 2. 验证是否为聚餐桌订单 =====
+        Order order = orderMapper.findById(orderItem.getOrderId());
+        if (order == null || order.getTableId() == null) {
+            throw new IllegalStateException("订单或餐桌不存在");
+        }
+
+        Tables table = tablesMapper.findById(order.getTableId());
+        if (table == null || table.getTableType() != Tables.TableType.GROUPED) {
+            throw new IllegalStateException("此方法仅支持聚餐桌（GROUPED）订单，当前餐桌类型：" +
+                    (table != null ? table.getTableType() : "null"));
+        }
+
+        // ===== 3. 计算撤销后的新数量 =====
+        int currentQuantity = orderItem.getQuantity();
+        int newQuantity = currentQuantity - cancelQuantity;
+
+        if (newQuantity < 0) {
+            throw new IllegalArgumentException("撤销数量(" + cancelQuantity +
+                    ")不能超过当前数量(" + currentQuantity + ")");
+        }
+
+        // 🔧【日志】记录 cancelPart 参数
+        System.out.println("🗑️ 聚餐桌撤销请求: orderItemId=#" + orderItemId +
+                ", cancelQuantity=" + cancelQuantity +
+                ", cancelPart=" + cancelPart);
+
+        // ===== 4. 🔧【核心】智能处理：数量=0时删除，否则更新 =====
+        if (newQuantity == 0) {
+            // ── 情况1：数量归零 → 删除订单项 ──
+            handleDeleteOrderItem(orderItemId, orderItem, order, cancellationReason, cancelPart);
+        } else {
+            // ── 情况2：数量>0 → 更新订单项 ──
+            handleUpdateOrderItem(orderItemId, orderItem, newQuantity, cancellationReason, cancelPart);
+        }
+    }
+
+    /**
+     * 🔧 辅助方法：删除订单项（数量归零时）
+     */
+    private void handleDeleteOrderItem(int orderItemId, OrderItem orderItem, Order order,
+                                       String cancellationReason, String cancelPart) throws SQLException {
+        System.out.println("🗑️ 订单项数量归零，执行删除: orderItemId=#" + orderItemId +
+                (cancelPart != null ? ", cancelPart=" + cancelPart : ""));
+
+        // 1. 记录撤销审计日志
+        recordCancellation(orderItem, order, cancellationReason, cancelPart);
+
+        // 2. 删除订单项
+        int deleted = orderItemMapper.deleteOrderItemByOrderItemId(orderItemId);
+        if (deleted == 0) {
+            throw new RuntimeException("删除订单项失败：orderItemId=" + orderItemId);
+        }
+
+        // 3. 重新计算订单总金额
+        recalculateOrderTotal(order.getOrderId());
+
+        // 4. 检查订单是否为空 → 删除空订单
+        checkAndDeleteEmptyOrder(order.getOrderId());
+
+        System.out.println("✅ 订单项已删除: orderItemId=#" + orderItemId);
+    }
+
+    /**
+     * 🔧 辅助方法：更新订单项（数量>0时）
+     */
+    private void handleUpdateOrderItem(int orderItemId, OrderItem orderItem, int newQuantity,
+                                       String cancellationReason, String cancelPart) throws SQLException {
+        System.out.println("✏️ 订单项数量更新: orderItemId=#" + orderItemId +
+                ", 原数量=" + orderItem.getQuantity() + ", 新数量=" + newQuantity +
+                (cancelPart != null ? ", cancelPart=" + cancelPart : ""));
+
+        // 1. 计算新的served_quantity（不能超过新数量）
+        int newServedQuantity = Math.min(orderItem.getServedQuantity(), newQuantity);
+
+        // 2. 计算新状态
+        String newStatus = calculateStatusAfterCancel(newQuantity, newServedQuantity);
+
+        // 3. 记录撤销审计日志
+        recordCancellation(orderItem, null, cancellationReason, cancelPart);
+
+        // 4. 更新订单项
+        int updated = orderItemMapper.updateGroupedOrderItemQuantity(
+                orderItemId,
+                newQuantity,
+                newServedQuantity,
+                newStatus
+        );
+        if (updated == 0) {
+            throw new RuntimeException("更新订单项失败：orderItemId=" + orderItemId);
+        }
+
+        // 5. 重新计算订单总金额
+        recalculateOrderTotal(orderItem.getOrderId());
+
+        System.out.println("✅ 订单项已更新: orderItemId=#" + orderItemId +
+                ", 新状态=" + newStatus);
+    }
+
+    /**
+     * 🔧 辅助方法：记录撤销审计日志
+     */
+    private void recordCancellation(OrderItem orderItem, Order order,
+                                   String cancellationReason, String cancelPart) {
+        try {
+            double cancelledAmount = orderItem.getPriceAtOrder() *
+                    (order != null ? 1 : orderItem.getQuantity());
+
+            // 🔧 如果 cancellationReason 为空，使用 cancelPart 作为原因
+            String finalReason = (cancellationReason != null && !cancellationReason.isEmpty())
+                    ? cancellationReason
+                    : (cancelPart != null ? "撤销部分: " + cancelPart : "用户撤销");
+
+            orderMapper.recordCancellation(
+                    "ITEM",
+                    order != null ? order.getOrderId() : orderItem.getOrderId(),
+                    order != null ? order.getOrderNumber() : null,
+                    orderItem.getItemCode(),
+                    1,
+                    orderItem.getStatus(),
+                    cancelledAmount,
+                    finalReason
+            );
+        } catch (Exception e) {
+            System.err.println("⚠️ 记录撤销审计失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 🔧 辅助方法：重新计算订单总金额
+     */
+    private void recalculateOrderTotal(int orderId) {
+        Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
+        if (newTotal != null) {
+            orderMapper.updateOrderTotals(orderId, newTotal, newTotal);
+        }
+    }
+
+    /**
+     * 🔧 辅助方法：检查并删除空订单
+     */
+    private void checkAndDeleteEmptyOrder(int orderId) {
+        if (!orderItemMapper.hasRemainingItems(orderId)) {
+            orderMapper.deleteOrder(orderId);
+            System.out.println("🗑️ 空订单已删除: orderId=" + orderId);
+        }
+    }
+
+    /**
+     * 🔧 聚餐桌共同菜品撤销（智能更新 quantity/served_quantity/status/distribution）
+     *
+     * @param orderItemId         订单项主键
+     * @param cancelQuantity      撤销数量
+     * @param newQuantity         新总数量
+     * @param newServedQuantity   新已上桌数量
+     * @param newStatus           新状态
+     * @param newAssignedTableIds 新 assigned_table_display_id
+     * @param newDistribution     新 quantity_distribution
+     * @param cancellationReason  撤销原因
+     * @param cancelPart          🔧 撤销部分：SERVED/UNSERVED（仅用于业务逻辑，不持久化）
+     * @throws SQLException 操作失败时抛出
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelSharedDishOrderItem(
+            int orderItemId, int cancelQuantity, int newQuantity,
+            int newServedQuantity, String newStatus,
+            String newAssignedTableIds, String newDistribution,
+            String cancellationReason, String cancelPart) throws SQLException {
+
+        // 1. 查询订单项（用于记录审计日志）
+        OrderItem orderItem = orderItemMapper.selectByPrimaryKey(orderItemId);
+        if (orderItem == null) {
+            throw new IllegalStateException("订单项不存在：" + orderItemId);
+        }
+
+        // 2. 验证是否为聚餐桌订单
+        Order order = orderMapper.findById(orderItem.getOrderId());
+        if (order == null || order.getTableId() == null) {
+            throw new IllegalStateException("订单或餐桌不存在");
+        }
+
+        Tables table = tablesMapper.findById(order.getTableId());
+        if (table == null || table.getTableType() != Tables.TableType.GROUPED) {
+            throw new IllegalStateException("此方法仅支持聚餐桌（GROUPED）订单");
+        }
+
+        // 🔧【业务逻辑】根据 cancelPart 进行额外处理（不持久化）
+        if (cancelPart != null) {
+            if ("SERVED".equals(cancelPart)) {
+                // 撤销已上桌部分：可添加额外业务逻辑（如通知厨房、更新统计等）
+                System.out.println("🗑️ 撤销已上桌部分: orderItemId=#" + orderItemId +
+                        ", cancelQty=" + cancelQuantity);
+            } else if ("UNSERVED".equals(cancelPart)) {
+                // 撤销未上桌部分：可添加额外业务逻辑
+                System.out.println("🗑️ 撤销未上桌部分: orderItemId=#" + orderItemId +
+                        ", cancelQty=" + cancelQuantity);
+            }
+            // 🔧 此处可添加其他业务逻辑，如发送通知、记录操作日志等
+            // 注意：所有逻辑都不涉及数据库更新，仅内存处理
+        }
+
+        // 3. 🔧 执行数据库更新（单条更新，精确匹配 order_item_id）
+        // cancelPart 不传入 Mapper，因为不需要持久化
+        int updated = orderItemMapper.updateSharedDishOrderItem(
+                orderItemId,
+                newQuantity,
+                newServedQuantity,
+                newStatus,
+                newAssignedTableIds,
+                newDistribution
+        );
+
+        if (updated == 0) {
+            throw new RuntimeException("更新订单项失败：orderItemId=" + orderItemId);
+        }
+
+        // 4. 记录撤销审计日志（仅当有已上桌数量时记录）
+        if (orderItem.getServedQuantity() > 0) {
+            double cancelledAmount = orderItem.getPriceAtOrder() * cancelQuantity;
+            orderMapper.recordCancellation(
+                    "ITEM",
+                    order.getOrderId(),
+                    order.getOrderNumber(),
+                    orderItem.getItemCode(),
+                    cancelQuantity,
+                    orderItem.getStatus(),
+                    cancelledAmount,
+                    cancellationReason != null ? cancellationReason : "用户撤销"
+            );
+        }
+
+        // 5. 重新计算订单总金额
+        recalculateOrderTotal(order.getOrderId());
+
+        // 6. 如果数量归零，检查是否删除订单
+        if (newQuantity <= 0) {
+            checkAndDeleteEmptyOrder(order.getOrderId());
+        }
+
+        System.out.println("✅ 共同菜品撤销完成: orderItemId=#" + orderItemId +
+                ", newQty=" + newQuantity +
+                ", newServedQty=" + newServedQuantity +
+                ", newStatus=" + newStatus +
+                ", cancelPart=" + cancelPart);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+// 🔧【新增】公开方法：供 View/Controller 调用底层 Mapper 操作
+// ═══════════════════════════════════════════════════════════
+
+    /**
+     * 🔧 记录撤销审计日志（公开方法，供外部调用）
+     */
+    @Transactional
+    public void recordCancellation(
+            String cancellationType,
+            Integer orderId,
+            String orderNumber,
+            String itemCode,
+            Integer cancelledQuantity,
+            String beforeStatus,
+            Double cancelledAmount,
+            String reason) {
+
+        orderMapper.recordCancellation(
+                cancellationType,
+                orderId,
+                orderNumber,
+                itemCode,
+                cancelledQuantity,
+                beforeStatus,
+                cancelledAmount,
+                reason
+        );
+    }
+
+    /**
+     * 🔧 根据 order_item_id 物理删除订单项（公开方法，供外部调用）
+     * @param orderItemId 订单项主键
+     * @return 影响行数
+     */
+    @Transactional
+    public int deleteOrderItemByOrderItemId(Integer orderItemId) {
+        if (orderItemId == null || orderItemId <= 0) {
+            throw new IllegalArgumentException("orderItemId 无效");
+        }
+        return orderItemMapper.deleteOrderItemByOrderItemId(orderItemId);
+    }
 }

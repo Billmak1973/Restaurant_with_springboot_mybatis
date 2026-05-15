@@ -13,7 +13,6 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
-import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -2924,7 +2923,7 @@ public class HomePanel extends JPanel {
         // 🔧 初始提示可见性：如果默认是手动且是聚餐桌，则显示提示
         if (manualOption.isSelected() && isGroupedTable) {
             hintPanel.setVisible(true);
-        }else {
+        } else {
             // 确保其他模式下初始状态隐藏
             hintPanel.setVisible(false);
         }
@@ -3184,9 +3183,9 @@ public class HomePanel extends JPanel {
     /**
      * 🔧【新增】检查 quantity_distribution 并提示不均匀分配
      *
-     * @param dialog        对话框
-     * @param items         同菜品的订单项列表
-     * @param itemCode      菜品编号
+     * @param dialog   对话框
+     * @param items    同菜品的订单项列表
+     * @param itemCode 菜品编号
      */
     private void checkAndNotifyUnevenDistribution(JFrame dialog, List<OrderItem> items, String itemCode) {
         for (OrderItem item : items) {
@@ -4260,9 +4259,56 @@ public class HomePanel extends JPanel {
 
 
     /**
+     * 🔧 询问撤销已上桌还是未上桌部分
+     */
+    private String askCancelPartDialog(Component parent, String itemCode, String itemName,
+                                       int totalQty, int servedQty) {
+
+//        // 🔧【Debug 1】方法入口：記錄調用參數
+//        System.out.println("🔍 [DEBUG] askCancelPartDialog 被調用: " +
+//                "itemCode=" + itemCode +
+//                ", itemName=" + itemName +
+//                ", totalQty=" + totalQty +
+//                ", servedQty=" + servedQty);
+
+        String[] options = {"① 撤销已上桌部分", "② 撤销未上桌部分"};
+
+        int choice = JOptionPane.showOptionDialog(
+                parent,
+                "🍽️ 菜品 【" + itemName + "】(" + itemCode + ") 当前状态：\n" +
+                        "已上桌 " + servedQty + " / 总计 " + totalQty + "\n\n" +
+                        "请选择要撤销的部分：",
+                "选择撤销范围",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null, options, options[0]
+        );
+
+        // 🔧【Debug 2】用戶選擇後：記錄 choice 值
+//        System.out.println("🔍 [DEBUG] 用戶選擇: choice=" + choice);
+
+        if (choice < 0) {
+            // 🔧【Debug 3a】用戶取消
+//            System.out.println("🔍 [DEBUG] 用戶取消選擇，返回 null");
+            return null;
+        }
+
+        String result = choice == 0 ? "SERVED" : "UNSERVED";
+
+        // 🔧【Debug 3b】記錄最終返回值
+//        System.out.println("🔍 [DEBUG] 返回結果: " + result +
+//                " (choice=" + choice + ")");
+
+        return result;
+    }
+
+
+    /**
      * 統一撤銷菜品對話框（僅堂食需要撤銷原因，外賣不需要）
      * 🔧 修复：菜品编号比较时统一转大写，确保已上桌菜品能正确触发撤销原因弹窗
+     * 🔧【新增】支持部分上桌菜品选择撤销"已上桌部分"或"未上桌部分"
      */
+
     private void showCancelOrderItemDialog() {
         // 1. 根據訂單類型獲取標識符 + 標籤文本
         String identifier;
@@ -4296,6 +4342,7 @@ public class HomePanel extends JPanel {
         JTextField itemIdField = new JTextField();
         JLabel quantityLabel = new JLabel("<html>撤銷數量（用逗號\",\"分隔；未填默認為 1）:</html>");
         JTextField quantityField = new JTextField("1");
+
         // 🔧【新增】菜品类型单选按钮面板（初始隐藏，确认时动态判断）
         JPanel radioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         radioPanel.setBackground(new Color(245, 248, 255));
@@ -4331,8 +4378,8 @@ public class HomePanel extends JPanel {
 
         // 🔧 菜品类型行（默认隐藏，聚餐桌时显示）
         JLabel dishTypeLabel = new JLabel("菜品类型:");
-        dishTypeLabel.setVisible(false);  // 🔧 默认隐藏
-        radioPanel.setVisible(false);      // 🔧 默认隐藏
+        dishTypeLabel.setVisible(false);  //  默认隐藏
+        radioPanel.setVisible(false);      //  默认隐藏
         inputPanel.add(dishTypeLabel);
         inputPanel.add(radioPanel);
 
@@ -4356,6 +4403,7 @@ public class HomePanel extends JPanel {
 
         // ===== 取消按鈕 =====
         cancelBtn.addActionListener(evt -> dialog.dispose());
+
         // ═══════════════════════════════════════════════════════════
         // 🔧【新增】判断是否为聚餐桌，如果是则显示菜品类型选择
         // ═══════════════════════════════════════════════════════════
@@ -4364,38 +4412,39 @@ public class HomePanel extends JPanel {
             if (table != null && table.getTableType() == Tables.TableType.GROUPED) {
                 dishTypeLabel.setVisible(true);
                 radioPanel.setVisible(true);
-                System.out.println("🔧 检测到聚餐桌 #" + identifier + "，显示菜品类型选择");
+                // System.out.println("🔧 检测到聚餐桌 #" + identifier + "，显示菜品类型选择");
 
                 // 重新计算对话框高度
                 dialog.pack();
                 dialog.setSize(650, 530);  // 增加高度以容纳单选按钮
             }
         }
+
         // ===== 確認按鈕 =====
         // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】確認按鈕事件處理器（整合聚餐桌專用邏輯）
+        // 🔧【核心修改】確認按鈕事件處理器（整合聚餐桌專用邏輯 + 部分上桌选择撤销部分）
         // ═══════════════════════════════════════════════════════════
         confirmBtn.addActionListener(evt -> {
+            // ═══════════════════════════════════════════════════════════
+            // 【阶段 1】基础输入验证（保持不变）
+            // ═══════════════════════════════════════════════════════════
             String inputId = idField.getText().trim();
             if (inputId.isEmpty()) {
                 JOptionPane.showMessageDialog(dialog, idLabel + "不能为空！", "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
-            // 驗證訂單/餐桌是否存在
+            // 验证订单/餐桌是否存在
             boolean valid = false;
             if (currentOrderType == OrderType.DINE_IN) {
                 Tables table = service.getTableById(inputId);
                 valid = (table != null && (table.getStatus() == Tables.TableStatus.OCCUPIED
                         || table.getStatus() == Tables.TableStatus.RESERVED));
             } else {
-                // 支持预约订单（R开头）和普通外卖订单（P/D开头）
                 if (inputId.startsWith("R")) {
-                    // 预约订单：验证预约号是否存在
                     TableReservation reservation = controller.getReservationDetail(inputId);
                     valid = (reservation != null);
                 } else {
-                    // 普通外卖订单：验证订单号是否存在
                     Order order = frame.findActiveOrderByOrderNumber(inputId);
                     valid = (order != null);
                 }
@@ -4403,7 +4452,8 @@ public class HomePanel extends JPanel {
             if (!valid) {
                 String typeName = currentOrderType == OrderType.DINE_IN ? "餐桌" :
                         (inputId.startsWith("R") ? "預約訂單" : "訂單");
-                JOptionPane.showMessageDialog(dialog, "未找到有效" + typeName + "：" + inputId, "错误", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(dialog, "未找到有效" + typeName + "：" + inputId,
+                        "错误", JOptionPane.ERROR_MESSAGE);
                 return;
             }
 
@@ -4423,7 +4473,7 @@ public class HomePanel extends JPanel {
                 try {
                     int qty = i < quantityStrs.length ? Integer.parseInt(quantityStrs[i].trim()) : 1;
                     if (qty <= 0) {
-                        JOptionPane.showMessageDialog(dialog, "数量必须大于0！", "错误", JOptionPane.ERROR_MESSAGE);
+                        JOptionPane.showMessageDialog(dialog, "数量必须大于 0！", "错误", JOptionPane.ERROR_MESSAGE);
                         allValid = false;
                         break;
                     }
@@ -4436,170 +4486,362 @@ public class HomePanel extends JPanel {
             }
             if (!allValid) return;
 
-            // 🔧【關鍵修改】僅堂食模式檢查撤銷原因
-            String cancellationReason = null;
+            // ═══════════════════════════════════════════════════════════
+            // 【阶段 2】🔧 融合方案：分类型处理撤销原因收集
+            // ═══════════════════════════════════════════════════════════
+
+            // 全局变量：记录每个菜品的撤销部分 + 全局撤销原因
+            Map<String, String> cancelPartMap = new HashMap<>();
+            String globalCancellationReason = null;
+            boolean needsGlobalReason = false;
+
+            // 仅堂食订单需要处理撤销原因逻辑
             if (currentOrderType == OrderType.DINE_IN) {
-                // 堂食：檢查是否有菜品已上桌，需要原因
-                boolean requiresReason = false;
-                List<OrderItem> orderItems = frame.loadFormalOrderItems(inputId);
+                Tables table = service.getTableById(inputId);
+                boolean isGroupedTable = (table != null &&
+                        table.getTableType() == Tables.TableType.GROUPED);
 
-                System.out.println(" 检查撤销原因 - 订单: " + inputId + ", 菜品: " + Arrays.toString(itemIds));
+                // ── 情况 A：普通餐桌 或 聚餐桌的「单桌模式」→ 提前收集 ──
+                if (!isGroupedTable || singleTableRadio.isSelected()) {
+                    List<OrderItem> orderItems = frame.loadFormalOrderItems(inputId);
+                    if (orderItems != null) {
+                        for (String id : itemIds) {
+                            String code = id.trim().toUpperCase();
+                            for (OrderItem item : orderItems) {
+                                if (!code.equalsIgnoreCase(item.getItemCode())) continue;
 
-                if (orderItems != null) {
-                    for (String id : itemIds) {
-                        String code = id.trim().toUpperCase();  // 输入转大写
-                        for (OrderItem item : orderItems) {
-                            // 关键修复：两边都转大写再比较，避免大小写不匹配
-                            String itemCode = item.getItemCode() != null ?
-                                    item.getItemCode().trim().toUpperCase() : "";
-                            String status = item.getStatus();
-                            int servedQty = item.getServedQuantity();
+                                // 单桌模式：只处理分配给当前餐桌的菜品
+                                String assignedId = item.getAssignedTableDisplayId();
+                                if (assignedId != null && !inputId.equals(assignedId.trim())) {
+                                    continue;
+                                }
 
-                            System.out.println("  - 对比: 输入[" + code + "] vs 订单[" + itemCode +
-                                    "], status=" + status + ", servedQty=" + servedQty);
-
-                            // 🔧【核心修复】只有当菜品状态是 PARTIALLY_SERVED 或 SERVED 时才需要原因
-                            // PREPARING 和 PREPARED 状态不需要原因，可以直接删除
-                            if (code.equals(itemCode) &&
-                                    ("PARTIALLY_SERVED".equals(status) || "SERVED".equals(status))) {
-                                requiresReason = true;
-                                System.out.println(" 找到已上桌菜品（状态：" + status + "），需要撤销原因！");
-                                break;
-                            } else if (code.equals(itemCode)) {
-                                System.out.println(" 菜品状态为 " + status + "，无需撤销原因，可直接删除");
+                                String status = item.getStatus();
+                                if ("PARTIALLY_SERVED".equals(status)) {
+                                    // 部分上桌：弹窗询问撤销哪部分
+                                    String part = askCancelPartDialog(dialog, code,
+                                            item.getItemName(), item.getQuantity(),
+                                            item.getServedQuantity());
+                                    if (part == null) return;  // 用户取消
+                                    cancelPartMap.put(code, part);
+                                    needsGlobalReason = true;
+                                } else if ("SERVED".equals(status)) {
+                                    // 全部上桌：默认撤销已上桌部分
+                                    cancelPartMap.put(code, "SERVED");
+                                    needsGlobalReason = true;
+                                } else {
+                                    // 未上桌菜品：无需原因
+                                    cancelPartMap.put(code, "UNSERVED");
+                                }
+                                break;  // 找到匹配项后跳出
                             }
                         }
-                        if (requiresReason) break;
                     }
-                }
 
-                if (requiresReason) {
-                    cancellationReason = JOptionPane.showInputDialog(
-                            dialog,
-                            "该菜品已有部分/全部上桌，请输入撤销原因:",
-                            "需要撤销原因",
-                            JOptionPane.WARNING_MESSAGE
-                    );
-                    if (cancellationReason == null || cancellationReason.trim().isEmpty()) {
-                        JOptionPane.showMessageDialog(
-                                dialog,
-                                "撤销已上桌菜品必须提供原因",
-                                "输入错误",
-                                JOptionPane.ERROR_MESSAGE
-                        );
-                        return;
+                    // 🔹 提前询问撤销原因（普通餐桌逻辑简单，可以提前问）
+                    if (needsGlobalReason) {
+                        globalCancellationReason = JOptionPane.showInputDialog(dialog,
+                                "<html><b>⚠️ 菜品已上桌</b><br><br>" +
+                                        "请输入撤销原因（必填）：</html>",
+                                "需要撤销原因", JOptionPane.WARNING_MESSAGE);
+                        if (globalCancellationReason == null ||
+                                globalCancellationReason.trim().isEmpty()) {
+                            JOptionPane.showMessageDialog(dialog,
+                                    "撤销已上桌菜品必须提供原因",
+                                    "输入错误", JOptionPane.ERROR_MESSAGE);
+                            return;
+                        }
+                        globalCancellationReason = globalCancellationReason.trim();
                     }
-                    cancellationReason = cancellationReason.trim();
-                } else {
-                    System.out.println(" 所有菜品均未上桌或处于准备状态，无需撤销原因");
                 }
+                // ── 情况 B：聚餐桌的「共同菜品/删除所有」模式 → 延迟处理 ──
+                // 不提前收集 cancelPart，等用户选择具体记录后再检查
+                // （在遍历菜品执行时处理）
             }
-            // 外賣模式：不需要撤銷原因，cancellationReason 保持 null
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【核心修改】執行撤銷：聚餐桌專用邏輯 + 普通邏輯分支
+            // 【阶段 3】🔧 遍历菜品执行撤销
             // ═══════════════════════════════════════════════════════════
-            // 🔧【聚餐桌专用】检查是否为聚餐桌且 quantity_distribution 为 null
-
             boolean anySuccess = false;
+
             for (int i = 0; i < itemIds.length; i++) {
                 String code = itemIds[i].trim().toUpperCase();
-                if (!code.isEmpty()) {
-                    // 🔧【聚餐桌专用】检查是否为聚餐桌且 quantity_distribution 为 null
-                    boolean isGroupedTableCancel = false;
+                if (code.isEmpty()) continue;
 
-                    if (currentOrderType == OrderType.DINE_IN) {
-                        Tables table = service.getTableById(inputId);
-                        if (table != null && table.getTableType() == Tables.TableType.GROUPED) {
+                boolean isGroupedTableCancel = false;
 
-                            // 聚餐桌：获取订单项并收集所有匹配的菜品记录
+                if (currentOrderType == OrderType.DINE_IN) {
+                    Tables table = service.getTableById(inputId);
+                    if (table != null && table.getTableType() == Tables.TableType.GROUPED) {
+
+                        // ── 单桌模式：使用提前收集的 cancelPart ──
+                        if (singleTableRadio.isSelected()) {
                             List<OrderItem> orderItems = frame.loadFormalOrderItems(inputId);
-                            List<OrderItem> matchedItems = new ArrayList<>();
-
-                            // 🔹 先收集所有匹配的订单项
+                            OrderItem targetItem = null;
                             for (OrderItem item : orderItems) {
-                                if (item.getItemCode().equalsIgnoreCase(code) && sharedDishRadio.isSelected()) {
-                                    matchedItems.add(item);
+                                if (code.equalsIgnoreCase(item.getItemCode()) &&
+                                        inputId.equals(item.getAssignedTableDisplayId())) {
+                                    targetItem = item;
+                                    break;
                                 }
                             }
+                            if (targetItem == null) {
+                                JOptionPane.showMessageDialog(dialog,
+                                        "未找到餐桌 #" + inputId + " 的单独分配菜品：" + code +
+                                                "\n\n💡 提示：该菜品可能是【多桌共享】类型，请切换为「共同菜品」模式",
+                                        "未找到匹配菜品", JOptionPane.WARNING_MESSAGE);
+                                continue;
+                            }
 
-                            // 🔹 如果有多个匹配项，弹出选择对话框
-                            if (matchedItems.size() > 1) {
+                            // 🔹 使用提前收集的 cancelPart 和 reason
+                            String cancelPart = cancelPartMap.getOrDefault(code, "UNSERVED");
+                            String finalReason = globalCancellationReason;
+
+                            // 🔹 兜底：如果提前没问原因但实际需要，此时再问
+                            if (("SERVED".equals(cancelPart) || "PARTIALLY_SERVED".equals(cancelPart)) &&
+                                    (finalReason == null || finalReason.isEmpty())) {
+                                finalReason = JOptionPane.showInputDialog(dialog,
+                                        "<html><b>⚠️ 菜品已上桌</b><br><br>" +
+                                                "菜品：<b>" + targetItem.getItemName() + "</b> (" + code + ")<br>" +
+                                                "当前状态：<font color='#4caf50'>" +
+                                                ("SERVED".equals(targetItem.getStatus()) ? "✅ 已全部上桌" : "🟠 部分上桌") +
+                                                "</font><br><br>" +
+                                                "<font color='#d32f2f'>请输入撤销原因（必填）：</font></html>",
+                                        "需要撤销原因",
+                                        JOptionPane.WARNING_MESSAGE);
+                                if (finalReason == null || finalReason.trim().isEmpty()) return;
+                            }
+
+                            try {
+                                controller.handleCancelGroupedTableOrderItemSmart(
+                                        inputId,
+                                        targetItem.getOrderItemId(),
+                                        quantities[i],
+                                        finalReason != null ? finalReason : "用户撤销",
+                                        cancelPart);
+                                anySuccess = true;
+                                isGroupedTableCancel = true;
+
+                                System.out.println("🗑️ 聚餐桌单桌菜品撤销成功: " +
+                                        "code=" + code +
+                                        ", table=" + inputId +
+                                        ", orderItemId=" + targetItem.getOrderItemId() +
+                                        ", cancelPart=" + cancelPart);
+
+                            } catch (Exception e) {
+                                JOptionPane.showMessageDialog(dialog, "撤销失败：" + e.getMessage(),
+                                        "错误", JOptionPane.ERROR_MESSAGE);
+                                e.printStackTrace();
+                            }
+                        }
+
+                        // ── 共同菜品/删除所有模式：延迟检查撤销原因 ──
+                        else if (sharedDishRadio.isSelected() || deleteFromAllGroupedTablesRadio.isSelected()) {
+                            // 1️ 先收集匹配的订单项
+                            List<OrderItem> matchedItems = new ArrayList<>();
+                            List<OrderItem> orderItems = frame.loadFormalOrderItems(inputId);
+                            for (OrderItem item : orderItems) {
+                                if (code.equalsIgnoreCase(item.getItemCode())) {
+                                    String assignedId = item.getAssignedTableDisplayId();
+                                    boolean isShared = (assignedId != null &&
+                                            assignedId.split(",").length > 1);
+                                    if ((sharedDishRadio.isSelected() && isShared) ||
+                                            (deleteFromAllGroupedTablesRadio.isSelected())) {
+                                        if (assignedId != null &&
+                                                containsTable(assignedId.split(","), inputId)) {
+                                            matchedItems.add(item);
+                                        }
+                                    }
+                                }
+                            }
+                            if (matchedItems.isEmpty()) {
+                                JOptionPane.showMessageDialog(dialog,
+                                        "未找到餐桌 #" + inputId + " 的匹配菜品：" + code,
+                                        "未找到匹配菜品", JOptionPane.WARNING_MESSAGE);
+                                continue;
+                            }
+
+                            // 2️ 如果需要，弹出选择对话框（用户可能取消）
+                            OrderItem targetItem = null;
+                            if (matchedItems.size() == 1) {
+                                // 只有一个匹配项，直接使用
+                                targetItem = matchedItems.get(0);
+                            } else {
+                                // 多个匹配项，弹出选择对话框
                                 List<OrderItem> selectedItems = showGroupedTableCancelSelectionDialog(
                                         dialog, inputId, code, quantities[i], matchedItems);
 
                                 if (selectedItems == null || selectedItems.isEmpty()) {
-                                    // 用户取消选择，跳过当前菜品
-                                    continue;
+                                    continue;  // 用户取消选择
                                 }
 
-                                // 🔹 对用户选择的每条记录执行撤销
-                                for (OrderItem selectedItem : selectedItems) {
-                                    try {
-                                        if (selectedItem.getQuantityDistribution() == null) {
-                                            // 情况 1：无 distribution → 每桌独立记录
-                                            controller.handleCancelGroupedTableOrderItem(
-                                                    inputId, selectedItem.getOrderItemId(), inputId);
-                                        } else {
-                                            // 情况 2：有 distribution → 一键点餐共享模式
-                                            int cancelQty = quantities[i];  // 用户输入的每桌撤销数量
-                                            controller.handleCancelGroupedTableOrderItemWithDistribution(
-                                                    inputId, selectedItem.getOrderItemId(), inputId, cancelQty);
-                                        }
-                                        anySuccess = true;
-                                        isGroupedTableCancel = true;
-                                        System.out.println(" 聚餐桌撤销成功: " + code +
-                                                ", orderItemId=" + selectedItem.getOrderItemId());
-                                    } catch (Exception e) {
+                                // 🔧 取第一个选中的项目（或者根据需要处理多个）
+                                targetItem = selectedItems.get(0);
+
+                                // 如果需要处理多个选中的项目，可以遍历 selectedItems
+                                // for (OrderItem item : selectedItems) { ... }
+                            }
+
+                            if (targetItem == null) {
+                                continue;  // 没有选中任何项目
+                            }
+
+                            // 3️【关键】获取到 targetItem 后，再检查撤销原因
+                            String cancelPart = null;
+                            String itemStatus = targetItem.getStatus();
+                            if ("PARTIALLY_SERVED".equals(itemStatus)) {
+                                cancelPart = askCancelPartDialog(dialog, code,
+                                        targetItem.getItemName(), targetItem.getQuantity(),
+                                        targetItem.getServedQuantity());
+                                if (cancelPart == null) continue;  // 用户取消
+                            } else if ("SERVED".equals(itemStatus)) {
+                                cancelPart = "SERVED";
+                            } else {
+                                cancelPart = "UNSERVED";
+                            }
+
+                            //  如果需要原因且还没提供，此时才弹窗
+                            String finalReason = globalCancellationReason;
+                            if (("SERVED".equals(cancelPart) || "PARTIALLY_SERVED".equals(cancelPart)) &&
+                                    (finalReason == null || finalReason.isEmpty())) {
+                                finalReason = JOptionPane.showInputDialog(dialog,
+                                        "<html><b>⚠️ 菜品已上桌</b><br><br>" +
+                                                "菜品：<b>" + targetItem.getItemName() + "</b> (" + code + ")<br>" +
+                                                "<font color='#d32f2f'>请输入撤销原因（必填）：</font></html>",
+                                        "需要撤销原因", JOptionPane.WARNING_MESSAGE);
+                                if (finalReason == null || finalReason.trim().isEmpty()) return;
+                            }
+
+                            // 4️ 执行撤销（根据模式调用不同方法）
+                            try {
+                                if (sharedDishRadio.isSelected()) {
+                                    // 🔧 共同菜品撤销：智能更新 quantity/served_quantity/status/distribution
+                                    int currentQty = targetItem.getQuantity();
+                                    int currentServedQty = targetItem.getServedQuantity();
+                                    int cancelQty = quantities[i];
+
+                                    if (cancelQty > currentQty) {
                                         JOptionPane.showMessageDialog(dialog,
-                                                "聚餐桌撤销失败: " + e.getMessage(),
-                                                "错误", JOptionPane.ERROR_MESSAGE);
-                                        e.printStackTrace();
+                                                "撤销数量不能超过当前数量！\n当前：" + currentQty + " 份",
+                                                "输入错误", JOptionPane.ERROR_MESSAGE);
+                                        continue;
                                     }
-                                }
-                            }
-                            // 🔹 如果只有一个匹配项，直接处理
-                            else if (matchedItems.size() == 1) {
-                                OrderItem item = matchedItems.get(0);
-                                try {
-                                    if (item.getQuantityDistribution() == null) {
-                                        // 情况 1：无 distribution
-                                        controller.handleCancelGroupedTableOrderItem(
-                                                inputId, item.getOrderItemId(), inputId);
+
+                                    int newQty = Math.max(0, currentQty - cancelQty);
+                                    int newServedQty = Math.max(0, currentServedQty - cancelQty);
+                                    newServedQty = Math.min(newServedQty, newQty);
+                                    String newStatus = calculateStatusAfterCancel(newQty, newServedQty);
+
+                                    // 处理 assigned_table_display_id 和 quantity_distribution
+                                    String newAssignedTableIds = targetItem.getAssignedTableDisplayId();
+                                    String newDistribution = null;
+                                    String currentDistribution = targetItem.getQuantityDistribution();
+
+                                    if (currentDistribution != null && !currentDistribution.isEmpty()) {
+                                        Map<String, Integer> distMap = parseDistribution(currentDistribution);
+                                        if (distMap != null && !distMap.isEmpty()) {
+                                            Integer currentAlloc = distMap.get(inputId);
+                                            if (currentAlloc != null) {
+                                                int newAlloc = currentAlloc - cancelQty;
+                                                if (newAlloc <= 0) {
+                                                    distMap.remove(inputId);
+                                                    newAssignedTableIds = removeTableFromList(newAssignedTableIds, inputId);
+                                                } else {
+                                                    distMap.put(inputId, newAlloc);
+                                                }
+                                            }
+                                            if (!distMap.isEmpty()) {
+                                                newDistribution = formatDistribution(distMap);
+                                            } else {
+                                                newAssignedTableIds = removeTableFromList(newAssignedTableIds, inputId);
+                                            }
+                                        }
                                     } else {
-                                        // 情况 2：有 distribution
-                                        int cancelQty = quantities[i];
-                                        controller.handleCancelGroupedTableOrderItemWithDistribution(
-                                                inputId, item.getOrderItemId(), inputId, cancelQty);
+                                        newAssignedTableIds = removeTableFromList(newAssignedTableIds, inputId);
                                     }
-                                    anySuccess = true;
-                                    isGroupedTableCancel = true;
-                                    System.out.println(" 聚餐桌撤销成功: " + code +
-                                            ", orderItemId=" + item.getOrderItemId());
-                                } catch (Exception e) {
-                                    JOptionPane.showMessageDialog(dialog,
-                                            "聚餐桌撤销失败: " + e.getMessage(),
-                                            "错误", JOptionPane.ERROR_MESSAGE);
-                                    e.printStackTrace();
+
+                                    // 处理 served_table_display_id
+                                    String newServedTableIds = targetItem.getServedTableDisplayId();
+                                    if (newServedTableIds != null && !newServedTableIds.isEmpty() &&
+                                            newServedTableIds.contains(inputId)) {
+                                        if (newServedQty <= 0) {
+                                            newServedTableIds = removeTableFromList(newServedTableIds, inputId);
+                                        }
+                                    }
+
+                                    // 调用 Controller 执行撤销
+                                    controller.handleCancelSharedDishOrderItem(
+                                            targetItem.getOrderItemId(),
+                                            cancelQty,
+                                            newQty,
+                                            newServedQty,
+                                            newStatus,
+                                            newAssignedTableIds,
+                                            newDistribution,
+                                            finalReason != null ? finalReason : "用户撤销",
+                                            cancelPart
+                                    );
+
+                                } else {
+                                    // 🔧 删除所有关联餐桌的菜品：直接物理删除整条记录
+                                    int currentQty = targetItem.getQuantity();
+                                    int currentServedQty = targetItem.getServedQuantity();
+
+                                    // 记录撤销审计日志（仅当有已上桌数量时）
+                                    if (currentServedQty > 0) {
+                                        double cancelledAmount = targetItem.getPriceAtOrder() * currentQty;
+                                        controller.getOrderService().recordCancellation(
+                                                "ITEM",
+                                                targetItem.getOrderId(),
+                                                null,
+                                                targetItem.getItemCode(),
+                                                currentQty,
+                                                itemStatus,
+                                                cancelledAmount,
+                                                finalReason != null ? finalReason : "用户撤销"
+                                        );
+                                    }
+
+                                    // 直接物理删除整条记录
+                                    int deleted = controller.getOrderService().deleteOrderItemByOrderItemId(
+                                            targetItem.getOrderItemId()
+                                    );
+                                    if (deleted <= 0) {
+                                        throw new RuntimeException("删除失败：orderItemId=" + targetItem.getOrderItemId());
+                                    }
                                 }
-                            }
-                            // 🔹 如果没有匹配项，走普通逻辑
-                            else {
-                                // 不设置 isGroupedTableCancel = true，让普通逻辑处理
+
+                                anySuccess = true;
+                                isGroupedTableCancel = true;
+
+                                System.out.println("🗑️ 聚餐桌菜品撤销成功: " +
+                                        "code=" + code +
+                                        ", table=" + inputId +
+                                        ", orderItemId=" + targetItem.getOrderItemId() +
+                                        ", cancelPart=" + cancelPart);
+
+                            } catch (Exception e) {
+                                JOptionPane.showMessageDialog(dialog, "撤销失败：" + e.getMessage(),
+                                        "错误", JOptionPane.ERROR_MESSAGE);
+                                e.printStackTrace();
                             }
                         }
                     }
+                }
 
-                    // 🔧 如果不是聚餐桌专用撤销，走普通逻辑
-                    if (!isGroupedTableCancel) {
-                        if (cancelOrderItemLogic(dialog, inputId, code, quantities[i], cancellationReason)) {
-                            anySuccess = true;
-                        }
+                // ── 普通餐桌：使用提前收集的参数 ──
+                if (!isGroupedTableCancel) {
+                    String cancelPart = cancelPartMap.getOrDefault(code, null);
+                    if (cancelOrderItemLogic(dialog, inputId, code, quantities[i],
+                            globalCancellationReason, cancelPart)) {
+                        anySuccess = true;
                     }
-
                 }
             }
 
+            // ═══════════════════════════════════════════════════════════
+            // 【阶段 4】结果反馈 + 刷新界面
+            // ═══════════════════════════════════════════════════════════
             if (anySuccess) {
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
@@ -4610,13 +4852,15 @@ public class HomePanel extends JPanel {
                 }
                 JOptionPane.showMessageDialog(dialog, "部分或全部菜品已成功撤銷。");
             } else {
-                JOptionPane.showMessageDialog(dialog, "未找到匹配的菜品或數量不足。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(dialog, "未找到匹配的菜品或數量不足。",
+                        "提示", JOptionPane.INFORMATION_MESSAGE);
             }
             dialog.dispose();
         });
 
         dialog.setVisible(true);
     }
+
 
 
     /**
@@ -4632,7 +4876,7 @@ public class HomePanel extends JPanel {
     private List<OrderItem> showGroupedTableCancelSelectionDialog(
             JFrame parent, String tableNumber, String itemCode, int cancelQty, List<OrderItem> items) {
 
-        JDialog selectionDialog = new JDialog(parent, "🗑️ 选择要撤销的菜品记录", true);
+        JDialog selectionDialog = new JDialog(parent, " 选择要撤销的菜品记录", true);
         selectionDialog.setSize(900, 500);
         selectionDialog.setLocationRelativeTo(parent);
         selectionDialog.getContentPane().setBackground(new Color(245, 248, 250));
@@ -4644,7 +4888,7 @@ public class HomePanel extends JPanel {
         // 标题
         JPanel titlePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         titlePanel.setBackground(new Color(245, 248, 250));
-        JLabel titleLabel = new JLabel("<html><h2 style='color:#d32f2f;margin:0;'>🗑️ 选择要撤销的菜品记录</h2></html>");
+        JLabel titleLabel = new JLabel("<html><h2 style='color:#d32f2f;margin:0;'> 选择要撤销的菜品记录</h2></html>");
         titleLabel.setFont(new Font("Microsoft YaHei", Font.BOLD, 16));
         titlePanel.add(titleLabel);
 
@@ -4677,7 +4921,8 @@ public class HomePanel extends JPanel {
                     item.getServedTableDisplayId() : "-";
 
             Object[] row = {
-                    true, item.getItemName(), item.getQuantity(),
+                    // 改为 false，默认不勾选
+                    false, item.getItemName(), item.getQuantity(),
                     item.getServedQuantity(), statusText,
                     assignedTables, servedTables, "#" + item.getOrderItemId()
             };
@@ -4772,11 +5017,13 @@ public class HomePanel extends JPanel {
 
     /**
      * 撤銷菜品核心邏輯（根據類型調用不同 Controller 方法）
-     * 🔧【新增】聚餐桌预约订单：确保撤销后每张桌子的菜品数量是整数
+     * 🔧【新增】支持传入 cancelPart 参数（部分上桌时选择撤销哪部分）
      *
      * @param cancellationReason 撤銷原因（堂食可能需要，外賣=null）
+     * @param cancelPart         撤销部分："SERVED"=已上桌, "UNSERVED"=未上桌, null=默认逻辑
      */
-    private boolean cancelOrderItemLogic(Component parent, String identifier, String itemCode, int quantity, String cancellationReason) {
+    private boolean cancelOrderItemLogic(Component parent, String identifier, String itemCode,
+                                         int quantity, String cancellationReason, String cancelPart) {
         // UI 验证：itemCode → itemId
         com.restaurant.entity.MenuItem menuItem = frame.getMenuItemById(itemCode);
         if (menuItem == null) {
@@ -4787,7 +5034,7 @@ public class HomePanel extends JPanel {
 
         try {
             // ═══════════════════════════════════════════════════════════
-            // 🔧【新增】检查是否为聚餐桌预约订单，验证撤销数量
+            // 🔧【新增】检查是否为聚餐桌预约订单，验证撤销数量（保持原有逻辑）
             // ═══════════════════════════════════════════════════════════
             if (currentOrderType == OrderType.RESERVATION && identifier.startsWith("R")) {
                 // 1. 查询预约详情
@@ -4841,7 +5088,7 @@ public class HomePanel extends JPanel {
                                     return false;
                                 }
 
-                                System.out.println("✅ 聚餐桌撤销验证通过 - 桌子数：" + tableCount +
+                                System.out.println(" 聚餐桌撤销验证通过 - 桌子数：" + tableCount +
                                         ", 撤销数量：" + quantity +
                                         ", 剩余数量：" + remainingQty +
                                         "（每张桌 " + (remainingQty / tableCount) + " 份）");
@@ -4854,8 +5101,9 @@ public class HomePanel extends JPanel {
 
             if (currentOrderType == OrderType.DINE_IN) {
                 // 堂食：通过餐桌号撤销（需要原因）
+                // 🔧 传入 cancelPart 参数
                 controller.handleCancelOrderItem(identifier, itemCode, quantity,
-                        cancellationReason != null ? cancellationReason : "用户撤销");
+                        cancellationReason != null ? cancellationReason : "用户撤销", cancelPart);
             }
             // 🔧【修复】预约订单：通过 reservation_id 撤销
             else if (currentOrderType == OrderType.RESERVATION) {
@@ -4872,15 +5120,17 @@ public class HomePanel extends JPanel {
                         identifier,  // reservation_id
                         itemId,
                         quantity,
-                        cancellationReason != null ? cancellationReason : "用户撤销"
+                        cancellationReason != null ? cancellationReason : "用户撤销",
+                        cancelPart                               // 🔧 新增：是否为部分撤销
                 );
-                System.out.println("✅ 预约订单菜品撤销成功: reservationId=" + identifier +
+                System.out.println("预约订单菜品撤销成功: reservationId=" + identifier +
                         ", orderId=" + preOrder.getOrderId());
             } else {
                 // 外卖：通过订单号撤销（原因可选，传 null 或默认值）
                 controller.handleCancelTakeoutOrderItem(identifier, itemId, quantity,
                         cancellationReason != null ? cancellationReason : "用户撤销");
             }
+
             SwingUtilities.invokeLater(() -> {
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
@@ -5615,5 +5865,95 @@ public class HomePanel extends JPanel {
 
         cancelBtn.addActionListener(e -> dialog.dispose());
         dialog.setVisible(true);
+    }
+
+    /**
+     * 🔧 解析 quantity_distribution JSON 字符串为 Map
+     * 格式示例：{"13":4,"14":4,"15":3} → Map{"13"=4, "14"=4, "15"=3}
+     */
+    private Map<String, Integer> parseDistribution(String jsonStr) {
+        if (jsonStr == null || jsonStr.isEmpty()) {
+            return null;
+        }
+        Map<String, Integer> result = new LinkedHashMap<>();
+        try {
+            // 移除花括号和空格
+            String content = jsonStr.replaceAll("[{}\\s]", "");
+            if (content.isEmpty()) {
+                return result;
+            }
+            // 按逗号分割键值对
+            String[] pairs = content.split(",");
+            for (String pair : pairs) {
+                String[] kv = pair.split(":");
+                if (kv.length == 2) {
+                    String tableId = kv[0].replaceAll("\"", "").trim();
+                    int qty = Integer.parseInt(kv[1].trim());
+                    result.put(tableId, qty);
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            System.err.println("⚠️ 解析 quantity_distribution 失败: " + jsonStr + " | 错误: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 🔧 格式化 distribution Map 为 JSON 字符串
+     */
+    private String formatDistribution(Map<String, Integer> distribution) {
+        if (distribution == null || distribution.isEmpty()) {
+            return null;
+        }
+        StringBuilder json = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, Integer> entry : distribution.entrySet()) {
+            if (!first) json.append(",");
+            json.append("\"").append(entry.getKey()).append("\":").append(entry.getValue());
+            first = false;
+        }
+        json.append("}");
+        return json.toString();
+    }
+
+    /**
+     * 🔧 从逗号分隔的桌号列表中移除指定桌号
+     * 示例：输入 "13,14,15,16", "14" → 输出 "13,15,16"
+     */
+    private String removeTableFromList(String tableList, String tableIdToRemove) {
+        if (tableList == null || tableList.isEmpty()) {
+            return null;
+        }
+        String[] tables = tableList.split(",");
+        List<String> result = new ArrayList<>();
+        for (String t : tables) {
+            if (!tableIdToRemove.equals(t.trim())) {
+                result.add(t.trim());
+            }
+        }
+        return result.isEmpty() ? null : String.join(",", result);
+    }
+
+    /**
+     * 🔧 辅助方法：计算撤销后状态
+     */
+    private String calculateStatusAfterCancel(int newQty, int servedQty) {
+        if (newQty <= 0) return "UNSERVED";
+        if (servedQty >= newQty) return "SERVED";
+        if (servedQty > 0) return "PARTIALLY_SERVED";
+        return "UNSERVED";
+    }
+
+    // ═══════════════════════════════════════════════════════════
+// 🔧 辅助方法：检查数组是否包含指定餐桌号
+// ═══════════════════════════════════════════════════════════
+    private boolean containsTable(String[] tableIds, String targetId) {
+        for (String tid : tableIds) {
+            if (targetId.equals(tid.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

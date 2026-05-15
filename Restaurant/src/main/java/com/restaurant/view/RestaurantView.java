@@ -7,12 +7,12 @@ import com.restaurant.entity.TableReservation;
 import com.restaurant.entity.Tables;
 
 import javax.swing.*;
+import javax.swing.Timer;
+import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.event.*;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -20,20 +20,16 @@ import java.util.*;
 import java.util.List;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.DocumentEvent;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.stream.Collectors;
 import javax.swing.JSpinner;
-import javax.swing.JSpinner.DateEditor;
-import javax.swing.Timer;
-
+import org.springframework.context.event.EventListener;
 /**
  * 純GUI視圖層 - 不包含任何業務邏輯
  * 所有按鈕事件通過Controller轉發
  */
-public class RestaurantView extends JFrame {
+public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
     // ===== 成員變量（完全保留）=====
     private javax.swing.Timer refreshTimer;
@@ -62,8 +58,6 @@ public class RestaurantView extends JFrame {
     private JScrollPane reservationsLogScroll;   // 滚动面板
     // ===== 在类的顶部成员变量区域添加 =====
     private JSplitPane innerSplitPane;  // ← 新增这行
-    private JSplitPane mainSplitPane;   // ← 外层分割也建议声明
-    private Map<String, Object> pendingReservationEdit = null;
 
     // ===== 構造函數（完全保留你的佈局代碼）=====
     public RestaurantView() {
@@ -224,6 +218,15 @@ public class RestaurantView extends JFrame {
     // ===== Setter for Controller（手動設置，非Spring注入）=====
     public void setController(RestaurantController controller) {
         this.controller = controller;
+        if (controller != null && controller.service != null) {
+            boolean isOpen = controller.service.isOpenForBusiness();
+
+            // 设置按钮文本
+            setCloseDayButtonText(Boolean.parseBoolean(isOpen ? "结束营业" : "开始营业"));
+
+            // 更新状态显示
+            updateBusinessStatusDisplay(isOpen);
+        }
     }
 
     // ===== 事件綁定方法（空實現，後續由Controller填充）=====
@@ -441,11 +444,11 @@ public class RestaurantView extends JFrame {
      */
     public void updateQueueDisplay(Queue<CustomerGroup> q2, Queue<CustomerGroup> q4, Queue<CustomerGroup> q6) {
         StringBuilder sb = new StringBuilder();
-        sb.append("当前队列\n\n");
+        sb.append("当前队列\n");
 
-        // 2人桌队列
+        // 2人桌队列（添加 null 检查）
         sb.append("2人桌队列:\n");
-        if (q2.isEmpty()) {
+        if (q2 == null || q2.isEmpty()) {  // ← 添加 q2 == null 检查
             sb.append("• 无等待顾客\n");
         } else {
             int position = 1;
@@ -456,9 +459,9 @@ public class RestaurantView extends JFrame {
         }
         sb.append("\n");
 
-        // 4人桌队列
+        // 4人桌队列（添加 null 检查）
         sb.append("4人桌队列:\n");
-        if (q4.isEmpty()) {
+        if (q4 == null || q4.isEmpty()) {  // ← 添加 q4 == null 检查
             sb.append("• 无等待顾客\n");
         } else {
             int position = 1;
@@ -469,9 +472,9 @@ public class RestaurantView extends JFrame {
         }
         sb.append("\n");
 
-        // 6人桌队列
+        // 6人桌队列（添加 null 检查）
         sb.append("6人桌队列:\n");
-        if (q6.isEmpty()) {
+        if (q6 == null || q6.isEmpty()) {  // ← 添加 q6 == null 检查
             sb.append("• 无等待顾客\n");
         } else {
             int position = 1;
@@ -484,11 +487,88 @@ public class RestaurantView extends JFrame {
         queueDisplay.setText(sb.toString());
     }
 
-    /**
-     * 更新餐桌状态详情面板（空实现，后续填充）
-     */
+    //据餐桌的訂單情況呢？？？
     public void updateTableStatusDisplay(List<Tables> tables) {
-        /* TODO */
+        StringBuilder sb = new StringBuilder();
+
+        if (tables == null || tables.isEmpty()) {
+            tableStatusDisplay.setText("✨ 暂无餐桌信息");
+            return;
+        }
+
+        for (Tables table : tables) {
+            // 1️⃣ 订单状态（仅占用中餐桌显示）
+            String orderStatusText = "";
+            if (controller != null && table.getStatus() == Tables.TableStatus.OCCUPIED) {
+                // 🔧【核心修复】合并桌查询主桌的订单状态
+                String queryTableId = table.getDisplayId();
+
+                if (table.getTableType() == Tables.TableType.MERGED && table.getMergedWith() != null) {
+                    // 合并桌：使用编号较小的桌号作为主桌
+                    String partnerId = table.getMergedWith();
+                    int currentNum = Integer.parseInt(table.getDisplayId().replaceAll("[^0-9]", ""));
+                    int partnerNum = Integer.parseInt(partnerId.replaceAll("[^0-9]", ""));
+
+                    // 编号较小的为主桌
+                    queryTableId = (currentNum <= partnerNum) ? table.getDisplayId() : partnerId;
+
+                    System.out.println("🔧 合并桌订单查询：餐桌#" + table.getDisplayId() +
+                            " → 查询主桌#" + queryTableId);
+                }
+
+                orderStatusText = controller.getOrderStatusDisplay(queryTableId);
+            }
+
+            // 2️⃣ 顾客组信息（保持不变）
+            String customerGroupInfo = "";
+            if (table.getStatus() == Tables.TableStatus.OCCUPIED && table.getCurrentGroup() != null) {
+                customerGroupInfo = String.format(" | 顾客组: #%d (%d人)",
+                        table.getCurrentGroup().getCallNumber(),
+                        table.getCurrentGroup().getGroupSize());
+            }
+
+            // 3️⃣ 合并餐桌特殊标识（保持不变）
+            String mergedLabel = "";
+            if (table.getTableType() == Tables.TableType.MERGED && table.getMergedWith() != null) {
+                mergedLabel = String.format(" [合并桌: +%s]", table.getMergedWith());
+            }
+
+            // 4️⃣ 聚餐桌特殊标识（保持不变）
+            String groupedLabel = "";
+            if (table.getTableType() == Tables.TableType.GROUPED && table.getGroupWith() != null) {
+                groupedLabel = String.format(" [聚餐桌: %s]", table.getGroupWith());
+            }
+
+            // 5️⃣ 构建基础信息行（保持不变）
+            sb.append(String.format(
+                    " 餐桌 #%s%s%s | 容量：%d人 | 状态：%s%s%s",
+                    table.getDisplayId(),
+                    mergedLabel,
+                    groupedLabel,
+                    table.getCapacity(),
+                    table.getStatus().getDisplayName(),
+                    orderStatusText,
+                    customerGroupInfo
+            ));
+
+            // 6️⃣ 时间信息（仅占用中）（保持不变）
+            if (table.getStatus() == Tables.TableStatus.OCCUPIED && table.getStartTime() != null) {
+                String endTime = table.getEndTime() != null ?
+                        table.getFormattedEndTime() : "进行中";
+                sb.append(String.format(" |  %s → %s",
+                        table.getFormattedStartTime(), endTime));
+            }
+
+            sb.append("\n").append("─".repeat(40)).append("\n\n");
+        }
+
+        // 7️⃣ 更新 UI（EDT 安全）（保持不变）
+        SwingUtilities.invokeLater(() -> {
+            tableStatusDisplay.setText(sb.toString());
+            if (tableStatusDisplay.getDocument().getLength() > 0) {
+                tableStatusDisplay.setCaretPosition(0);  // 滚动到顶部
+            }
+        });
     }
 
     /**
@@ -2238,38 +2318,6 @@ public class RestaurantView extends JFrame {
 
                 }
 
-//                else if ("ASSIGN".equals(selectedMode)) {
-//                    System.out.println(" [EXEC] 进入 ASSIGN 分支");  // ← 新增
-//                    String resId = idField.getText().trim();
-//                    if (resId.isEmpty()) {
-//                        showError("請輸入預約號");
-//                        shouldClose = false;
-//                        return;
-//                    }
-//
-//                    @SuppressWarnings("unchecked")
-//                    Map<String, JCheckBox> tableBoxes = (Map<String, JCheckBox>) formPanel.getClientProperty("assignTableCheckBoxes");
-//                    List<String> selectedTables = new ArrayList<>();
-//                    if (tableBoxes != null) {
-//                        for (Map.Entry<String, JCheckBox> entry : tableBoxes.entrySet()) {
-//                            if (entry.getValue().isSelected()) {
-//                                String num = entry.getKey().replaceAll("[^0-9]", "");
-//                                if (!num.isEmpty()) selectedTables.add(num);
-//                            }
-//                        }
-//                    }
-//                    if (selectedTables.isEmpty()) {
-//                        showError("請至少選擇一張餐桌");
-//                        shouldClose = false;
-//                        return;
-//                    }
-//
-//                    result[0] = new HashMap<>();
-//                    result[0].put("mode", "ASSIGN");
-//                    result[0].put("reservationId", resId);
-//                    result[0].put("selectedTables", selectedTables);
-//
-//                }
                 else if ("ASSIGN".equals(selectedMode)) {
                     System.out.println("🎯 [EXEC] 进入 ASSIGN 分支");
 
@@ -2606,7 +2654,48 @@ public class RestaurantView extends JFrame {
                         shouldClose = false;
                         return;
                     }
+                    // 🔧【新增】预点餐状态下修改6人桌数量的二次确认
+                    if (existingReservation != null && Boolean.TRUE.equals(existingReservation.get("preOrder"))) {
+                        Object tableConfigObj = edits.get("tableConfig");
+                        if (tableConfigObj instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Integer> newConfig = (Map<String, Integer>) tableConfigObj;
 
+                            // 🔧【修复】从 Map 中获取原始配置描述，而不是直接调用方法
+                            String originalConfigDesc = (String) existingReservation.get("table_config_desc");
+                            Map<String, Integer> originalConfig = parseTableConfigFromDesc(originalConfigDesc);
+
+                            int originalSixSeatCount = originalConfig.getOrDefault("6", 0);
+                            int newSixSeatCount = newConfig.getOrDefault("6", 0);
+
+                            // 如果6人桌数量发生变化，且符合聚餐桌规则（≥3张）
+                            if (originalSixSeatCount != newSixSeatCount && newSixSeatCount >= 3) {
+                                String confirmMsg = String.format(
+                                        "<html><b>⚠️ 桌子数量变更提示</b><br><br>" +
+                                                "当前预约已是<b>预点餐状态</b>（pre_order=1）<br>" +
+                                                "6人桌数量将从 <b>%d 张</b> 变更为 <b>%d 张</b><br><br>" +
+                                                "<font color='#d32f2f'>⚠️ 注意：</font><br>" +
+                                                "• 聚餐桌菜品份额将按比例调整<br>" +
+                                                "• 已点餐菜品将重新分配到新桌子数量<br>" +
+                                                "• 请确认是否继续修改？</html>",
+                                        originalSixSeatCount, newSixSeatCount
+                                );
+
+                                int confirm = JOptionPane.showConfirmDialog(
+                                        dialog,
+                                        confirmMsg,
+                                        "预点餐修改确认",
+                                        JOptionPane.YES_NO_OPTION,
+                                        JOptionPane.WARNING_MESSAGE
+                                );
+
+                                if (confirm != JOptionPane.YES_OPTION) {
+                                    shouldClose = false;
+                                    return; // 用户点击"否"或关闭弹窗，终止修改
+                                }
+                            }
+                        }
+                    }
                     result[0] = new HashMap<>();
                     result[0].put("mode", "EDIT_TIME");
                     result[0].put("reservationId", id);
@@ -4374,6 +4463,34 @@ public class RestaurantView extends JFrame {
         return createFormField(labelText, inputComponent, true);
     }
 
+
+    /**
+     * 🔧 辅助方法：从 table_config_desc 解析桌子配置 Map
+     * 例如："2人桌 x1, 6人桌 x3, " → Map{"2":1, "6":3}
+     */
+    private Map<String, Integer> parseTableConfigFromDesc(String configDesc) {
+        Map<String, Integer> config = new HashMap<>();
+        if (configDesc == null || configDesc.isEmpty()) return config;
+        String[] parts = configDesc.split(",");
+        for (String part : parts) {
+            part = part.trim();
+            if (part.contains("人桌") && part.contains("x")) {
+                String[] segs = part.split("x");
+                if (segs.length == 2) {
+                    String cap = segs[0].replaceAll("[^0-9]", "");
+                    String qtyStr = segs[1].replaceAll("[^0-9]", "").trim();
+                    if (!cap.isEmpty() && !qtyStr.isEmpty()) {
+                        try {
+                            config.put(cap, Integer.parseInt(qtyStr));
+                        } catch (NumberFormatException e) {
+                            // 忽略解析错误
+                        }
+                    }
+                }
+            }
+        }
+        return config;
+    }
     // 🔧 新增辅助方法：计算并更新锁定状态
 
     private void updateLockStatus(JSpinner dateSpinner, JTextField timeFieldComp, JLabel lockStatusLabel) {
@@ -5559,15 +5676,6 @@ public class RestaurantView extends JFrame {
 
 
     /**
-     * 🔧 刷新数量模式预约显示（美化版 - 按钮分离 + 优雅交互 + 延迟状态）
-     * 显示规则：
-     * - 🔴 红色：1.5小时内且未过期（紧急）
-     * - ⚪ 灰色：超过1.5小时但未过期（普通）
-     * - 🔵 蓝色：已过期（预约时间 < 当前时间）
-     * - 🟡 橙色：已延迟预约（rescheduled_time 不为空）
-     */
-
-    /**
      * 🔧 刷新数量模式预约显示（美化版 - 按钮分离 + 优雅交互 + 延迟状态 + 自动启停定时器）
      * 显示规则：
      * - 🔴 红色：1.5 小时内且未过期（紧急）
@@ -6182,7 +6290,7 @@ public class RestaurantView extends JFrame {
                     // 🔹 失败提示
                     String errorMsg = (String) cancelResult.get("message");
                     SwingUtilities.invokeLater(() ->
-                            showError("❌ 取消失败：" + errorMsg)
+                            showError(" 取消失败：" + errorMsg)
                     );
                 }
 
@@ -6283,4 +6391,915 @@ public class RestaurantView extends JFrame {
         }
     }
 
+
+    /**
+     * 🔧 实现回调接口：显示预约匹配提醒弹窗
+     */
+    @Override
+    public void showReservationMatchAlert(String reservationId, String customerName,
+                                          String customerPhone, String reservationTime,
+                                          int requiredCapacity, int requiredCount) {
+        SwingUtilities.invokeLater(() -> {
+            String message = String.format(
+                    "<html><div style='padding:15px; font-family:Microsoft YaHei;'>" +
+                            "<h3 style='color:#1976d2; margin:0 0 10px 0;'>🎯 找到匹配的预约！</h3>" +
+                            "<hr style='border:0; border-top:1px solid #eee; margin:10px 0;'>" +
+                            "<b>预约号：</b>%s<br>" +
+                            "<b>客人：</b>%s (%s)<br>" +
+                            "<b>预约时间：</b>%s<br>" +
+                            "<b>需要：</b>%d 张 %d 人桌<br><br>" +
+                            "<font color='#1976d2'><b>💡 当前餐桌已空闲，请及时分配！</b></font>" +
+                            "</div></html>",
+                    reservationId, customerName, customerPhone, reservationTime,
+                    requiredCount, requiredCapacity
+            );
+
+            JOptionPane.showMessageDialog(
+                    this,
+                    message,
+                    "📋 预约匹配提醒",
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+        });
+    }
+
+    /**
+     * 🔧 显示子桌合并确认对话框
+     *
+     * @param subTableA 子桌A的显示编号（如 "7a"）
+     * @param subTableB 子桌B的显示编号（如 "7b"）
+     * @param mainTableDisplayId 合并后的主桌编号（如 "7"）
+     * @return true=用户确认合并，false=用户取消
+     */
+    public boolean showMergeConfirmationDialog(String subTableA, String subTableB, String mainTableDisplayId) {
+        // ✅ 修正：使用 %s 占位符，不要直接在字符串里拼接变量
+        String message = String.format(
+                "<html><div style='padding:15px; font-family:Microsoft YaHei;'>" +
+                        "<h3 style='color:#1976d2; margin:0 0 10px 0;'>🔗 确认合并餐桌？</h3>" +
+                        "<hr style='border:0; border-top:1px solid #eee; margin:10px 0;'>" +
+                        "<b>子桌 #%s</b> + <b>#%s</b><br>" +          // 修改点 1
+                        "↓ 合并为 ↓<br>" +
+                        "<b style='color:#4caf50; font-size:16px;'>主桌 #%s</b><br><br>" + // 修改点 2
+                        "<font color='#666'>合并后：</font><ul style='margin:5px 0; padding-left:20px;'>" +
+                        "<li>两张子桌将恢复为主桌</li>" +
+                        "<li>餐桌容量恢复为原始容量</li>" +
+                        "<li>顾客组将自动分配到合并后的餐桌</li>" +
+                        "</ul>" +
+                        "<font color='#d32f2f'><b>⚠️ 此操作不可撤销，确认继续？</b></font>" +
+                        "</div></html>",
+                subTableA, subTableB, mainTableDisplayId // ✅ 修正：变量放在这里作为参数
+        );
+
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                message,
+                "合并餐桌确认",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+
+        return result == JOptionPane.YES_OPTION;
+    }
+
+    /**
+     * 🔧 显示合并操作结果提示
+     *
+     * @param success 操作是否成功
+     * @param message 提示消息内容
+     */
+    public void showMergeResult(boolean success, String message) {
+        SwingUtilities.invokeLater(() -> {
+            if (success) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        message,
+                        "✅ 操作成功",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            } else {
+                JOptionPane.showMessageDialog(
+                        this,
+                        message,
+                        "❌ 操作失败",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+        });
+    }
+
+    /**
+     * 🔧 動態更新「結束營業/開始營業」按鈕狀態
+     * @param isOpen true=營業中(顯示結束營業/紅色), false=已打烊(顯示開始營業/綠色)
+     */
+    public void setCloseDayButtonText(boolean isOpen) {
+        SwingUtilities.invokeLater(() -> {
+            if (closeDayButton != null) {
+                if (isOpen) {
+                    closeDayButton.setText("結束營業");
+                    closeDayButton.setBackground(new Color(178, 34, 34)); // 深紅色
+                } else {
+                    closeDayButton.setText("開始營業");
+                    closeDayButton.setBackground(new Color(34, 139, 34)); // 森林綠
+                }
+                closeDayButton.revalidate();
+                closeDayButton.repaint();
+            }
+        });
+    }
+
+    /**
+     * 更新营业状态显示（绿色=营业中/红色=打烊）
+     *
+     * @note 仅更新UI标题样式，无业务逻辑
+     */
+    public void updateBusinessStatusDisplay(boolean isOpen) {
+        // 1. 状态配置
+        String title = isOpen ? "🟢 餐厅状态：营业中" : "🔴 餐厅状态：已打烊";
+        Color titleColor = isOpen ? new Color(0, 120, 0) : new Color(180, 40, 40);
+        Color bgColor = isOpen ?
+                new Color(232, 245, 233) :  // 浅绿色背景
+                new Color(255, 235, 235);   // 浅红色背景
+        Color borderColor = isOpen ?
+                new Color(76, 175, 80) :     // 绿色边框
+                new Color(244, 67, 54);      // 红色边框
+
+        // 2. 创建带圆角的边框
+        Border lineBorder = BorderFactory.createLineBorder(borderColor, 2);
+        Border emptyBorder = BorderFactory.createEmptyBorder(8, 12, 8, 12);
+        Border compoundBorder = BorderFactory.createCompoundBorder(lineBorder, emptyBorder);
+
+        // 3. 创建标题边框（带字体和颜色）
+        TitledBorder titledBorder = BorderFactory.createTitledBorder(
+                compoundBorder,
+                title,
+                TitledBorder.LEFT,
+                TitledBorder.TOP,
+                new Font("Microsoft YaHei UI", Font.BOLD, 14),
+                titleColor
+        );
+        titledBorder.setTitleJustification(TitledBorder.LEFT);
+
+        // 4. 应用边框并设置背景
+        bottomPanel.setBorder(titledBorder);
+        bottomPanel.setBackground(bgColor);
+        bottomPanel.setOpaque(true);  // 确保背景色生效
+
+        // 5. 刷新显示
+        bottomPanel.revalidate();
+        bottomPanel.repaint();
+
+        // 6. 可选：添加状态切换动画效果
+        animateStatusChange(bottomPanel, isOpen);
+    }
+
+    /**
+     * 添加轻微的状态切换动画（淡入效果）
+     */
+    private void animateStatusChange(JPanel panel, boolean isOpen) {
+        // 简单脉冲效果：轻微缩放 + 透明度变化
+        Timer timer = new Timer(30, e -> {
+            // 实际项目中可使用 TimingFramework 或自定义动画
+            // 这里仅示意，可根据需要扩展
+        });
+        timer.setRepeats(false);
+        timer.start();
+    }
+
+    /**
+     * 🔧 顯示未結賬餐桌警告对话框（可選：確認/取消）
+     * @param unpaidTables 未結賬餐桌列表
+     * @return true=用戶確認打烊, false=用戶取消
+     */
+    public boolean showUnpaidWarningDialog(List<String> unpaidTables) {
+        if (unpaidTables == null || unpaidTables.isEmpty()) {
+            return true; // 無未結賬訂單，直接通過
+        }
+
+        StringBuilder warningMsg = new StringBuilder();
+        warningMsg.append("<html><div style='padding:10px; font-family:Microsoft YaHei;'>");
+        warningMsg.append("<h3 style='color:#d32f2f; margin:0 0 10px 0;'>⚠️ 未結賬訂單提醒</h3>");
+        warningMsg.append("<hr style='border:0; border-top:1px solid #eee; margin:10px 0;'>");
+        warningMsg.append("<p style='margin:5px 0;'>以下餐桌有未結賬訂單：</p><ul style='margin:5px 0; padding-left:20px;'>");
+
+        // 最多顯示 15 個，避免對話框過大
+        int displayCount = Math.min(unpaidTables.size(), 10);
+        for (int i = 0; i < displayCount; i++) {
+            warningMsg.append("<li>餐桌 #").append(unpaidTables.get(i)).append("</li>");
+        }
+        if (unpaidTables.size() > 10) {
+            warningMsg.append("<li style='color:#666;'>... 還有 ").append(unpaidTables.size() - 10)
+                    .append(" 個餐桌未顯示</li>");
+        }
+
+        warningMsg.append("</ul>");
+        warningMsg.append("<p style='color:#666; font-size:12px; margin:10px 0 0 0;'>");
+        warningMsg.append("💡 未結賬訂單將保留至次日，不影響打烊操作。</p>");
+        warningMsg.append("<p style='color:#d32f2f; font-weight:bold; margin:15px 0 0 0;'>");
+        warningMsg.append("是否確認結束營業？</p></div></html>");
+
+        Object[] options = {"✅ 確認打烊", "❌ 取消"};
+        int choice = JOptionPane.showOptionDialog(
+                this,
+                warningMsg.toString(),
+                "未結賬訂單提醒",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[1] // 默認選「取消」
+        );
+
+        return choice == JOptionPane.YES_OPTION;
+    }
+
+    public void showQueueManagementDialog() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        JLabel callNumberLabel = new JLabel("排队号码：");
+        JTextField callNumberField = new JTextField(10);
+        JLabel customerCountLabel = new JLabel("客户数量：");
+        JTextField customerCountField = new JTextField(10);
+
+        // 添加新的选项
+        JCheckBox addGroupCheckbox = new JCheckBox("增加顾客组");
+        JCheckBox editGroupSizeCheckbox = new JCheckBox("编辑顾客组人数");
+        JCheckBox deleteGroupCheckbox = new JCheckBox("删除顾客组");
+
+        //  检查餐厅是否营业
+        boolean isOpenForBusiness = controller != null && controller.service != null && controller.service.isOpenForBusiness();
+
+        //只检查是否有VACANT状态的主餐桌
+        boolean hasVacantTables = false;
+        if (controller != null && controller.service != null) {
+            for (Tables table : controller.service.getAllTables()) {
+                // 跳过子桌，只检查主餐桌
+                if (table.getSubTableSuffix() != null && !table.getSubTableSuffix().isEmpty()) {
+                    continue;
+                }
+                // 仅检查VACANT状态（完全空闲的餐桌）
+                if (table.getStatus() == Tables.TableStatus.VACANT) {
+                    hasVacantTables = true;
+                    break;
+                }
+            }
+        }
+
+        //  检查是否有排队顾客
+        boolean hasWaitingCustomers = controller != null && controller.hasWaitingCustomers();
+
+        // 只有当没有VACANT餐桌且餐厅在营业时才启用"增加顾客组"
+        boolean canAddGroups = !hasVacantTables && isOpenForBusiness;
+        addGroupCheckbox.setEnabled(canAddGroups);
+
+        // 设置精确的工具提示
+        if (!isOpenForBusiness) {
+            addGroupCheckbox.setToolTipText("餐厅已结束营业，不能添加新顾客组");
+        } else if (canAddGroups) {
+            addGroupCheckbox.setToolTipText("没有空闲餐桌，新顾客必须加入队列");
+        } else {
+            addGroupCheckbox.setToolTipText("有空闲餐桌，新顾客应直接入座，无需加入队列");
+        }
+
+        // 单选按钮组（保持互斥选择）
+        ButtonGroup group = new ButtonGroup();
+        group.add(addGroupCheckbox);
+        group.add(editGroupSizeCheckbox);
+        group.add(deleteGroupCheckbox);
+
+        //  修正的智能默认选择逻辑 - 考虑营业状态
+        if (!isOpenForBusiness) {
+            // 餐厅不营业：不选择任何选项
+            group.clearSelection();
+        } else if (canAddGroups) {
+            // 有营业且没有空闲餐桌：默认选择"增加顾客组"
+            addGroupCheckbox.setSelected(true);
+        } else if (hasWaitingCustomers) {
+            // 有营业、有空闲餐桌且有排队顾客：默认选择"编辑顾客组人数"
+            editGroupSizeCheckbox.setSelected(true);
+        } else {
+            // 有营业、有空闲餐桌且无排队顾客：不选择任何选项
+            group.clearSelection();
+        }
+
+        // 复选框监听器 - 全面控制UI状态
+        ActionListener checkboxListener = e -> {
+            boolean isAddSelected = addGroupCheckbox.isSelected();
+            boolean isEditSelected = editGroupSizeCheckbox.isSelected();
+            boolean isDeleteSelected = deleteGroupCheckbox.isSelected();
+
+            // 控制排队号码字段
+            callNumberField.setEnabled(!isAddSelected);
+            callNumberField.setEditable(!isAddSelected);
+            callNumberLabel.setEnabled(!isAddSelected);
+
+            // 控制客户数量字段
+            customerCountField.setEnabled(isAddSelected || isEditSelected);
+            customerCountField.setEditable(isAddSelected || isEditSelected);
+            customerCountLabel.setEnabled(isAddSelected || isEditSelected);
+
+            // 清空不必要的字段
+            if (isAddSelected) {
+                callNumberField.setText("");
+            }
+            if (!isAddSelected && !isEditSelected) {
+                customerCountField.setText("");
+            }
+        };
+
+        addGroupCheckbox.addActionListener(checkboxListener);
+        editGroupSizeCheckbox.addActionListener(checkboxListener);
+        deleteGroupCheckbox.addActionListener(checkboxListener);
+
+        // 初始状态设置 - 必须在设置监听器后调用
+        checkboxListener.actionPerformed(null);
+
+        // 添加状态说明标签（增强用户体验）
+        JLabel statusLabel = new JLabel();
+        statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+
+        //  根据营业状态更新状态标签
+        if (!isOpenForBusiness) {
+            statusLabel.setText("⛔ 餐厅已结束营业，不能添加新顾客");
+            statusLabel.setForeground(new Color(180, 0, 0)); // 深红色
+        } else if (canAddGroups) {
+            statusLabel.setText("⚠️ 所有餐桌已满，新顾客必须加入队列");
+            statusLabel.setForeground(new Color(180, 0, 0)); // 深红色
+        } else {
+            statusLabel.setText("✅ 有空闲餐桌，新顾客应直接入座");
+            statusLabel.setForeground(new Color(0, 120, 0)); // 深绿色
+        }
+
+        // 布局设置
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 1;
+        panel.add(callNumberLabel, gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        panel.add(callNumberField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        panel.add(customerCountLabel, gbc);
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        panel.add(customerCountField, gbc);
+
+        // 添加状态说明标签
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        panel.add(statusLabel, gbc);
+
+        // 添加新选项到布局
+        gbc.gridy = 3;
+        panel.add(addGroupCheckbox, gbc);
+
+        gbc.gridy = 4;
+        panel.add(editGroupSizeCheckbox, gbc);
+
+        gbc.gridy = 5;
+        panel.add(deleteGroupCheckbox, gbc);
+
+        // 显示对话框
+        int result = JOptionPane.showConfirmDialog(this, panel, "排队管理", JOptionPane.OK_CANCEL_OPTION);
+        if (result == JOptionPane.OK_OPTION) {
+            boolean isAdd = addGroupCheckbox.isSelected();
+            boolean isEdit = editGroupSizeCheckbox.isSelected();
+            boolean isDelete = deleteGroupCheckbox.isSelected();
+
+            // 验证至少选择了一个操作
+            if (!isAdd && !isEdit && !isDelete) {
+                showError("请选择一个操作！");
+                return;
+            }
+
+            //  额外检查：如果餐厅不营业且用户尝试添加顾客组
+            if (!isOpenForBusiness && isAdd) {
+                showError("餐厅已结束营业，无法添加新顾客组！");
+                return;
+            }
+
+            try {
+                int callNumber = -1;
+                int customerCount = -1;
+
+                // 仅当不是"增加顾客组"时才验证排队号码
+                if (!isAdd) {
+                    String callNumberStr = callNumberField.getText().trim();
+                    if (callNumberStr.isEmpty()) {
+                        showError("请输入排队号码！");
+                        return;
+                    }
+                    callNumber = Integer.parseInt(callNumberStr);
+                }
+
+                // 仅当是"增加"或"编辑"时才验证客户数量
+                if (isAdd || isEdit) {
+                    String customerCountStr = customerCountField.getText().trim();
+                    if (customerCountStr.isEmpty()) {
+                        showError("请填写客户数量！");
+                        return;
+                    }
+                    customerCount = Integer.parseInt(customerCountStr);
+                    if (customerCount <= 0) {
+                        showError("客户数量必须大于0！");
+                        return;
+                    }
+                }
+
+                // 通过控制器处理队列管理操作
+                if (controller != null) {
+                    controller.handleQueueManagementAction(callNumber, customerCount, isAdd, isEdit, isDelete);
+                }
+            } catch (NumberFormatException ex) {
+                showError("排队号码和客户数量必须是有效数字！");
+            }
+        }
+    }
+
+    public void showSelectTableDialog() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 10, 8, 10);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.gridx = 0;
+        gbc.weightx = 1.0;
+
+        // ===== 1. 操作模式选择（顶部！）=====
+        gbc.gridy = 0;
+        JLabel modeLabel = new JLabel("📌 操作模式:");
+        modeLabel.setFont(modeLabel.getFont().deriveFont(Font.BOLD, 14f));
+        panel.add(modeLabel, gbc);
+
+        gbc.gridy = 1;
+        JRadioButton newCustomerRadio = new JRadioButton("新顾客入座", true);
+        JRadioButton fromQueueRadio = new JRadioButton("从队列分配顾客");
+        ButtonGroup modeGroup = new ButtonGroup();
+        modeGroup.add(newCustomerRadio);
+        modeGroup.add(fromQueueRadio);
+        JPanel modePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        modePanel.add(newCustomerRadio);
+        modePanel.add(fromQueueRadio);
+        panel.add(modePanel, gbc);
+
+        // ===== 2. 顾客组叫号输入（仅队列模式显示）=====
+        gbc.gridy = 2;
+        JLabel callNumberLabel = new JLabel("排隊號（如 5）:");
+        panel.add(callNumberLabel, gbc);
+
+        gbc.gridy = 3;
+        JTextField callNumberField = new JTextField(12);
+        panel.add(callNumberField, gbc);
+
+        // 初始隐藏（默认新顾客模式）
+        callNumberLabel.setVisible(false);
+        callNumberField.setVisible(false);
+
+        // ===== 3. 餐桌编号 =====
+        gbc.gridy = 4;
+        JLabel tableIdLabel = new JLabel("餐桌编号（如 7）:");
+        panel.add(tableIdLabel, gbc);
+
+        gbc.gridy = 5;
+        JTextField tableIdField = new JTextField(12);
+        panel.add(tableIdField, gbc);
+
+        // ===== 4. 人数输入（仅新顾客模式）=====
+        gbc.gridy = 6;
+        JLabel peopleCountLabel = new JLabel("人数:");
+        panel.add(peopleCountLabel, gbc);
+
+        gbc.gridy = 7;
+        JTextField peopleCountField = new JTextField(12);
+        panel.add(peopleCountField, gbc);
+
+        // ===== 5. 餐桌容量选项 =====
+        gbc.gridy = 8;
+        JLabel tableTypeLabel = new JLabel("餐桌容量:");
+        tableTypeLabel.setFont(tableTypeLabel.getFont().deriveFont(Font.BOLD));
+        panel.add(tableTypeLabel, gbc);
+
+        gbc.gridy = 9;
+        JCheckBox twoSeatOption = new JCheckBox("2 人桌（1-2 人）", true);
+        JCheckBox fourSeatOption = new JCheckBox("4 人桌（1-4 人）");
+        JCheckBox sixSeatOption = new JCheckBox("6 人桌（4-6 人）");
+        ButtonGroup seatGroup = new ButtonGroup();
+        seatGroup.add(twoSeatOption);
+        seatGroup.add(fourSeatOption);
+        seatGroup.add(sixSeatOption);
+        JPanel typePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        typePanel.add(twoSeatOption);
+        typePanel.add(fourSeatOption);
+        typePanel.add(sixSeatOption);
+        panel.add(typePanel, gbc);
+
+        // ===== 6. 餐桌操作类型 =====
+        gbc.gridy = 10;
+        JLabel operationLabel = new JLabel("🔧 餐桌操作类型:");
+        operationLabel.setFont(operationLabel.getFont().deriveFont(Font.BOLD));
+        panel.add(operationLabel, gbc);
+
+        gbc.gridy = 11;
+        JCheckBox addGuestsOption = new JCheckBox("往桌子添加客人", true);
+        JCheckBox mergeOption = new JCheckBox("合并桌子（2 张）");
+        JCheckBox shareOption = new JCheckBox("共享餐桌（拼桌）");
+        JCheckBox groupedOption = new JCheckBox("聚餐桌（3张或以上）");
+
+        // 🔧【修改】使用 GridLayout 实现 2 行 2 列布局
+        JPanel operationPanel = new JPanel(new GridLayout(2, 2, 10, 10));
+        operationPanel.add(addGuestsOption);
+        operationPanel.add(mergeOption);
+        operationPanel.add(shareOption);
+        operationPanel.add(groupedOption);
+        panel.add(operationPanel, gbc);
+
+        // ===== 交互逻辑 =====
+
+        fromQueueRadio.addActionListener(e -> {
+            boolean isQueueMode = fromQueueRadio.isSelected();
+            callNumberLabel.setVisible(isQueueMode);
+            callNumberField.setVisible(isQueueMode);
+            peopleCountLabel.setVisible(!isQueueMode && !groupedOption.isSelected());
+            peopleCountField.setVisible(!isQueueMode && !groupedOption.isSelected());
+            twoSeatOption.setEnabled(true);
+            fourSeatOption.setEnabled(true);
+            sixSeatOption.setText("6人桌 ( 4-6人）");
+            tableIdLabel.setText(isQueueMode ? "分配到餐桌编号:" : "餐桌编号（如 7）:");
+            // 🔧【新增】从队列分配时隐藏聚餐桌选项
+            if (isQueueMode) {
+                groupedOption.setVisible(false);
+                groupedOption.setEnabled(false); // 禁用防止被选中
+
+                // 如果之前选中了聚餐桌，强制取消选中，这会触发 groupedOption 的监听器进行状态清理
+                if (groupedOption.isSelected()) {
+                    groupedOption.setSelected(false);
+
+                    // 清理后，如果其他操作类型（添加客人/合并/拼桌）都没选，默认选中“往桌子添加客人”
+                    // 避免操作类型区域看起来是空的（虽然业务上队列分配通常不追加，但为了界面完整性）
+                    if (!addGuestsOption.isSelected() && !mergeOption.isSelected() && !shareOption.isSelected()) {
+                        addGuestsOption.setSelected(true);
+                    }
+                }
+            } else {
+                // 切回新顾客模式时，恢复聚餐桌选项
+                groupedOption.setVisible(true);
+                groupedOption.setEnabled(true);
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        newCustomerRadio.addActionListener(e -> {
+            boolean isNewMode = newCustomerRadio.isSelected();
+            callNumberLabel.setVisible(!isNewMode);
+            callNumberField.setVisible(!isNewMode);
+            peopleCountLabel.setVisible(isNewMode && !groupedOption.isSelected());
+            peopleCountField.setVisible(isNewMode && !groupedOption.isSelected());
+            // 🔧【新增】新顾客入座时显示聚餐桌选项
+            groupedOption.setVisible(true);
+            groupedOption.setEnabled(true);
+
+            tableIdLabel.setText("餐桌编号（如 7）:");
+            if (isNewMode) {
+                addGuestsOption.setToolTipText(
+                        "将新顾客追加到已有顾客的餐桌（同一顾客组增加人数） " +
+                                "例如：2 人桌已有 1 人，再加 1 人变为 2 人"
+                );
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        addGuestsOption.addActionListener(e -> {
+            if (addGuestsOption.isSelected()) {
+                mergeOption.setSelected(false);
+                shareOption.setSelected(false);
+                groupedOption.setSelected(false);
+                sixSeatOption.setVisible(true);
+                twoSeatOption.setEnabled(true);
+                fourSeatOption.setEnabled(true);
+                tableIdLabel.setText("餐桌编号（如 7）:");
+                twoSeatOption.setText("2 人桌（1-2 人）");
+                fourSeatOption.setText("4 人桌（1-4 人）");
+                sixSeatOption.setText("6 人桌（4-6人）");
+
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        mergeOption.addActionListener(e -> {
+            boolean isMerge = mergeOption.isSelected();
+            if (isMerge) {
+                twoSeatOption.setEnabled(true);
+                fourSeatOption.setEnabled(true);
+                sixSeatOption.setEnabled(true);
+
+                addGuestsOption.setSelected(false);
+                shareOption.setSelected(false);
+                groupedOption.setSelected(false);
+                sixSeatOption.setSelected(false);
+                sixSeatOption.setVisible(true);
+                twoSeatOption.setSelected(true);
+                tableIdLabel.setText("餐桌编号（如 7）:");
+                twoSeatOption.setText("合并 2 人桌（3-4 人）");
+                fourSeatOption.setText("合并 4 人桌（5-8 人）");
+                sixSeatOption.setText("合并 6 人桌（9-12 人）");
+            } else {
+                sixSeatOption.setVisible(true);
+                tableIdLabel.setText("餐桌编号（如 7）:");
+                twoSeatOption.setText("2 人桌（1-2 人）");
+                fourSeatOption.setText("4 人桌（1-4 人）");
+                sixSeatOption.setText("6 人桌 ( 4-6 人) ");
+                twoSeatOption.setSelected(true);
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        shareOption.addActionListener(e -> {
+            if (shareOption.isSelected()) {
+                // 🔧【关键修复】显式启用 2人桌和 4人桌
+                // 防止因为 groupedOption 的取消逻辑未及时生效，导致按钮依然变灰
+                twoSeatOption.setEnabled(true);
+                fourSeatOption.setEnabled(true);
+
+                addGuestsOption.setSelected(false);
+                mergeOption.setSelected(false);
+                groupedOption.setSelected(false);
+                sixSeatOption.setSelected(false);
+                sixSeatOption.setVisible(false);
+                tableIdLabel.setText("餐桌编号（如 7）:");
+                twoSeatOption.setText("2 人桌（1-2 人）");
+                fourSeatOption.setText("4 人桌（1-4 人）");
+            } else {
+                sixSeatOption.setVisible(true);
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        groupedOption.addActionListener(e -> {
+            boolean isGrouped = groupedOption.isSelected();
+            if (isGrouped) {
+                // 互斥其他操作
+                addGuestsOption.setSelected(false);
+                mergeOption.setSelected(false);
+                shareOption.setSelected(false);
+
+                // 聚餐桌只能用 6 人桌
+                sixSeatOption.setVisible(true);
+                sixSeatOption.setSelected(true);
+                sixSeatOption.setEnabled(true);
+                twoSeatOption.setEnabled(false);
+                fourSeatOption.setEnabled(false);
+
+                // 隐藏普通人数输入
+                peopleCountLabel.setVisible(false);
+                peopleCountField.setVisible(false);
+
+                // 更新标签提示
+                tableIdLabel.setText("主餐桌编号（如 13）:");
+                tableIdField.setToolTipText("输入聚餐桌组中编号最小的餐桌号");
+
+                // 🔧【修改】清空人数输入，由系统根据餐桌自动计算
+                peopleCountField.setText("");
+
+                sixSeatOption.setText("6 人桌 ");
+                twoSeatOption.setText("2 人桌（1-2 人）");
+                fourSeatOption.setText("4 人桌（1-4 人）");
+
+                groupedOption.setToolTipText(
+                        "聚餐桌规则：\n" +
+                                "• 必须使用 6 人桌，数量 3-6 张（通过连续桌号自动识别）\n" +
+                                "• 接待 9 人以上大型顾客组\n" +
+                                "• 桌号必须连续（如 13,14,15）\n" +
+                                "• 主桌为编号最小的餐桌，系统自动识别关联桌"
+                );
+            } else {
+                // 恢复普通模式
+                twoSeatOption.setEnabled(true);
+                fourSeatOption.setEnabled(true);
+                sixSeatOption.setVisible(true);
+                peopleCountLabel.setVisible(newCustomerRadio.isSelected());
+                peopleCountField.setVisible(newCustomerRadio.isSelected());
+                tableIdLabel.setText("餐桌编号（如 7）:");
+                tableIdField.setToolTipText("");
+                sixSeatOption.setText("6 人桌(1-6人) ");
+            }
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        // ===== 创建对话框 =====
+        JOptionPane optionPane = new JOptionPane(panel, JOptionPane.PLAIN_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION);
+        JDialog dialog = optionPane.createDialog(this, "🍽️ 选择餐桌");
+        dialog.setSize(580, 580);
+        dialog.setLocationRelativeTo(null);
+
+        // ===== 🔹 仅禁用"新顾客入座"模式（关闭营业时）=====
+        if (controller != null && controller.service != null && !controller.service.isOpenForBusiness()) {
+            newCustomerRadio.setEnabled(false);
+            newCustomerRadio.setToolTipText("⛔ 餐厅已结束营业，不能添加新顾客");
+            if (newCustomerRadio.isSelected() && fromQueueRadio.isEnabled()) {
+                fromQueueRadio.setSelected(true);
+                callNumberLabel.setVisible(true);
+                callNumberField.setVisible(true);
+                peopleCountLabel.setVisible(false);
+                peopleCountField.setVisible(false);
+                tableIdLabel.setText("分配到餐桌编号:");
+            }
+            panel.revalidate();
+            panel.repaint();
+        }
+
+        // =====  关键修复 1：检测所有主桌是否被占用 =====
+        boolean allMainTablesOccupied = false;
+        if (controller != null && controller.service != null) {
+            List<Tables> tables = controller.service.getAllTables();
+            allMainTablesOccupied = tables.stream()
+                    .filter(table -> table.getTableType() == Tables.TableType.MAIN)
+                    .allMatch(table -> table.getStatus() == Tables.TableStatus.OCCUPIED);
+        }
+        if (allMainTablesOccupied) {
+            mergeOption.setEnabled(false);
+            groupedOption.setEnabled(false);
+            mergeOption.setSelected(false);
+            shareOption.setSelected(false);
+            groupedOption.setSelected(false);
+            mergeOption.setToolTipText(" 所有主桌已被占用，无法合并");
+            groupedOption.setToolTipText("所有主桌已被占用，无法创建聚餐桌");
+            operationPanel.setToolTipText(" 所有主桌已被占用，合并/聚餐桌操作不可用");
+            panel.revalidate();
+            panel.repaint();
+        }
+
+        // =====  关键修复 2：检测队列是否为空（纯内存检查）=====
+        boolean allQueuesEmpty = true;
+        if (controller != null && controller.service != null) {
+            Queue<CustomerGroup> q2 = controller.service.getQueue2Seat();
+            Queue<CustomerGroup> q4 = controller.service.getQueue4Seat();
+            Queue<CustomerGroup> q6 = controller.service.getQueue6Seat();
+            allQueuesEmpty = q2.isEmpty() && q4.isEmpty() && q6.isEmpty();
+        }
+        if (allQueuesEmpty) {
+            fromQueueRadio.setEnabled(false);
+            fromQueueRadio.setSelected(false);
+            newCustomerRadio.setSelected(true);
+            callNumberLabel.setVisible(false);
+            callNumberField.setVisible(false);
+            peopleCountLabel.setVisible(true);
+            peopleCountField.setVisible(true);
+            tableIdLabel.setText("餐桌编号（如 7）:");
+            fromQueueRadio.setToolTipText(" 当前无排队顾客，无法从队列分配");
+            modePanel.setToolTipText(" 所有队列为空，仅支持新顾客入座");
+            panel.revalidate();
+            panel.repaint();
+        }
+
+        // ===== 🔹 关闭营业且无队列时禁用"确定"按钮 =====
+        boolean isClosed = (controller != null && controller.service != null &&
+                !controller.service.isOpenForBusiness());
+        boolean queuesEmpty = allQueuesEmpty;
+
+        // 显示对话框（模态阻塞）
+        dialog.setVisible(true);
+
+        //  关键：对话框关闭后，如果用户点了"确定"但条件不满足 → 拦截并提示
+        if (isClosed && queuesEmpty &&
+                optionPane.getValue() != null &&
+                optionPane.getValue().equals(JOptionPane.OK_OPTION)) {
+            showError(" 餐厅已打烊且无排队顾客，无法执行此操作！");
+            return;
+        }
+
+        // ===== 处理结果 =====
+        if (optionPane.getValue() != null &&
+                optionPane.getValue().equals(JOptionPane.OK_OPTION)) {
+
+            String tableIdInput = tableIdField.getText().trim();
+            if (tableIdInput.isEmpty()) {
+                showError("请输入餐桌编号！");
+                return;
+            }
+
+            boolean isFromQueue = fromQueueRadio.isSelected();
+            int peopleCount = 0;
+            int callNumber = 0;
+
+            if (isFromQueue) {
+                String callNumberInput = callNumberField.getText().trim();
+                if (callNumberInput.isEmpty()) {
+                    showError("请输入顾客组叫号！");
+                    return;
+                }
+                try {
+                    callNumber = Integer.parseInt(callNumberInput);
+                    if (callNumber <= 0) {
+                        showError("叫号必须大于 0！");
+                        return;
+                    }
+                } catch (NumberFormatException ex) {
+                    showError("叫号必须为整数！");
+                    return;
+                }
+            } else {
+                // 聚餐桌模式下人数由系统根据餐桌自动计算，否则读取输入
+                if (!groupedOption.isSelected()) {
+                    String peopleInput = peopleCountField.getText().trim();
+                    if (peopleInput.isEmpty()) {
+                        showError("请输入人数！");
+                        return;
+                    }
+                    try {
+                        peopleCount = Integer.parseInt(peopleInput);
+                        if (peopleCount <= 0) {
+                            showError("人数必须大于 0！");
+                            return;
+                        }
+                    } catch (NumberFormatException ex) {
+                        showError("人数必须为整数！");
+                        return;
+                    }
+                }
+                // 🔧 聚餐桌：人数留空，由 Service 层根据餐桌自动计算
+            }
+
+            boolean isMerge = mergeOption.isSelected();
+            boolean isTwoSeat = twoSeatOption.isSelected();
+            boolean isFourSeat = fourSeatOption.isSelected();
+            boolean isSixSeat = sixSeatOption.isSelected();
+            boolean isAddGuests = addGuestsOption.isSelected();
+            boolean isShare = shareOption.isSelected();
+            boolean isGrouped = groupedOption.isSelected();
+
+            // 🔧 调用 Controller（聚餐桌桌子数量由餐桌编号自动识别，传 0 表示自动）
+            controller.handleManualTableAssignment(
+                    tableIdInput,
+                    peopleCount,
+                    isFromQueue,
+                    callNumber,
+                    isMerge,
+                    isTwoSeat,
+                    isFourSeat,
+                    isSixSeat,
+                    isAddGuests,
+                    isShare,
+                    isGrouped,
+                    0  // 🔧 聚餐桌桌子数量：传 0 表示由系统根据餐桌编号自动识别
+            );
+        }
+    }
+    /**
+     * 🔧 封装确认对话框（供 Controller 调用）
+     */
+    public int showConfirmDialog(String message, String title) {
+        return JOptionPane.showConfirmDialog(
+                this,                    // 父窗口，保证模态正确
+                message,
+                title,
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+    }
+
+    // RestaurantView.java - 新增方法
+    /**
+     * 🔧 显示"追加入座"确认对话框
+     * @param displayId 餐桌编号
+     * @param currentSize 当前人数
+     * @param remainingSeats 剩余座位
+     * @param additionalPeople 要追加的人数
+     * @return true=用户确认，false=用户取消
+     */
+    public boolean showAddGuestsConfirmationDialog(
+            String displayId, int currentSize, int remainingSeats, int additionalPeople) {
+
+        String message = String.format(
+                "<html><div style='padding:10px; font-family:Microsoft YaHei;'>" +
+                        "<b>⚠️ 确认追加入座？</b><br><br>" +
+                        "餐桌 <b>#%s</b> 已有顾客正在用餐。<br>" +
+                        "当前人数：<b>%d 人</b><br>" +
+                        "剩余座位：<b>%d 个</b><br><br>" +
+                        "要追加 <b>%d 位</b> 新顾客到该餐桌吗？<br>" +
+                        "<font color='#666'><small>请确认是否为同一组朋友</small></font>" +
+                        "</div></html>",
+                displayId, currentSize, remainingSeats, additionalPeople
+        );
+
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                message,
+                "确认追加入座",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+        );
+
+        return result == JOptionPane.YES_OPTION;
+    }
 }

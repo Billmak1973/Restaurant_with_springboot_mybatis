@@ -560,15 +560,13 @@ public class OrderSystemGUI extends JFrame {
     }
 
     /**
-     * 🔧 撤销预约订单中的菜品（通过 reservation_id）
-     *
-     * @param reservationId      预约号
-     * @param itemId             菜品ID
-     * @param quantity           撤销数量
-     * @param cancellationReason 撤销原因
+     * 🔧 撤销预约订单中的菜品（通过 reservation_id）- 添加 cancelPart 参数
      */
-    public void cancelReservationOrderItem(String reservationId, int itemId, int quantity, String cancellationReason) throws SQLException {
-        orderService.cancelReservationOrderItem(reservationId, itemId, quantity, cancellationReason);
+    public void cancelReservationOrderItem(String reservationId, int itemId,
+                                           int quantity, String cancellationReason,
+                                           String cancelPart) throws SQLException {  // 🔧 新增
+        orderService.cancelReservationOrderItem(reservationId, itemId, quantity,
+                cancellationReason, cancelPart);
     }
 
     public void addOrderItemsForGroupedTable(
@@ -620,7 +618,6 @@ public class OrderSystemGUI extends JFrame {
 
         return 1;  // 解析失败时返回默认值
     }
-
 
 }
 

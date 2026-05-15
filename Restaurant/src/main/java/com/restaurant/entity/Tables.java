@@ -5,6 +5,8 @@ import java.awt.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+
+import com.restaurant.mapper.CustomerGroupMapper;
 import org.apache.ibatis.type.Alias;  // ✅ 新增导入
 
 @Alias("Tables")
@@ -335,18 +337,6 @@ public class Tables {
         }
     }
 
-    // 添加状态验证方法
-//    public boolean isConsistent() {
-//        if (status == TableStatus.OCCUPIED) {
-//            boolean hasGroup = currentGroup != null && currentGroupId != null;
-//            if (!hasGroup) {
-//                System.err.println("⚠️ 餐桌 #" + displayId + " 状态为OCCUPIED，但组数据不完整");
-//                return false;
-//            }
-//            return currentGroupId.equals(currentGroup.getGroup_id());
-//        }
-//        return true;
-//    }
 
     public boolean isConsistent() {
         if (status == TableStatus.OCCUPIED) {
@@ -379,8 +369,6 @@ public class Tables {
         }
         return currentGroup;
     }
-
-
 
     /** 合并餐桌实际使用座位数（独立餐桌始终=0） */
     public int getActualSeats() {

@@ -328,6 +328,7 @@
     ├── 異常日誌：try-catch + printStackTrace
     └── 調試日誌：關鍵業務節點輸出 [DEBUG] 標記
 ```
+<img width="1918" height="1005" alt="image" src="https://github.com/user-attachments/assets/fcf543da-8d78-41cc-b8b2-22f24a146149" />
 
 ---
 

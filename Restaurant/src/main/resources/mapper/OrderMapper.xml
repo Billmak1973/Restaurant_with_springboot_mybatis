@@ -43,47 +43,7 @@
         LIMIT 1
     </select>
 
-    <!-- 4. getOrderTotalAmount -->
-    <select id="getOrderTotalAmount" resultType="java.lang.Double">
-        SELECT total_amount
-        FROM table_orders
-        WHERE order_id = #{orderId}
-        AND status = 'ORDERED'
-    </select>
 
-    <!-- 5. getOrderCreateTime -->
-    <select id="getOrderCreateTime" resultType="java.sql.Timestamp">
-        SELECT order_time
-        FROM table_orders
-        WHERE order_id = #{orderId}
-        AND status = 'ORDERED'
-    </select>
-
-    <!-- 6. getActiveOrderHeaderByTableId -->
-    <select id="getActiveOrderHeaderByTableId" resultType="java.util.Map">
-        SELECT
-        o.order_time,
-        o.total_amount,
-        o.order_id
-        FROM table_orders o
-        WHERE o.table_id = #{tableId}
-        AND o.status = 'ORDERED'
-        ORDER BY o.order_time DESC
-        LIMIT 1
-    </select>
-
-    <!-- 7. getOrderItemsByOrderId -->
-    <select id="getOrderItemsByOrderId" resultType="java.util.Map">
-        SELECT
-        mi.item_code,
-        mi.name,
-        oi.quantity,
-        oi.served_quantity,
-        oi.price_at_order
-        FROM order_items oi
-        JOIN menu_items mi ON oi.item_id = mi.item_id
-        WHERE oi.order_id = #{orderId}
-    </select>
 
     <!-- ===== 订单状态更新 ===== -->
 
@@ -95,13 +55,6 @@
         WHERE order_id = #{orderId}
     </update>
 
-    <!-- 9. updateOrderStatusAndAmount -->
-    <update id="updateOrderStatusAndAmount">
-        UPDATE table_orders
-        SET status = #{status},
-        total_amount = #{amount}
-        WHERE order_id = #{orderId}
-    </update>
 
     <!-- 10. isOrderPreviouslyCheckedOut -->
     <select id="isOrderPreviouslyCheckedOut" resultType="boolean">
@@ -222,58 +175,6 @@
 
     <!-- ===== 季度销售记录原子操作 ===== -->
 
-    <!-- 19. findOrderItemsForSalesRecord -->
-    <select id="findOrderItemsForSalesRecord" resultType="java.util.Map">
-        SELECT
-        mi.item_code,
-        mi.name,
-        oi.price_at_order,
-        oi.quantity
-        FROM order_items oi
-        JOIN menu_items mi ON oi.item_id = mi.item_id
-        WHERE oi.order_id = #{orderId}
-    </select>
-
-    <!-- 20. checkQuarterlySalesExists -->
-    <select id="checkQuarterlySalesExists" resultType="java.lang.Integer">
-        SELECT sales_id
-        FROM item_quarterly_sales
-        WHERE item_code = #{itemCode}
-        AND item_name = #{itemName}
-        AND sale_price = #{salePrice}
-        AND year = #{year}
-        AND quarter = #{quarter}
-    </select>
-
-    <!-- 21. updateQuarterlySalesQuantity -->
-    <update id="updateQuarterlySalesQuantity">
-        UPDATE item_quarterly_sales
-        SET quantity_sold = quantity_sold + #{quantity},
-        sale_timestamp = NOW()
-        WHERE sales_id = #{salesId}
-    </update>
-
-    <!-- 22. insertQuarterlySalesRecord -->
-    <insert id="insertQuarterlySalesRecord">
-        INSERT INTO item_quarterly_sales (
-        item_code,
-        item_name,
-        sale_price,
-        quantity_sold,
-        sale_timestamp,
-        year,
-        quarter
-        ) VALUES (
-        #{itemCode},
-        #{itemName},
-        #{salePrice},
-        #{quantity},
-        NOW(),
-        #{year},
-        #{quarter}
-        )
-    </insert>
-
     <update id="recordQuarterlySales">
         <!-- 1. 创建临时表 🔧 指定字符集和排序规则 -->
         CREATE TEMPORARY TABLE IF NOT EXISTS tmp_grouped_items (
@@ -334,24 +235,21 @@
     </update>
 
 
-    <!-- findOrderItemsByTableDisplayId 查询 - 列名必须与属性名对应 -->
-    <!-- 现有的单个餐桌查询 -->
-    <select id="findOrderItemsByTableDisplayId" resultMap="OrderItemResult">
-        SELECT
-        oi.order_item_id, oi.order_id, oi.item_id,
-        oi.quantity, oi.served_quantity,oi.prepared_quantity,oi.status,
-        oi.price_at_order,
-        oi.assigned_table_display_id,
-        oi.served_table_display_id,  <!-- 🔧 新增 -->
-        oi.quantity_distribution,  <!-- 🔧 新增這一行 -->
-        mi.item_code, mi.name AS item_name
-        FROM table_orders o
-        JOIN order_items oi ON o.order_id = oi.order_id
-        JOIN menu_items mi ON oi.item_id = mi.item_id
-        JOIN restaurant_tables t ON o.table_id = t.table_id
-        WHERE t.display_id = #{displayId}
-        AND o.status = 'ORDERED'
-        ORDER BY oi.assigned_table_display_id, oi.order_item_id ASC
+    <!-- 新增：获取下一个外卖订单序号（格式：P-20260305-001） -->
+    <!-- 在 OrderMapper.xml 中找到 getNextOrderNumber，修改为支持堂食 -->
+    <select id="getNextOrderNumber" resultType="java.lang.Integer">
+        SELECT COALESCE(
+        MAX(CAST(SUBSTRING_INDEX(order_number, '-', -1) AS UNSIGNED)),
+        0
+        ) + 1
+        FROM table_orders
+        WHERE order_number LIKE CONCAT(#{prefix}, '-', #{dateStr}, '-%')
+        <if test="orderType != null">
+            AND order_type = #{orderType}
+        </if>
+        <if test="deliveryMethod != null">
+            AND delivery_method = #{deliveryMethod}
+        </if>
     </select>
 
     <!-- ===== 修正后的 OrderItemResult：纯 Setter 映射 ===== -->
@@ -453,27 +351,6 @@
         AND status = 'ORDERED'
     </select>
 
-
-    <!-- 新增：获取下一个外卖订单序号（格式：P-20260305-001） -->
-    <!-- 在 OrderMapper.xml 中找到 getNextOrderNumber，修改为支持堂食 -->
-    <select id="getNextOrderNumber" resultType="java.lang.Integer">
-        SELECT COALESCE(
-        MAX(CAST(SUBSTRING_INDEX(order_number, '-', -1) AS UNSIGNED)),
-        0
-        ) + 1
-        FROM table_orders
-        WHERE order_number LIKE CONCAT(#{prefix}, '-', #{dateStr}, '-%')
-        <if test="orderType != null">
-            AND order_type = #{orderType}
-        </if>
-        <if test="deliveryMethod != null">
-            AND delivery_method = #{deliveryMethod}
-        </if>
-    </select>
-
-
-
-    <!-- 在 OrderMapper.xml 末尾添加 -->
     <update id="updateDeliveryStatus">
         UPDATE table_orders
         SET delivery_status = #{status}
@@ -763,7 +640,6 @@
         LIMIT 1
     </select>
 
-    <!-- OrderMapper.xml 添加 -->
     <!--  新增：根据 reservation_id 查询活跃订单（预点餐/已下单）-->
     <select id="findActiveOrderIdByReservationId" resultType="java.lang.Integer">
         SELECT order_id

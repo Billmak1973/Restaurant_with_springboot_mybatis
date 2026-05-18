@@ -49,37 +49,11 @@ public interface TablesMapper {
      */
     List<Tables> findSubTablesByMainId(@Param("mainTableId") int mainTableId);
 
-    /**
-     * 查找相邻的可用餐桌对（用于合并）
-     * @param capacity 餐桌容量
-     * @param colsPerRow 每行列数（用于计算相邻关系）
-     * @return 相邻餐桌对列表
-     */
-    List<List<Tables>> findAdjacentAvailableTables(
-            @Param("capacity") int capacity,
-            @Param("colsPerRow") int colsPerRow);
 
-    /**
-     * 检查是否已有餐桌数据
-     * @return true=已有数据
-     */
-    boolean hasExistingTableData();
 
     // ===== 插入操作 =====
 
-    /**
-     * 保存餐桌（返回自增主键）
-     * @param table 餐桌对象
-     * @return 影响行数
-     */
-    int save(Tables table);
 
-    /**
-     * 批量插入默认餐桌数据
-     * @param tables 餐桌列表
-     * @return 影响行数
-     */
-    int initializeDefaultTables(@Param("tables") List<Tables> tables);
 
     /**
      * 保存子桌（返回自增主键）
@@ -201,22 +175,7 @@ public interface TablesMapper {
      */
     int updateMainTableToSplitting(@Param("mainTableId") int mainTableId);
 
-    /**
-     * 获取主桌基础信息
-     * @param mainTableId 主桌ID
-     * @return 包含 base_id 和 display_id 的 Map
-     */
-    java.util.Map<String, Object> getMainTableBaseInfo(@Param("mainTableId") int mainTableId);
 
-    /**
-     * 更新顾客组的餐桌关联
-     * @param groupId 顾客组ID
-     * @param tableId 新餐桌ID
-     * @return 影响行数
-     */
-    int updateCustomerGroupTableId(
-            @Param("groupId") int groupId,
-            @Param("tableId") int tableId);
 
 
     // ===== 合并餐桌（恢复拆分）相关 =====
@@ -244,19 +203,6 @@ public interface TablesMapper {
      */
     int deleteSubTables(@Param("subTableIds") List<Integer> subTableIds);
 
-
-
-
-    /**
-     * 批量插入子桌（一次插入两条记录）
-     * @param subTables 子桌列表（必须2个元素）
-     * @return 影响行数
-     */
-    int batchInsertSubTables(@Param("subTables") List<Tables> subTables);
-
-
-
-    // ===== 拆分餐桌原子操作（替代原 splitOccupiedTable）=====
 
 
     int updateTableForReservation(
@@ -365,4 +311,16 @@ public interface TablesMapper {
      * @return true=有记录，false=无记录
      */
     boolean hasAnyOrders(@Param("tableId") int tableId);
+
+    /**
+     * 更新聚餐桌入座状态
+     */
+    int updateTableForGroupedCheckIn(
+            @Param("tableId") int tableId,
+            @Param("status") String status,
+            @Param("currentGroupId") Integer currentGroupId,
+            @Param("actualSeats") int actualSeats,
+            @Param("groupWith") String groupWith,
+            @Param("tableType") String tableType
+    );
 }

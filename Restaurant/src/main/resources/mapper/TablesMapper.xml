@@ -94,59 +94,9 @@
         WHERE main_table_id = #{mainTableId}
     </select>
 
-    <!-- 6. findAdjacentAvailableTables -->
-    <select id="findAdjacentAvailableTables" resultMap="TablesResult">
-        SELECT
-        table_id, display_id, base_id, capacity, physical_capacity,
-        status, table_type, actual_seats, current_group_id,
-        is_split, sub_table_suffix, main_table_id,
-        start_time, end_time, merged_with
-        FROM restaurant_tables
-        WHERE status = 'VACANT'
-        AND capacity = #{capacity}
-        AND table_type = 'MAIN'
-        ORDER BY base_id
-    </select>
 
-    <!-- 7. hasExistingTableData -->
-    <select id="hasExistingTableData" resultType="boolean">
-        SELECT COUNT(*) &gt; 0 FROM restaurant_tables
-    </select>
 
     <!-- ===== 插入操作 ===== -->
-
-    <!-- 8. save -->
-    <insert id="save" useGeneratedKeys="true" keyProperty="table_id">
-        INSERT INTO restaurant_tables (
-        display_id, base_id, capacity, physical_capacity,
-        status, table_type, actual_seats, current_group_id,
-        is_split, sub_table_suffix, main_table_id,
-        start_time, end_time, merged_with,
-        reserved_time, group_with
-        ) VALUES (
-        #{displayId}, #{baseId}, #{capacity}, #{physicalCapacity},
-        #{status}, #{tableType}, #{actualSeats}, #{currentGroupId},
-        #{split}, #{subTableSuffix}, #{mainTableId},
-        #{startTime}, #{endTime}, #{mergedWith},
-        #{reservedTime}, #{groupWith}
-        )
-    </insert>
-
-
-    <!-- 9. initializeDefaultTables -->
-    <insert id="initializeDefaultTables">
-        INSERT INTO restaurant_tables (
-        display_id, base_id, capacity, physical_capacity,
-        status, table_type
-        ) VALUES
-        <foreach collection="tables" item="t" separator=",">
-            (
-            #{t.displayId}, #{t.baseId}, #{t.capacity}, #{t.physicalCapacity},
-            #{t.status}, #{t.tableType}
-            )
-        </foreach>
-        ON DUPLICATE KEY UPDATE display_id = display_id
-    </insert>
 
     <!-- 10. saveSubTable -->
     <insert id="saveSubTable" useGeneratedKeys="true" keyProperty="table_id">
@@ -278,20 +228,7 @@
         WHERE table_id = #{mainTableId}
     </update>
 
-    <!-- 18. getMainTableBaseInfo -->
-    <select id="getMainTableBaseInfo" resultType="java.util.Map">
-        SELECT base_id, display_id
-        FROM restaurant_tables
-        WHERE table_id = #{mainTableId}
-    </select>
 
-    <!-- 19. updateCustomerGroupTableId -->
-    <update id="updateCustomerGroupTableId">
-        UPDATE customer_groups SET
-        table_id = #{tableId},
-        is_assigned = TRUE
-        WHERE group_id = #{groupId}
-    </update>
 
     <!-- ===== 合并餐桌（恢复拆分）===== -->
 
@@ -483,4 +420,18 @@
         FROM table_orders
         WHERE table_id = #{tableId}
     </select>
+
+    <!-- 更新聚餐桌入座状态 -->
+    <update id="updateTableForGroupedCheckIn">
+        UPDATE restaurant_tables
+        SET
+        status = #{status},
+        current_group_id = #{currentGroupId},
+        actual_seats = #{actualSeats},
+        group_with = #{groupWith},
+        table_type = #{tableType},
+        start_time = NOW(),
+        reserved_time = NULL
+        WHERE table_id = #{tableId}
+    </update>
 </mapper>

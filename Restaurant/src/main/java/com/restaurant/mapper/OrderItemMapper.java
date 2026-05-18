@@ -35,16 +35,7 @@ public interface OrderItemMapper {
             @Param("orderId") int orderId,
             @Param("items") List<OrderItem> items);
 
-    /**
-     * 批量插入新订单项（通过 item_code 关联 menu_items）
-     *
-     * @param orderId 订单ID
-     * @param items   待插入的 OrderItem 列表（需含 itemCode, quantity, priceAtOrder）
-     * @return 影响行数
-     */
-    int insertNewOrderItems(
-            @Param("orderId") int orderId,
-            @Param("items") List<OrderItem> items);
+
 
     // ===== 订单金额计算 =====
 
@@ -79,16 +70,6 @@ public interface OrderItemMapper {
             @Param("itemId") int itemId);
 
 
-    /**
-     * 获取订单项上菜状态
-     *
-     * @param orderId 订单ID
-     * @param itemId  菜品ID
-     * @return 状态对象，不存在返回 null
-     */
-    OrderItemServingStatus fetchServingStatusByOrderItem(
-            @Param("orderId") int orderId,
-            @Param("itemId") int itemId);
     /**
      * 🔧 通过 order_item_id 精确更新 prepared_quantity + status
      */
@@ -226,14 +207,6 @@ public interface OrderItemMapper {
             @Param("orderId") int orderId,
             @Param("status") String status);  // 🔧 新增参数
 
-    // ===== OrderItemMapper.java 添加方法 =====
-
-    int updateServedQuantityAndStatus(
-            @Param("orderId") int orderId,
-            @Param("itemId") int itemId,
-            @Param("servedQuantity") int servedQuantity,
-            @Param("newStatus") String newStatus
-    );
 
     /**
      * 更新现有订单项数量（预约订单专用 - 使用 PREPARING/PREPARED 状态）
@@ -265,14 +238,6 @@ public interface OrderItemMapper {
             @Param("assignedTableDisplayId") String assignedTableDisplayId
     );
 
-    int updatePreparedQuantity(
-            @Param("orderItemId") int orderItemId, // 🔧 新增
-            @Param("orderId") int orderId,
-            @Param("itemId") int itemId,
-            @Param("preparedQuantity") int preparedQuantity,
-            @Param("newStatus") String newStatus,
-            @Param("assignedTableDisplayId") String assignedTableDisplayId
-    );
 
     OrderItem findSharedOrderItemByFuzzyTableId(
             @Param("itemId") int itemId,

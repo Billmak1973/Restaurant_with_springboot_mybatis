@@ -46,40 +46,11 @@ public interface OrderMapper {
      */
     Integer findCheckedOutOrderIdByTableId(@Param("tableId") int tableId);
 
-    /**
-     * 根据订单ID查询订单总金额
-     * @param orderId 订单ID
-     * @return 总金额，不存在返回 null
-     */
-    Double getOrderTotalAmount(@Param("orderId") int orderId);
 
-    /**
-     * 根据订单ID查询订单创建时间
-     * @param orderId 订单ID
-     * @return 创建时间，不存在返回 null
-     */
-    Timestamp getOrderCreateTime(@Param("orderId") int orderId);
 
-    /**
-     * 根据餐桌ID查询活跃订单头信息
-     * @param tableId 餐桌ID
-     * @return 订单头信息 Map，无记录返回 null
-     */
-    Map<String, Object> getActiveOrderHeaderByTableId(@Param("tableId") int tableId);
 
-    /**
-     * 根据订单ID查询订单明细列表
-     * @param orderId 订单ID
-     * @return 明细列表（Map格式）
-     */
-    List<Map<String, Object>> getOrderItemsByOrderId(@Param("orderId") int orderId);
 
-    /**
-     * 根据餐桌显示ID查询订单明细（带菜品信息）
-     * @param displayId 餐桌显示编号（如 "7" 或 "7a"）
-     * @return OrderItem 列表
-     */
-    List<OrderItem> findOrderItemsByTableDisplayId(@Param("displayId") String displayId);
+
 
     /**
      * 根据外卖订单号查询订单
@@ -98,18 +69,6 @@ public interface OrderMapper {
      * @return 影响行数
      */
     int checkoutOrder(@Param("orderId") int orderId);
-
-    /**
-     * 更新订单状态和金额
-     * @param orderId 订单ID
-     * @param status 新状态（如 "ORDERED" / "CHECKED_OUT"）
-     * @param amount 新总金额
-     * @return 影响行数
-     */
-    int updateOrderStatusAndAmount(
-            @Param("orderId") int orderId,
-            @Param("status") String status,
-            @Param("amount") double amount);
 
     /**
      * 检查餐桌是否有历史结账记录
@@ -202,55 +161,6 @@ public interface OrderMapper {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * 查询订单明细用于季度销售记录
-     * @param orderId 订单ID
-     * @return 明细列表（含 item_code, name, price_at_order, quantity）
-     */
-    List<Map<String, Object>> findOrderItemsForSalesRecord(@Param("orderId") int orderId);
-
-    /**
-     * 检查季度销售记录是否存在
-     * @param itemCode 菜品编号
-     * @param itemName 菜品名称
-     * @param salePrice 销售单价
-     * @param year 年份
-     * @param quarter 季度
-     * @return 销售记录ID，不存在返回 null
-     */
-    Integer checkQuarterlySalesExists(
-            @Param("itemCode") String itemCode,
-            @Param("itemName") String itemName,
-            @Param("salePrice") double salePrice,
-            @Param("year") int year,
-            @Param("quarter") String quarter);
-
-    /**
-     * 更新季度销售数量
-     * @param salesId 销售记录ID
-     * @param quantity 增加的数量
-     * @return 影响行数
-     */
-    int updateQuarterlySalesQuantity(@Param("salesId") int salesId, @Param("quantity") int quantity);
-
-    /**
-     * 插入季度销售记录
-     * @param itemCode 菜品编号
-     * @param itemName 菜品名称
-     * @param salePrice 销售单价
-     * @param quantity 销售数量
-     * @param year 年份
-     * @param quarter 季度
-     * @return 影响行数
-     */
-    int insertQuarterlySalesRecord(
-            @Param("itemCode") String itemCode,
-            @Param("itemName") String itemName,
-            @Param("salePrice") double salePrice,
-            @Param("quantity") int quantity,
-            @Param("year") int year,
-            @Param("quarter") String quarter);
-
-    /**
      * 批量记录季度销售（单方法完成查询+更新+插入，使用CTE）
      * @param orderId 订单ID
      * @param year 年份
@@ -284,22 +194,6 @@ public interface OrderMapper {
      */
     List<Map<String, Object>> findDeliveryOrders();
 
-    // ═══════════════════════════════════════════════════════════
-    // 【外卖订单号生成】
-    // ═══════════════════════════════════════════════════════════
-
-    /**
-     * 获取下一个外卖订单序号（用于生成订单号）
-     * @param prefix 前缀："P"=自取 / "D"=配送
-     * @param dateStr 日期字符串：格式 "20260305"
-     * @param deliveryMethod 配送方式："PICKUP" / "DELIVERY"
-     * @return 下一个序号（从1开始）
-     */
-    Integer getNextOrderNumber(
-            @Param("prefix") String prefix,
-            @Param("dateStr") String dateStr,
-            @Param("deliveryMethod") String deliveryMethod
-    );
 
     // 新增：根据外卖订单号查询订单明细
     List<OrderItem> findOrderItemsByOrderNumber(@Param("orderNumber") String orderNumber);
@@ -355,6 +249,7 @@ public interface OrderMapper {
 
 
     int updateDeliveryFee(@Param("orderId") int orderId, @Param("deliveryFee") Double deliveryFee);
+
 
     /**
      * 重单时更新订单：状态 + 金额 + 重单时间
@@ -414,7 +309,6 @@ public interface OrderMapper {
             @Param("oldStatus") String oldStatus
     );
 
-    // 在 OrderMapper.java 中找到 getNextOrderNumber 方法，添加 orderType 参数
     Integer getNextOrderNumber(
             @Param("prefix") String prefix,
             @Param("dateStr") String dateStr,

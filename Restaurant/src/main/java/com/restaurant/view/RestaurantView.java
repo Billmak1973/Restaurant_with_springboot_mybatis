@@ -12,7 +12,14 @@ import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
+import java.awt.Color;
+import java.awt.Font;
 import java.awt.event.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.text.AttributedString;
+import java.text.NumberFormat;
+import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -24,6 +31,39 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.stream.Collectors;
 import javax.swing.JSpinner;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableModel;
+
+import com.toedter.calendar.JDateChooser;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFFont;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.ChartPanel;
+import org.jfree.chart.JFreeChart;
+import org.jfree.chart.axis.*;
+import org.jfree.chart.block.BlockBorder;
+import org.jfree.chart.labels.ItemLabelAnchor;
+import org.jfree.chart.labels.ItemLabelPosition;
+import org.jfree.chart.labels.PieSectionLabelGenerator;
+import org.jfree.chart.labels.StandardCategoryItemLabelGenerator;
+import org.jfree.chart.plot.*;
+import org.jfree.chart.renderer.category.BarRenderer;
+import org.jfree.chart.renderer.category.CategoryItemRenderer;
+import org.jfree.chart.renderer.category.StandardBarPainter;
+import org.jfree.chart.title.LegendTitle;
+import org.jfree.chart.title.TextTitle;
+import org.jfree.chart.ui.RectangleEdge;
+import org.jfree.chart.ui.RectangleInsets;
+import org.jfree.chart.ui.TextAnchor;
+import org.jfree.chart.util.Rotation;
+import org.jfree.data.Range;
+import org.jfree.data.category.CategoryDataset;
+import org.jfree.data.category.DefaultCategoryDataset;
+import org.jfree.data.general.DefaultPieDataset;
+import org.jfree.data.general.PieDataset;
 import org.springframework.context.event.EventListener;
 /**
  * 純GUI視圖層 - 不包含任何業務邏輯
@@ -487,7 +527,6 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         queueDisplay.setText(sb.toString());
     }
 
-    //据餐桌的訂單情況呢？？？
     public void updateTableStatusDisplay(List<Tables> tables) {
         StringBuilder sb = new StringBuilder();
 
@@ -497,7 +536,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         }
 
         for (Tables table : tables) {
-            // 1️⃣ 订单状态（仅占用中餐桌显示）
+            // 1 订单状态（仅占用中餐桌显示）
             String orderStatusText = "";
             if (controller != null && table.getStatus() == Tables.TableStatus.OCCUPIED) {
                 // 🔧【核心修复】合并桌查询主桌的订单状态
@@ -516,10 +555,32 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             " → 查询主桌#" + queryTableId);
                 }
 
+                // 🔧【新增】聚餐桌：使用主桌（最小编号）查询订单状态
+                else if (table.getTableType() == Tables.TableType.GROUPED && table.getGroupWith() != null) {
+                    // 解析 group_with 字段（格式："13,14,15"）
+                    String[] groupIds = table.getGroupWith().split(",");
+                    if (groupIds.length > 0) {
+                        // 找到编号最小的桌号作为主桌
+                        queryTableId = groupIds[0].trim();
+                        int minNum = Integer.parseInt(queryTableId.replaceAll("[^0-9]", ""));
+
+                        for (String id : groupIds) {
+                            int num = Integer.parseInt(id.trim().replaceAll("[^0-9]", ""));
+                            if (num < minNum) {
+                                minNum = num;
+                                queryTableId = id.trim();
+                            }
+                        }
+
+                        System.out.println("🔧 聚餐桌订单查询：餐桌#" + table.getDisplayId() +
+                                " → 查询主桌#" + queryTableId + " (关联桌: " + table.getGroupWith() + ")");
+                    }
+                }
+
                 orderStatusText = controller.getOrderStatusDisplay(queryTableId);
             }
 
-            // 2️⃣ 顾客组信息（保持不变）
+            // 2 顾客组信息（保持不变）
             String customerGroupInfo = "";
             if (table.getStatus() == Tables.TableStatus.OCCUPIED && table.getCurrentGroup() != null) {
                 customerGroupInfo = String.format(" | 顾客组: #%d (%d人)",
@@ -527,16 +588,28 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         table.getCurrentGroup().getGroupSize());
             }
 
-            // 3️⃣ 合并餐桌特殊标识（保持不变）
+            // 3 合并餐桌特殊标识（保持不变）
             String mergedLabel = "";
             if (table.getTableType() == Tables.TableType.MERGED && table.getMergedWith() != null) {
                 mergedLabel = String.format(" [合并桌: +%s]", table.getMergedWith());
             }
 
-            // 4️⃣ 聚餐桌特殊标识（保持不变）
+            // 4 聚餐桌特殊标识（修改：超过3个时用省略号）
             String groupedLabel = "";
             if (table.getTableType() == Tables.TableType.GROUPED && table.getGroupWith() != null) {
-                groupedLabel = String.format(" [聚餐桌: %s]", table.getGroupWith());
+                String[] groupIds = table.getGroupWith().split(",");
+                String displayGroupWith;
+
+                if (groupIds.length > 3) {
+                    // 🔧 超过3个：显示"首,次,...,尾"格式（如：13,14,...,17）
+                    displayGroupWith = groupIds[0].trim() + "," +
+                            groupIds[1].trim() + ",...," +
+                            groupIds[groupIds.length - 1].trim();
+                } else {
+                    // 🔧 3个或以下：全部显示
+                    displayGroupWith = table.getGroupWith();
+                }
+                groupedLabel = String.format(" [聚餐桌: %s]", displayGroupWith);
             }
 
             // 5️⃣ 构建基础信息行（保持不变）
@@ -1960,6 +2033,21 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         shouldClose = false;
                         return;
                     }
+                    // 🔧【新增】检查预约时间是否为过去时间
+                    try {
+                        // 解析用户选择的日期和时间
+                        LocalDateTime reserveTime = LocalDateTime.parse(dateStr + " " + timeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+
+                        // 如果预约时间早于当前时间
+                        if (reserveTime.isBefore(LocalDateTime.now())) {
+                            showError("不能预约过去的时间！"); // 弹出错误弹窗
+                            shouldClose = false; // 标记不关闭对话框
+                            return; // 终止后续逻辑，拒绝预约
+                        }
+                    } catch (Exception ee) {
+                        // 理论上不会执行到这里，因为前面已经验证了格式
+                    }
+
                     if (name.isEmpty() || phone.isEmpty()) {
                         showError("請填寫必填字段");
                         shouldClose = false;
@@ -7268,7 +7356,6 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         );
     }
 
-    // RestaurantView.java - 新增方法
     /**
      * 🔧 显示"追加入座"确认对话框
      * @param displayId 餐桌编号
@@ -7302,4 +7389,2479 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         return result == JOptionPane.YES_OPTION;
     }
+
+    public void showBusinessReportDialog() {
+        JDialog reportDialog = new JDialog(this, "营业报表统计", true);
+        reportDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+
+        // 创建主滚动面板
+        JScrollPane mainScrollPane = new JScrollPane();
+        mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        mainScrollPane.getViewport().setBackground(Color.WHITE);
+
+        // 创建内容面板
+        JPanel contentPanel = new JPanel(new BorderLayout(15, 15));
+        contentPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+
+        // 创建选项卡面板
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.setFont(new Font("微软雅黑", Font.BOLD, 12));
+        tabbedPane.setPreferredSize(new Dimension(1050, 500)); // 设置选项卡面板的首选大小
+
+        // 1. 营业总览面板 - 现在包含统计范围选择
+        JPanel overviewPanel = createBusinessOverviewPanel();
+        tabbedPane.addTab("营业总览", overviewPanel);
+
+        // 2. 菜品销售分析面板 - 为了兼容性保留日期选择器参数
+        JPanel emptyPanelForDish = new JPanel();
+        JPanel dishAnalysisPanel = createDishAnalysisPanel(null, null, null, null, statusLabel);
+        tabbedPane.addTab("菜品销售分析", dishAnalysisPanel);
+
+        // 3. 取消预约统计面板
+        JPanel forfeitedPanel = createForfeitedDepositPanel();
+        tabbedPane.addTab("取消预约统计", forfeitedPanel);
+
+        // 状态栏
+        JPanel statusPanel = new JPanel(new BorderLayout());
+        statusPanel.setBorder(BorderFactory.createEtchedBorder());
+        statusLabel = new JLabel("就绪. 就緒.");
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        statusPanel.add(statusLabel, BorderLayout.WEST);
+
+        // 操作按钮面板
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
+        JButton exportButton = new JButton("导出Excel");
+        exportButton.setPreferredSize(new Dimension(100, 30));
+        JButton printButton = new JButton("打印报表");
+        printButton.setPreferredSize(new Dimension(100, 30));
+        JButton closeButton = new JButton("关闭");
+        closeButton.setPreferredSize(new Dimension(80, 30));
+        buttonPanel.add(exportButton);
+        buttonPanel.add(printButton);
+        buttonPanel.add(closeButton);
+
+        // 底部面板
+        JPanel bottomPanel = new JPanel(new BorderLayout(0, 5));
+        bottomPanel.setBorder(BorderFactory.createEmptyBorder(10, 0, 5, 0));
+        bottomPanel.add(buttonPanel, BorderLayout.NORTH);
+        bottomPanel.add(statusPanel, BorderLayout.SOUTH);
+
+        // 将各组件添加到内容面板
+        JScrollPane tabScrollPane = new JScrollPane(tabbedPane);
+        tabScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        tabScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        contentPanel.add(tabScrollPane, BorderLayout.CENTER);
+        contentPanel.add(bottomPanel, BorderLayout.SOUTH);
+
+        // 设置主滚动面板的内容
+        mainScrollPane.setViewportView(contentPanel);
+
+        // 设置对话框内容
+        reportDialog.add(mainScrollPane);
+
+        // 设置合理的初始大小，同时保留滚动功能
+        reportDialog.setSize(1150, 750);
+
+        // 导出按钮
+        exportButton.addActionListener(e -> {
+            int selectedIndex = tabbedPane.getSelectedIndex();
+            if (selectedIndex == 0) { // 营业总览
+                JTable reportTable = getTableFromPanel(overviewPanel);
+                if (reportTable == null) {
+                    JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                DefaultTableModel tableModel = (DefaultTableModel) reportTable.getModel();
+                if (tableModel == null || tableModel.getRowCount() == 0) {
+                    JOptionPane.showMessageDialog(reportDialog, "没有数据可导出", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                exportReportToExcel(reportTable);
+            } else { // 菜品销售分析
+                JTable dishTable = getDishTableFromPanel(dishAnalysisPanel);
+                if (dishTable == null) {
+                    JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                DefaultTableModel tableModel = (DefaultTableModel) dishTable.getModel();
+                if (tableModel == null || tableModel.getRowCount() == 0) {
+                    JOptionPane.showMessageDialog(reportDialog, "没有数据可导出", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                exportDishSalesToExcel(dishTable);
+            }
+        });
+
+        // 打印按钮
+        printButton.addActionListener(e -> {
+            int selectedIndex = tabbedPane.getSelectedIndex();
+            if (selectedIndex == 0) { // 营业总览
+                JTable reportTable = getTableFromPanel(overviewPanel);
+                if (reportTable == null) {
+                    JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                DefaultTableModel tableModel = (DefaultTableModel) reportTable.getModel();
+                if (tableModel == null || tableModel.getRowCount() == 0) {
+                    JOptionPane.showMessageDialog(reportDialog, "没有数据可打印", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                try {
+                    boolean complete = reportTable.print();
+                    if (complete) {
+                        showTimeMessage("打印任务已发送到打印机", "操作成功");
+                    } else {
+                        JOptionPane.showMessageDialog(reportDialog, "打印被取消", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(reportDialog, "打印失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                }
+            } else { // 菜品销售分析
+                JTable dishTable = getDishTableFromPanel(dishAnalysisPanel);
+                if (dishTable == null) {
+                    JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                DefaultTableModel tableModel = (DefaultTableModel) dishTable.getModel();
+                if (tableModel == null || tableModel.getRowCount() == 0) {
+                    JOptionPane.showMessageDialog(reportDialog, "没有数据可打印", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                try {
+                    boolean complete = dishTable.print();
+                    if (complete) {
+                        showTimeMessage("打印任务已发送到打印机", "操作成功");
+                    } else {
+                        JOptionPane.showMessageDialog(reportDialog, "打印被取消", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(reportDialog, "打印失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        // 关闭按钮
+        closeButton.addActionListener(e -> reportDialog.dispose());
+
+        reportDialog.setLocationRelativeTo(this);
+        reportDialog.setVisible(true);
+    }
+
+    /**
+     * 递归查找容器内指定名称的组件
+     *
+     * @param container 起始容器（支持嵌套组件树）
+     * @param name      目标组件的getName()标识
+     * @return 首个匹配组件，无匹配返回null
+     * @note 1. **搜索策略**：
+     * - 深度优先遍历组件树
+     * - 精确字符串匹配（区分大小写）
+     * 2. **典型用途**：
+     * - 从复杂面板结构中定位特定组件
+     * - 替代硬编码组件引用（解耦UI结构）
+     * 3. **性能警告**：
+     * - 避免在高频操作中调用（遍历整个子树）
+     * - 深层嵌套容器可能影响性能
+     * 4. **约束**：
+     * - 仅匹配显式设置setName()的组件
+     * - 返回首个匹配项（不保证唯一性）
+     * @example 在tabbedPane中查找名为"chartPanel"的子面板：
+     * JPanel chart = (JPanel)findComponentByName(tabbedPane, "chartPanel");
+     */
+    private Component findComponentByName(Container container, String name) {
+        for (int i = 0; i < container.getComponentCount(); i++) {
+            Component comp = container.getComponent(i);
+            if (name.equals(comp.getName())) {
+                return comp;
+            }
+            if (comp instanceof Container) {
+                Component found = findComponentByName((Container) comp, name);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 创建营业概览分析面板（交互式报表生成器）
+     *
+     * @return 营业数据可视化面板，包含日期选择器/数据表格/双图表面板
+     * @note 1. **双模式数据查询**：
+     * - 单日模式：精确分析特定日期经营状况
+     * - 范围模式：对比多日趋势（自动校验日期顺序）
+     * 2. **智能数据展示**：
+     * - 表格自动高亮总计行（蓝色背景+粗体）
+     * - 交错行颜色提升可读性
+     * - 双图表联动（营业额+顾客数量趋势）
+     * 3. **性能优化**：
+     * - 后台线程加载数据（SwingWorker）
+     * - 按钮状态管理（加载中禁用）
+     * - 内存安全：表格模型动态重置
+     * 4. **用户体验设计**：
+     * - 日期选择器即时启用/禁用
+     * - 列宽精确控制（日期/金额列右对齐）
+     * - 操作成功浮动提示（showTimeMessage）
+     * 5. **错误防御**：
+     * - 空日期选择验证
+     * - 日期范围逻辑校验（开始≤结束）
+     * - 异常捕获不中断主线程
+     * 6. **典型业务流程**：
+     * ① 选择2024-01-15单日 → ② 生成报表 →
+     * ③ 查看当日客单价(¥85.3)和订单量(12) →
+     * ④ 切换至2024-01-01至2024-01-31范围分析月趋势
+     * @warning 1. 依赖controller.getDailyBusinessReport()实现
+     * 2. 要求statusLabel已初始化（避免NPE）
+     * 3. JDateChooser需处理时区问题（使用java.util.Date）
+     */
+    private JPanel createBusinessOverviewPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // ===== 保持原有结构不变，只在顶部添加统计范围面板 =====
+        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        controlPanel.setBorder(BorderFactory.createTitledBorder("选择统计范围"));
+
+        // 模式选择
+        ButtonGroup modeGroup = new ButtonGroup();
+        JRadioButton singleDayRadio = new JRadioButton("单日统计", true);
+        JRadioButton rangeRadio = new JRadioButton("日期范围统计", false);
+        modeGroup.add(singleDayRadio);
+        modeGroup.add(rangeRadio);
+
+        controlPanel.add(singleDayRadio);
+        controlPanel.add(new JLabel("日期:"));
+
+        // 日期选择器
+        JDateChooser singleDayChooser = new JDateChooser(new java.util.Date());
+        singleDayChooser.setDateFormatString("yyyy-MM-dd");
+        singleDayChooser.setPreferredSize(new Dimension(120, 28));
+        controlPanel.add(singleDayChooser);
+
+        controlPanel.add(rangeRadio);
+        controlPanel.add(new JLabel("从:"));
+
+        JDateChooser startDateChooser = new JDateChooser();
+        startDateChooser.setDateFormatString("yyyy-MM-dd");
+        startDateChooser.setPreferredSize(new Dimension(120, 28));
+        startDateChooser.setEnabled(false);
+        controlPanel.add(startDateChooser);
+
+        controlPanel.add(new JLabel("到:"));
+
+        JDateChooser endDateChooser = new JDateChooser(new java.util.Date());
+        endDateChooser.setDateFormatString("yyyy-MM-dd");
+        endDateChooser.setPreferredSize(new Dimension(120, 28));
+        endDateChooser.setEnabled(false);
+        controlPanel.add(endDateChooser);
+
+        // 模式切换监听器
+        singleDayRadio.addActionListener(e -> {
+            singleDayChooser.setEnabled(true);
+            startDateChooser.setEnabled(false);
+            endDateChooser.setEnabled(false);
+            singleDayChooser.requestFocus();
+        });
+
+        rangeRadio.addActionListener(e -> {
+            singleDayChooser.setEnabled(false);
+            startDateChooser.setEnabled(true);
+            endDateChooser.setEnabled(true);
+            startDateChooser.requestFocus();
+        });
+
+        // 生成报表按钮
+        JButton generateButton = new JButton("生成报表");
+        generateButton.setPreferredSize(new Dimension(100, 30));
+        generateButton.setFont(new Font("微软雅黑", Font.BOLD, 12));
+        controlPanel.add(generateButton);
+        // ===== 统计范围面板结束 =====
+
+        // 创建表格面板 - 保持原有代码不变
+        String[] columnNames = {"日期", "总营业额(元)", "顾客总数", "平均客单价(元)", "外卖订单数量"};
+        DefaultTableModel tableModel = new DefaultTableModel(columnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // 表格不可编辑
+            }
+        };
+
+        JTable reportTable = new JTable(tableModel);
+        reportTable.setRowHeight(25);
+        reportTable.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        reportTable.getTableHeader().setFont(new Font("微软雅黑", Font.BOLD, 12));
+        reportTable.setFillsViewportHeight(true);
+
+        // 设置表格列宽
+        reportTable.getColumnModel().getColumn(0).setPreferredWidth(100);
+        reportTable.getColumnModel().getColumn(1).setPreferredWidth(120);
+        reportTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        reportTable.getColumnModel().getColumn(3).setPreferredWidth(120);
+        reportTable.getColumnModel().getColumn(4).setPreferredWidth(80);
+
+        // 设置表格渲染器
+        reportTable.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable table, Object value,
+                                                           boolean isSelected, boolean hasFocus,
+                                                           int row, int column) {
+                Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+                if (row == table.getRowCount() - 1 && value != null && value.toString().contains("总计")) {
+                    // 总计行高亮显示
+                    c.setFont(new Font("微软雅黑", Font.BOLD, 12));
+                    c.setBackground(new Color(220, 230, 255));
+                } else if (row % 2 == 0) {
+                    // 交错行颜色
+                    c.setBackground(new Color(245, 245, 245));
+                } else {
+                    c.setBackground(Color.WHITE);
+                }
+                setHorizontalAlignment(column == 0 ? SwingConstants.LEFT : SwingConstants.RIGHT);
+                return c;
+            }
+        });
+
+        JScrollPane tableScrollPane = new JScrollPane(reportTable);
+        tableScrollPane.setName("reportTableScrollPane");
+        tableScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        tableScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        tableScrollPane.setPreferredSize(new Dimension(950, 250)); // 保持原有高度
+
+        // 图表区域 - 保持原有代码不变
+        JPanel chartPanel = new JPanel();
+        chartPanel.setBorder(BorderFactory.createTitledBorder("数据可视化"));
+        chartPanel.setLayout(new GridLayout(1, 2, 10, 10));
+        chartPanel.setPreferredSize(new Dimension(950, 300));
+        chartPanel.setMinimumSize(new Dimension(400, 250));
+        chartPanel.setName("chartPanel");
+
+        // 将各面板添加到主面板 - 保持原有结构
+        panel.add(controlPanel, BorderLayout.NORTH); // 添加统计范围面板在顶部
+        panel.add(tableScrollPane, BorderLayout.CENTER);
+        panel.add(chartPanel, BorderLayout.SOUTH);
+
+        // 添加事件处理 - 保持原有功能
+        generateButton.addActionListener(e -> {
+            try {
+                if (singleDayRadio.isSelected()) {
+                    java.util.Date selectedDate = singleDayChooser.getDate();
+                    if (selectedDate == null) {
+                        JOptionPane.showMessageDialog(panel, "请选择一个日期");
+                        return;
+                    }
+                    String dateStr = new SimpleDateFormat("yyyy-MM-dd").format(selectedDate);
+
+                    statusLabel.setText("正在加载单日数据...");
+                    generateButton.setEnabled(false);
+
+                    SwingWorker<List<Map<String, Object>>, Void> worker = new SwingWorker<>() {
+                        @Override
+                        protected List<Map<String, Object>> doInBackground() throws Exception {
+                            return controller.getDailyBusinessReport(dateStr);
+                        }
+
+                        @Override
+                        protected void done() {
+                            try {
+                                List<Map<String, Object>> reportData = get();
+                                displayReportData(reportData, reportTable, tableModel, chartPanel);
+                                statusLabel.setText("单日报表加载完成");
+                                showTimeMessage("单日报表生成成功", "操作成功");
+                            } catch (Exception ex) {
+                                statusLabel.setText("加载失败: " + ex.getMessage());
+                                JOptionPane.showMessageDialog(panel, "生成单日报表失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                                ex.printStackTrace();
+                            } finally {
+                                generateButton.setEnabled(true);
+                            }
+                        }
+                    };
+                    worker.execute();
+
+                } else {
+                    java.util.Date startDate = startDateChooser.getDate();
+                    java.util.Date endDate = endDateChooser.getDate();
+                    if (startDate == null || endDate == null) {
+                        JOptionPane.showMessageDialog(panel, "请选择开始日期和结束日期");
+                        return;
+                    }
+                    if (startDate.after(endDate)) {
+                        JOptionPane.showMessageDialog(panel, "开始日期不能晚于结束日期");
+                        return;
+                    }
+                    String startDateStr = new SimpleDateFormat("yyyy-MM-dd").format(startDate);
+                    String endDateStr = new SimpleDateFormat("yyyy-MM-dd").format(endDate);
+
+                    statusLabel.setText("正在加载日期范围数据...");
+                    generateButton.setEnabled(false);
+
+                    SwingWorker<List<Map<String, Object>>, Void> worker = new SwingWorker<>() {
+                        @Override
+                        protected List<Map<String, Object>> doInBackground() throws Exception {
+                            return controller.getDateRangeBusinessReport(startDateStr, endDateStr);
+                        }
+
+                        @Override
+                        protected void done() {
+                            try {
+                                List<Map<String, Object>> reportData = get();
+                                displayReportData(reportData, reportTable, tableModel, chartPanel);
+                                statusLabel.setText("日期范围报表加载完成");
+                                showTimeMessage("日期范围报表生成成功", "操作成功");
+                            } catch (Exception ex) {
+                                statusLabel.setText("加载失败: " + ex.getMessage());
+                                JOptionPane.showMessageDialog(panel, "生成日期范围报表失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                                ex.printStackTrace();
+                            } finally {
+                                generateButton.setEnabled(true);
+                            }
+                        }
+                    };
+                    worker.execute();
+                }
+            } catch (Exception ex) {
+                statusLabel.setText("错误: " + ex.getMessage());
+                JOptionPane.showMessageDialog(panel, "生成报表失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
+            }
+        });
+
+        return panel;
+    }
+
+    /**
+     * 创建菜品销售分析面板（完整交互式报表界面）
+     *
+     * @param singleDayChooser 保留参数（未使用，为接口兼容）
+     * @param startDateChooser 保留参数（未使用，为接口兼容）
+     * @param endDateChooser   保留参数（未使用，为接口兼容）
+     * @param rangeRadio       保留参数（未使用，为接口兼容）
+     * @param panelStatusLabel 状态标签（用于显示加载/错误信息）
+     * @note 1. **核心功能模块**：
+     * - 顶部控制区：年份/季度/类别/数量/图表类型选择器
+     * - 中部数据表：菜品销售明细（编号/名称/销量/销售额等）
+     * - 底部图表区：动态生成柱状图或饼图（双图并列）
+     * 2. **智能交互设计**：
+     * - 年份输入框支持手动输入+实时验证（1990-当前年+1）
+     * - 图表类型实时切换（柱状图/饼图）
+     * - 数据量动态限制（全部/前10/25/50）
+     * - 菜品类别筛选（A/B/C/D/全部）
+     * 3. **数据加载优化**：
+     * - 后台线程加载（SwingWorker）
+     * - 加载中显示进度条
+     * - 空数据友好提示
+     * 4. **异常处理**：
+     * - 无效年份输入实时标红
+     * - 数据库错误弹窗提示
+     * - 图表生成失败保留界面
+     * 5. **布局细节**：
+     * - 表格列宽精确控制
+     * - 图表区域可滚动（适应大尺寸）
+     * - 响应式边距（BorderLayout+GridLayout组合）
+     * 6. **典型使用流程**：
+     * ① 选择2024年Q2数据 → ② 筛选B类(饮料) →
+     * ③ 限制前25项 → ④ 切换饼图查看占比
+     * @warning 1. 依赖controller.getQuarterlyDishSalesReport()实现
+     * 2. 要求panelStatusLabel非空（避免NPE）
+     * 3. 初始状态显示引导文本（需点击加载）
+     */
+    private JPanel createDishAnalysisPanel(JDateChooser singleDayChooser, JDateChooser startDateChooser,
+                                           JDateChooser endDateChooser, JRadioButton rangeRadio,
+                                           JLabel panelStatusLabel) {
+        JPanel panel = new JPanel(new BorderLayout(15, 15));
+        panel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+
+        // 1. 顶部控制面板
+        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        controlPanel.setBorder(BorderFactory.createEtchedBorder());
+
+        // 年份选择 - 修复：允许手动输入
+        JPanel yearPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        yearPanel.add(new JLabel("年份:"));
+
+        // 创建可编辑的年份组合框
+        JComboBox<String> yearCombo = new JComboBox<>();
+        yearCombo.setEditable(true);
+
+        // 添加年份选项
+        List<String> years = controller.getAvailableYearsForDishSales();
+        for (String year : years) {
+            yearCombo.addItem(year);
+        }
+
+        // 添加当前年份（如果不在列表中）
+        String currentYear = String.valueOf(java.time.LocalDate.now().getYear());
+        if (!years.contains(currentYear)) {
+            yearCombo.addItem(currentYear);
+        }
+
+        // 设置默认选择
+        yearCombo.setSelectedItem(currentYear);
+        yearCombo.setName("yearCombo");
+        yearCombo.setPreferredSize(new Dimension(100, 25));
+
+        // 添加输入验证
+        JTextField yearEditor = (JTextField) yearCombo.getEditor().getEditorComponent();
+        yearEditor.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyReleased(KeyEvent e) {
+                String input = yearEditor.getText();
+                if (!input.isEmpty()) {
+                    try {
+                        int year = Integer.parseInt(input);
+                        if (year < 1990 || year > java.time.LocalDate.now().getYear() + 1) {
+                            yearEditor.setForeground(Color.RED);
+                        } else {
+                            yearEditor.setForeground(Color.BLACK);
+                        }
+                    } catch (NumberFormatException ex) {
+                        yearEditor.setForeground(Color.RED);
+                    }
+                }
+            }
+        });
+
+        yearPanel.add(yearCombo);
+
+        // 季度选择
+        JPanel quarterPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        quarterPanel.add(new JLabel("季度:"));
+        JComboBox<String> quarterCombo = new JComboBox<>(new String[]{"Q1", "Q2", "Q3", "Q4"});
+        quarterCombo.setSelectedItem("Q" + ((java.time.LocalDate.now().getMonthValue() - 1) / 3 + 1));
+        quarterCombo.setName("quarterCombo");
+        quarterCombo.setPreferredSize(new Dimension(80, 25));
+        quarterPanel.add(quarterCombo);
+
+        // 新增：添加数量选择器
+        JPanel limitPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        limitPanel.add(new JLabel("显示数量:"));
+        String[] limits = {"全部", "前10", "前25", "前50"};
+        JComboBox<String> limitCombo = new JComboBox<>(limits);
+        limitCombo.setSelectedIndex(0); // 默认"全部"
+        limitCombo.setName("limitCombo");
+        limitCombo.setPreferredSize(new Dimension(100, 25));
+        limitPanel.add(limitCombo);
+
+        // 新增：图表类型选择
+        JPanel chartTypePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        chartTypePanel.add(new JLabel("图表类型:"));
+        ButtonGroup chartTypeGroup = new ButtonGroup();
+        JRadioButton barChartRadio = new JRadioButton("柱状图", true); // 默认选中柱状图
+        JRadioButton pieChartRadio = new JRadioButton("扇形图", false);
+        chartTypeGroup.add(barChartRadio);
+        chartTypeGroup.add(pieChartRadio);
+        chartTypePanel.add(barChartRadio);
+        chartTypePanel.add(pieChartRadio);
+
+        // 分类选择器 - 新增
+        JPanel categoryPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        categoryPanel.add(new JLabel("类别:"));
+        String[] categories = {"全部", "A", "B", "C", "D"}; // A=特色食物, B=饮料, C=小炒, D=套餐
+        JComboBox<String> categoryCombo = new JComboBox<>(categories);
+        categoryCombo.setSelectedIndex(0); // 默认"全部"
+        categoryCombo.setName("categoryCombo");
+        categoryCombo.setPreferredSize(new Dimension(100, 25));
+        categoryPanel.add(categoryCombo);
+
+        // 加载按钮
+        JButton loadButton = new JButton("加载数据");
+        loadButton.setPreferredSize(new Dimension(100, 30));
+        loadButton.setFont(new Font("微软雅黑", Font.BOLD, 12));
+
+        controlPanel.add(yearPanel);
+        controlPanel.add(quarterPanel);
+        controlPanel.add(limitPanel); // 添加数量选择器
+        controlPanel.add(chartTypePanel); // 加入图表类型选择
+        controlPanel.add(categoryPanel); // 添加分类选择器到控制面板
+        controlPanel.add(loadButton);
+
+        // 2. 菜品数据表格
+        String[] dishColumns = {"菜品编号", "菜品名称", "销售数量", "销售额(元)", "平均单价(元)"};
+        DefaultTableModel dishTableModel = new DefaultTableModel(dishColumns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        JTable dishTable = new JTable(dishTableModel);
+        dishTable.setRowHeight(25);
+        dishTable.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        dishTable.getTableHeader().setFont(new Font("微软雅黑", Font.BOLD, 12));
+        dishTable.setFillsViewportHeight(true);
+        dishTable.setName("dishTable");
+
+        // 设置表格列宽
+        dishTable.getColumnModel().getColumn(0).setPreferredWidth(80);
+        dishTable.getColumnModel().getColumn(1).setPreferredWidth(150);
+        dishTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        dishTable.getColumnModel().getColumn(3).setPreferredWidth(100);
+        dishTable.getColumnModel().getColumn(4).setPreferredWidth(100);
+
+        // 为表格添加滚动支持
+        JScrollPane dishScrollPane = new JScrollPane(dishTable);
+        dishScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        dishScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        dishScrollPane.setPreferredSize(new Dimension(950, 250)); // 增加高度
+        dishScrollPane.setName("dishScrollPane");
+
+        // 3. 菜品图表区域 - 明确创建并命名
+        JPanel chartPanel = new JPanel();
+        chartPanel.setBorder(BorderFactory.createTitledBorder("销售趋势"));
+        chartPanel.setLayout(new GridLayout(1, 2, 10, 10));
+        chartPanel.setPreferredSize(new Dimension(950, 600)); // 增加高度到600
+        chartPanel.setMinimumSize(new Dimension(400, 400)); // 增加最小高度
+        chartPanel.setName("dishChartPanel"); // 修复：使用明确的名称，防止找不到
+
+        // 初始化图表区域
+        initializeChartPanel(chartPanel);
+
+        // 为图表区域添加滚动支持 - 修复：确保滚动功能正常
+        JScrollPane chartScrollPane = new JScrollPane(chartPanel);
+        chartScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        chartScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        chartScrollPane.setName("chartScrollPane");
+        // 设置滚动面板的最小尺寸，确保图表可以放大
+        chartScrollPane.setMinimumSize(new Dimension(900, 500));
+
+        // 4. 组装数据面板
+        JPanel dataPanel = new JPanel(new BorderLayout(10, 10));
+        dataPanel.add(dishScrollPane, BorderLayout.NORTH); // 表格放在上方
+
+        // 将图表滚动面板添加到数据面板 - 使用JScrollPane确保可滚动
+        dataPanel.add(chartScrollPane, BorderLayout.CENTER); // 图表区域放在中间，可扩展
+
+        // 设置数据面板的最小和首选大小，以适应滚动
+        dataPanel.setPreferredSize(new Dimension(980, 750)); // 增加高度
+        dataPanel.setMinimumSize(new Dimension(900, 700));
+
+        panel.add(controlPanel, BorderLayout.NORTH);
+
+        // 将数据面板放入滚动面板，以支持整个内容区域的滚动
+        JScrollPane mainScrollPane = new JScrollPane(dataPanel);
+        mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        mainScrollPane.setPreferredSize(new Dimension(1000, 800)); // 增加滚动面板的首选尺寸
+        mainScrollPane.getViewport().setBackground(Color.WHITE);
+
+        // 设置滚动面板的边框和样式
+        mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        mainScrollPane.getVerticalScrollBar().setUnitIncrement(20);
+        mainScrollPane.getHorizontalScrollBar().setUnitIncrement(20);
+
+        panel.add(mainScrollPane, BorderLayout.CENTER);
+
+        // 5. 添加事件处理
+        loadButton.addActionListener(e -> {
+            try {
+                int year = Integer.parseInt((String) yearCombo.getSelectedItem());
+                String quarter = (String) quarterCombo.getSelectedItem();
+                String category = (String) categoryCombo.getSelectedItem();
+                String limit = (String) limitCombo.getSelectedItem(); // 获取数量选择
+                boolean isBarChart = barChartRadio.isSelected(); // 获取当前图表类型
+
+                if (panelStatusLabel != null) {
+                    panelStatusLabel.setText("正在加载" + (category.equals("全部") ? "" : category + "类") + "菜品销售数据...");
+                }
+
+                // 添加加载指示器
+                JProgressBar progressBar = new JProgressBar();
+                progressBar.setIndeterminate(true);
+                JPanel progressPanel = new JPanel(new BorderLayout());
+                progressPanel.add(new JLabel("正在加载数据..."), BorderLayout.CENTER);
+                progressPanel.add(progressBar, BorderLayout.SOUTH);
+
+                // 替换图表区域
+                chartPanel.removeAll();
+                chartPanel.add(progressPanel);
+                chartPanel.revalidate();
+                chartPanel.repaint();
+
+                SwingWorker<List<Map<String, Object>>, Void> worker = new SwingWorker<>() {
+                    @Override
+                    protected List<Map<String, Object>> doInBackground() {
+                        return controller.getQuarterlyDishSalesReport(year, quarter, category);
+                    }
+
+                    @Override
+                    protected void done() {
+                        try {
+                            List<Map<String, Object>> reportData = get();
+                            if (reportData.isEmpty()) {
+                                JOptionPane.showMessageDialog(panel,
+                                        "未找到" + year + "年" + quarter +
+                                                (!"全部".equals(category) ? " " + category + "类" : "") +
+                                                "的销售数据",
+                                        "提示", JOptionPane.INFORMATION_MESSAGE);
+                                if (panelStatusLabel != null) {
+                                    panelStatusLabel.setText("未找到相关数据");
+                                }
+                                // 恢复图表区域
+                                initializeChartPanel(chartPanel);
+                                return;
+                            }
+
+                            // 更新表格数据
+                            displayDishSalesData(reportData, dishTable, dishTableModel, chartPanel);
+
+                            // 根据选择的数量，确定要显示的条目数
+                            int maxItems = getMaxItemsFromLimit(limit, reportData.size());
+
+                            // 更新图表，根据选择的图表类型
+                            updateDishSalesChart(reportData, chartPanel, maxItems, isBarChart);
+
+                            if (panelStatusLabel != null) {
+                                String categoryText = category.equals("全部") ? "" : category + "类";
+                                panelStatusLabel.setText(categoryText + "菜品销售数据加载完成 (" + reportData.size() + "条)");
+                            }
+                        } catch (Exception ex) {
+                            if (panelStatusLabel != null) {
+                                panelStatusLabel.setText("加载失败: " + ex.getMessage());
+                            }
+                            JOptionPane.showMessageDialog(panel, "加载菜品销售数据失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                            ex.printStackTrace();
+                            // 恢复图表区域
+                            initializeChartPanel(chartPanel);
+                        }
+                    }
+                };
+                worker.execute();
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(panel, "无效的年份格式，请输入4位数字年份", "输入错误", JOptionPane.ERROR_MESSAGE);
+                yearEditor.setForeground(Color.RED);
+            }
+        });
+
+        // 6. 为图表类型单选按钮添加事件监听器
+        ActionListener chartTypeListener = e -> {
+            if (dishTableModel.getRowCount() == 0) {
+                JOptionPane.showMessageDialog(panel, "请先加载数据", "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            try {
+                int year = Integer.parseInt((String) yearCombo.getSelectedItem());
+                String quarter = (String) quarterCombo.getSelectedItem();
+                String category = (String) categoryCombo.getSelectedItem();
+                String limit = (String) limitCombo.getSelectedItem();
+                boolean isBarChart = barChartRadio.isSelected();
+
+                // 重新获取数据
+                List<Map<String, Object>> reportData = controller.getQuarterlyDishSalesReport(year, quarter, category);
+
+                if (reportData.isEmpty()) {
+                    JOptionPane.showMessageDialog(panel, "没有找到可显示的数据", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+
+                // 根据选择的数量，确定要显示的条目数
+                int maxItems = getMaxItemsFromLimit(limit, reportData.size());
+
+                // 更新图表
+                updateDishSalesChart(reportData, chartPanel, maxItems, isBarChart);
+
+                if (panelStatusLabel != null) {
+                    String chartTypeText = isBarChart ? "柱状图" : "扇形图";
+                    panelStatusLabel.setText("已切换到" + chartTypeText + "显示");
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(panel, "更新图表失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                if (panelStatusLabel != null) {
+                    panelStatusLabel.setText("图表更新失败: " + ex.getMessage());
+                }
+            }
+        };
+
+        barChartRadio.addActionListener(chartTypeListener);
+        pieChartRadio.addActionListener(chartTypeListener);
+
+        // 7. 为数量选择器添加事件监听器
+        limitCombo.addActionListener(e -> {
+            if (dishTableModel.getRowCount() == 0) {
+                return;
+            }
+
+            try {
+                int year = Integer.parseInt((String) yearCombo.getSelectedItem());
+                String quarter = (String) quarterCombo.getSelectedItem();
+                String category = (String) categoryCombo.getSelectedItem();
+                String limit = (String) limitCombo.getSelectedItem();
+                boolean isBarChart = barChartRadio.isSelected();
+
+                // 重新获取数据
+                List<Map<String, Object>> reportData = controller.getQuarterlyDishSalesReport(year, quarter, category);
+
+                if (reportData.isEmpty()) {
+                    return;
+                }
+
+                // 根据选择的数量，确定要显示的条目数
+                int maxItems = getMaxItemsFromLimit(limit, reportData.size());
+
+                // 仅更新图表
+                updateDishSalesChart(reportData, chartPanel, maxItems, isBarChart);
+
+                if (panelStatusLabel != null) {
+                    panelStatusLabel.setText("已更新显示数量为 " + limit);
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        // 8. 为分类选择器添加事件监听器
+        categoryCombo.addActionListener(e -> {
+            // 自动加载新分类的数据
+            loadButton.doClick();
+        });
+
+        return panel;
+    }
+
+    /**
+     * 根据显示限制字符串计算最大项目数（安全边界处理）
+     *
+     * @param limit      限制选项（"前10"/"前25"/"前50"/"全部"）
+     * @param totalItems 数据集总项目数
+     * @return 实际显示数量（不超过totalItems）
+     */
+    private int getMaxItemsFromLimit(String limit, int totalItems) {
+        switch (limit) {
+            case "前10":
+                return Math.min(10, totalItems);
+            case "前25":
+                return Math.min(25, totalItems);
+            case "前50":
+                return Math.min(50, totalItems);
+            default: // "全部"
+                return totalItems;
+        }
+    }
+
+
+    /**
+     * 初始化图表区域为提示状态（无数据时显示引导文本）
+     *
+     * @param chartPanel 需要初始化的图表面板
+     */
+    private void initializeChartPanel(JPanel chartPanel) {
+        chartPanel.removeAll();
+
+        JLabel placeholderLabel = new JLabel("请选择年份和季度加载销售数据", SwingConstants.CENTER);
+        placeholderLabel.setFont(new Font("微软雅黑", Font.ITALIC, 14));
+        placeholderLabel.setForeground(Color.GRAY);
+
+        chartPanel.add(placeholderLabel);
+        chartPanel.revalidate();
+        chartPanel.repaint();
+    }
+
+
+    /**
+     * 動態更新菜品銷售圖表（支持柱狀圖/餅圖雙視圖）
+     *
+     * @param reportData 報表數據列表，每項包含：itemName, total_revenue, total_quantity
+     * @param chartPanel 目標圖表面板（將被清空並填充新內容）
+     * @param maxItems   顯示項目數量限制（0/負數=全部，>0=前N項，999+視為全部）
+     * @param isBarChart true=柱狀圖（數值精確比較），false=餅圖（比例直觀展示）
+     * @note 1. **智能數據處理**：
+     * - 自動截斷長菜名（>8字用"..."）
+     * - 餅圖模式下合併低占比項目（<2%或超出前10名）
+     * - 柱狀圖嚴格Y軸≥0，餅圖移除百分比標籤
+     * 2. **雙圖表布局**：
+     * - 左側：銷售額排名/占比
+     * - 右側：銷量排名/占比
+     * - 標題動態顯示"前N項"或"全部"
+     * 3. **性能保障**：
+     * - 限制餅圖最多顯示10+1（其他）個扇區
+     * - 自動跳過空數據集
+     * 4. **異常恢復**：
+     * - 圖表生成失敗時顯示友好錯誤提示
+     * - 保留原面板結構不崩潰
+     * 5. **典型場景**：
+     * - 選擇季度報表後即時生成可視化
+     * - 切換菜系類別時動態刷新
+     * - 用戶調整顯示數量（下拉框）時更新
+     *
+     */
+    private void updateDishSalesChart(List<Map<String, Object>> reportData, JPanel chartPanel, int maxItems, boolean isBarChart) {
+        chartPanel.removeAll();
+        chartPanel.setLayout(new GridLayout(1, 2, 10, 10));
+
+        try {
+            // 确保maxItems不会超过数据集大小
+            int itemsToDisplay = Math.min(maxItems, reportData.size());
+            String displayText = (maxItems == reportData.size() || maxItems >= 999) ? "全部" : "前" + maxItems;
+
+            if (isBarChart) {
+                // 柱状图逻辑
+                // 准备数据集
+                DefaultCategoryDataset salesDataset = new DefaultCategoryDataset();
+                DefaultCategoryDataset quantityDataset = new DefaultCategoryDataset();
+
+                for (int i = 0; i < itemsToDisplay; i++) {
+                    Map<String, Object> item = reportData.get(i);
+                    String itemName = (String) item.get("item_name");
+
+
+                    // 缩短长名称
+                    if (itemName.length() > 8) {
+                        itemName = itemName.substring(0, 8) + "...";
+                    }
+
+                    // 修复 BigDecimal 转 Double 的类型转换问题
+                    Object revenueObj = item.get("total_revenue");
+                    double totalRevenue = (revenueObj instanceof Number) ?
+                            ((Number) revenueObj).doubleValue() : 0.0;
+
+                    Object quantityObj = item.get("total_quantity");
+                    int totalQuantity = (quantityObj instanceof Number) ?
+                            ((Number) quantityObj).intValue() : 0;
+
+
+                    // 添加到销售额数据集
+                    salesDataset.addValue(totalRevenue, "销售额", itemName);
+
+                    // 添加到销量数据集
+                    quantityDataset.addValue(totalQuantity, "销量", itemName);
+                }
+
+                // 创建销售额图表
+                JFreeChart salesChart = ChartFactory.createBarChart(
+                        "销售额排名 (" + displayText + ")",
+                        "菜品",
+                        "销售额 (元)",
+                        salesDataset,
+                        PlotOrientation.VERTICAL,
+                        false,
+                        true,
+                        false
+                );
+
+                // 创建销量图表
+                JFreeChart quantityChart = ChartFactory.createBarChart(
+                        "销量排名 (" + displayText + ")",
+                        "菜品",
+                        "销售数量",
+                        quantityDataset,
+                        PlotOrientation.VERTICAL,
+                        false,
+                        true,
+                        false
+                );
+                // 自定义图表样式
+                customizeChartStyle(salesChart, new Color(41, 128, 185)); // 蓝色
+                customizeChartStyle(quantityChart, new Color(39, 174, 96)); // 绿色
+
+                // 创建图表面板
+                ChartPanel salesChartPanel = new ChartPanel(salesChart);
+                salesChartPanel.setMouseWheelEnabled(true);
+
+                ChartPanel quantityChartPanel = new ChartPanel(quantityChart);
+                quantityChartPanel.setMouseWheelEnabled(true);
+
+                // 添加到图表面板
+                chartPanel.add(salesChartPanel);
+                chartPanel.add(quantityChartPanel);
+            } else {
+                // 扇形图（饼图）逻辑
+                if (reportData.isEmpty()) {
+                    throw new RuntimeException("没有可用的销售数据");
+                }
+
+                // 计算总销售额和总销量
+                double totalRevenue = 0.0;
+                int totalQuantity = 0;
+
+                // 只计算显示范围内的数据
+                for (int i = 0; i < itemsToDisplay; i++) {
+                    Map<String, Object> item = reportData.get(i);
+                    // 🔧 修复：使用 Number 转换而不是直接强制转换
+                    totalRevenue += ((Number) item.get("total_revenue")).doubleValue();
+                    totalQuantity += ((Number) item.get("total_quantity")).intValue();
+                }
+
+                // 创建数据集
+                DefaultPieDataset salesDataset = new DefaultPieDataset();
+                DefaultPieDataset quantityDataset = new DefaultPieDataset();
+
+                // 仅显示有意义的切片 - 按销售额排序
+                List<Map<String, Object>> sortedData = new ArrayList<>(reportData.subList(0, itemsToDisplay));
+                // 🔧 修复：排序时也使用 Number 转换
+                sortedData.sort((a, b) -> Double.compare(
+                        ((Number) b.get("total_revenue")).doubleValue(),
+                        ((Number) a.get("total_revenue")).doubleValue()
+                ));
+
+                // 计算要显示的主要项目数量（最多10个，确保饼图不杂乱）
+                int primaryItemsCount = Math.min(10, sortedData.size());
+                double otherRevenue = 0.0;
+                int otherQuantity = 0;
+                int otherCount = 0;
+
+                for (int i = 0; i < sortedData.size(); i++) {
+                    Map<String, Object> item = sortedData.get(i);
+                    String itemName = (String) item.get("item_name");
+
+                    // 缩短长名称
+                    if (itemName.length() > 12) {
+                        itemName = itemName.substring(0, 12) + "...";
+                    }
+
+                    // 🔧 修复：使用 Number 转换
+                    double revenue = ((Number) item.get("total_revenue")).doubleValue();
+                    int quantity = ((Number) item.get("total_quantity")).intValue();
+
+                    double revenuePercent = (revenue / totalRevenue) * 100;
+                    double quantityPercent = totalQuantity > 0 ? ((double) quantity / totalQuantity) * 100 : 0;
+
+                    // 只显示主要项目或占比大于2%的项目
+                    if (i < primaryItemsCount - 1 || revenuePercent >= 2) {
+                        // 添加到销售额数据集
+                        salesDataset.setValue(itemName + " (" + String.format("%.1f%%", revenuePercent) + ")", revenue);
+
+                        // 添加到销量数据集
+                        quantityDataset.setValue(itemName + " (" + String.format("%.1f%%", quantityPercent) + ")", quantity);
+                    } else {
+                        otherRevenue += revenue;
+                        otherQuantity += quantity;
+                        otherCount++;
+                    }
+                }
+
+                // 添加"其他"类别
+                if (otherCount > 0) {
+                    double otherRevenuePercent = (otherRevenue / totalRevenue) * 100;
+                    double otherQuantityPercent = totalQuantity > 0 ? ((double) otherQuantity / totalQuantity) * 100 : 0;
+
+                    if (otherRevenue > 0) {
+                        salesDataset.setValue("其他 (" + otherCount + "项, " + String.format("%.1f%%", otherRevenuePercent) + ")", otherRevenue);
+                    }
+
+                    if (otherQuantity > 0) {
+                        quantityDataset.setValue("其他 (" + otherCount + "项, " + String.format("%.1f%%", otherQuantityPercent) + ")", otherQuantity);
+                    }
+                }
+
+                // 创建销售额饼图
+                JFreeChart salesChart = ChartFactory.createPieChart(
+                        "销售额占比 (" + displayText + ")",
+                        salesDataset,
+                        true,  // 显示图例
+                        true,  // 生成工具提示
+                        false  // 生成URLs
+                );
+                // 立即应用中文字体
+                applyChineseFontToChart(salesChart);
+
+                // 创建销量饼图
+                JFreeChart quantityChart = ChartFactory.createPieChart(
+                        "销量占比 (" + displayText + ")",
+                        quantityDataset,
+                        true,
+                        true,
+                        false
+                );
+                // 立即应用中文字体
+                applyChineseFontToChart(quantityChart);
+
+                // 自定义饼图样式
+                customizePieChart(salesChart, "销售额");
+                customizePieChart(quantityChart, "销量");
+
+                // 创建图表面板
+                ChartPanel salesChartPanel = new ChartPanel(salesChart);
+                salesChartPanel.setMouseWheelEnabled(true);
+
+                ChartPanel quantityChartPanel = new ChartPanel(quantityChart);
+                quantityChartPanel.setMouseWheelEnabled(true);
+
+                // 添加到图表面板
+                chartPanel.add(salesChartPanel);
+                chartPanel.add(quantityChartPanel);
+            }
+
+            chartPanel.revalidate();
+            chartPanel.repaint();
+        }
+            catch (Exception e) {
+            // 图表生成失败时显示错误
+            JLabel errorLabel = new JLabel("图表生成失败: " + e.getMessage(), SwingConstants.CENTER);
+            errorLabel.setForeground(Color.RED);
+            errorLabel.setFont(new Font("微软雅黑", Font.BOLD, 12));
+            chartPanel.add(errorLabel);
+
+            chartPanel.revalidate();
+            chartPanel.repaint();
+
+            e.printStackTrace();
+        }
+    }
+
+
+    /**
+     * 定制饼图样式（移除百分比，仅显示"名称:数值"）
+     *
+     * @param type 图表类型（如"销售额"触发首项弹出）
+     */
+    private void customizePieChart(JFreeChart chart, String type) {
+        PiePlot plot = (PiePlot) chart.getPlot();
+
+        // 获取支持中文的字体
+        Font chineseFontRegular = getChineseFont(12);
+        Font chineseFontBold = getChineseFont(14);
+        chineseFontBold = chineseFontBold.deriveFont(Font.BOLD); // 设置为粗体
+
+        // 设置背景
+        plot.setBackgroundPaint(Color.WHITE);
+        plot.setOutlineVisible(false);
+        plot.setShadowGenerator(null);
+
+        // ====== 彻底修复：完全移除百分比 ======
+        // 方法1：使用自定义标签生成器（最可靠）
+        plot.setLabelGenerator(new PieSectionLabelGenerator() {
+            @Override
+            public String generateSectionLabel(PieDataset dataset, Comparable key) {
+                // 只返回"名称: 数值"格式
+                Number value = dataset.getValue(key);
+                return key.toString() + ": " + value.intValue();
+            }
+
+            @Override
+            public AttributedString generateAttributedSectionLabel(PieDataset dataset, Comparable key) {
+                // 返回空的AttributedString，因为不需要特殊格式
+                return null;
+            }
+        });
+
+        // 方法2：作为备选（如果方法1不工作）
+        // plot.setLabelGenerator(new StandardPieSectionLabelGenerator(
+        //     "{0}: {1}",
+        //     NumberFormat.getIntegerInstance(),
+        //     new DecimalFormat("0%") // 使用一个不会实际显示的格式
+        // ));
+        // ====== 修复结束 ======
+
+        // 设置标签字体
+        plot.setLabelFont(chineseFontRegular);
+
+        // 显示标签
+        plot.setLabelLinksVisible(true);
+        plot.setLabelBackgroundPaint(Color.WHITE);
+        plot.setLabelOutlinePaint(Color.GRAY);
+        plot.setLabelShadowPaint(new Color(0, 0, 0, 0)); // 透明阴影
+
+        // 设置起始角度
+        plot.setStartAngle(90);
+
+        // 设置方向 - 顺时针
+        plot.setDirection(Rotation.CLOCKWISE);
+
+        // 设置标签链接样式
+        plot.setLabelLinkStyle(PieLabelLinkStyle.STANDARD);
+        plot.setLabelLinkPaint(Color.DARK_GRAY);
+        plot.setLabelLinkStroke(new BasicStroke(1.0f));
+
+        // 设置自动弹出主要部分 - 仅对销售额饼图应用
+        if ("销售额".equals(type) && plot.getDataset().getItemCount() > 0) {
+            // 只弹出第一个扇区（最大的部分）
+            Comparable<?> firstKey = plot.getDataset().getKey(0);
+            if (firstKey instanceof String) {
+                plot.setExplodePercent((String) firstKey, 0.10);
+            }
+        }
+
+        // 设置图例
+        LegendTitle legend = chart.getLegend();
+        if (legend != null) {
+            legend.setItemFont(chineseFontRegular.deriveFont(10.0f));
+            legend.setFrame(BlockBorder.NONE);
+            legend.setPosition(RectangleEdge.BOTTOM);
+        }
+
+        // 设置标题字体
+        TextTitle title = chart.getTitle();
+        if (title != null) {
+            title.setFont(chineseFontBold);
+        }
+
+        // 为每个扇区设置颜色 - 确保只使用字符串键
+        int colorIndex = 0;
+        Color[] colors = {
+                new Color(228, 41, 50),    // 红色
+                new Color(35, 154, 223),   // 蓝色
+                new Color(50, 168, 82),    // 绿色
+                new Color(142, 68, 173),   // 紫色
+                new Color(243, 156, 18),   // 橙色
+                new Color(127, 140, 141),  // 灰色
+                new Color(44, 62, 80),     // 深灰
+                new Color(211, 84, 0),     // 深橙
+                new Color(30, 130, 76),    // 深绿
+                new Color(218, 129, 225)   // 粉色
+        };
+
+        for (int i = 0; i < plot.getDataset().getItemCount(); i++) {
+            Comparable<?> key = plot.getDataset().getKey(i);
+            if (key instanceof String) {
+                plot.setSectionPaint((String) key, colors[colorIndex % colors.length]);
+                colorIndex++;
+            }
+        }
+
+        // 设置图表边距，确保中文标签有足够显示空间
+        chart.setPadding(new RectangleInsets(10, 10, 10, 10));
+
+        // 设置绘图区域边距
+        plot.setInsets(new RectangleInsets(10, 10, 10, 10));
+    }
+
+    /**
+     * 定制柱状图样式（自动范围 + 中文支持 + 标签优化）
+     * @param chart JFreeChart 对象
+     * @param seriesColor 系列主色调
+     */
+    private void customizeChartStyle(JFreeChart chart, Color seriesColor) {
+        // ===== 1. 获取绘图区和渲染器 =====
+        CategoryPlot plot = (CategoryPlot) chart.getPlot();
+        BarRenderer renderer = (BarRenderer) plot.getRenderer();
+
+        // ===== 2. 设置背景（关键：透明背景避免遮挡）=====
+        plot.setBackgroundPaint(new Color(255, 255, 255, 0));  // 透明
+        plot.setOutlineVisible(false);  // 隐藏边框
+        plot.setRangeGridlinePaint(new Color(230, 230, 230));  // 浅灰网格线
+        plot.setRangeGridlineStroke(new BasicStroke(0.5f));  // 细线
+
+        // ===== 3. 值轴配置（关键：删除 upperBound，启用自动范围）=====
+        ValueAxis rangeAxis = plot.getRangeAxis();
+        if (rangeAxis instanceof NumberAxis) {
+            NumberAxis numberAxis = (NumberAxis) rangeAxis;
+
+            // 🔑 核心：启用自动范围计算
+            numberAxis.setAutoRange(true);
+            numberAxis.setAutoRangeIncludesZero(true);  // 确保从0开始
+
+
+            // 字体设置
+            numberAxis.setLabelFont(getChineseFont(12));
+            numberAxis.setTickLabelFont(getChineseFont(11));
+            numberAxis.setLabelPaint(new Color(80, 80, 80));
+            numberAxis.setTickLabelPaint(new Color(100, 100, 100));
+            numberAxis.setAxisLinePaint(new Color(220, 220, 220));
+        }
+
+        // ===== 4. 分类轴（X轴）配置 =====
+        CategoryAxis domainAxis = plot.getDomainAxis();
+        domainAxis.setLabelFont(getChineseFont(12));
+        domainAxis.setTickLabelFont(getChineseFont(10));
+        domainAxis.setTickLabelPaint(new Color(100, 100, 100));
+        domainAxis.setAxisLinePaint(new Color(220, 220, 220));
+
+        // 🔑 标签旋转 + 截断（避免重叠）
+        domainAxis.setCategoryLabelPositions(CategoryLabelPositions.UP_45);
+        domainAxis.setMaximumCategoryLabelWidthRatio(0.8f);
+
+        // ===== 5. 渲染器配置（柱子样式）=====
+        renderer.setSeriesPaint(0, seriesColor);
+        renderer.setBarPainter(new StandardBarPainter());  // 移除渐变，纯色更清晰
+        renderer.setShadowVisible(false);  // 移除阴影
+
+        // 柱子边框
+        renderer.setSeriesOutlinePaint(0, seriesColor.darker());
+        renderer.setSeriesOutlineStroke(0, new BasicStroke(0.5f));
+
+        // 柱子间距
+        renderer.setItemMargin(0.15);  // 柱子之间间距
+        renderer.setMaximumBarWidth(0.08);  // 限制最大宽度
+
+        // ===== 6. 数据标签配置 =====
+        renderer.setDefaultItemLabelsVisible(true);
+        renderer.setDefaultItemLabelFont(getChineseFont(10));
+        renderer.setDefaultItemLabelPaint(new Color(60, 60, 60));
+
+        // 标签位置：柱子上方
+        renderer.setDefaultPositiveItemLabelPosition(
+                new ItemLabelPosition(ItemLabelAnchor.OUTSIDE12, TextAnchor.BOTTOM_CENTER)
+        );
+
+        // 标签格式：金额用货币格式，数量用整数
+        if (chart.getTitle() != null &&
+                chart.getTitle().getText().contains("销售额")) {
+            renderer.setDefaultItemLabelGenerator(
+                    new StandardCategoryItemLabelGenerator("{2}", NumberFormat.getCurrencyInstance())
+            );
+        } else {
+            renderer.setDefaultItemLabelGenerator(
+                    new StandardCategoryItemLabelGenerator("{2}", NumberFormat.getIntegerInstance())
+            );
+        }
+
+        // ===== 7. 图例配置 =====
+        LegendTitle legend = chart.getLegend();
+        if (legend != null) {
+            legend.setItemFont(getChineseFont(11));
+            legend.setItemPaint(new Color(80, 80, 80));
+            legend.setFrame(BlockBorder.NONE);  // 移除图例边框
+            legend.setPosition(RectangleEdge.BOTTOM);
+        }
+
+        // ===== 8. 标题配置 =====
+        TextTitle title = chart.getTitle();
+        if (title != null) {
+            title.setFont(getChineseFont(14));
+            title.setPaint(new Color(51, 51, 51));
+        }
+
+        // ===== 9. 整体边距（确保中文标签有空间）=====
+        chart.setPadding(new RectangleInsets(10, 15, 10, 15));
+        plot.setInsets(new RectangleInsets(10, 10, 25, 10));  // 底部多留空间给标签
+    }
+    /**
+     * 从面板获取报表表格
+     *
+     * @note 通过滚动窗格名称"reportTableScrollPane"查找
+     */
+    private JTable getTableFromPanel(JPanel panel) {
+        Component comp = findComponentByName(panel, "reportTableScrollPane");
+        if (comp instanceof JScrollPane) {
+            JScrollPane scrollPane = (JScrollPane) comp;
+            JViewport viewport = scrollPane.getViewport();
+            if (viewport != null && viewport.getView() instanceof JTable) {
+                return (JTable) viewport.getView();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从面板获取菜品表格
+     *
+     * @note 通过组件名称"dishTable"直接获取
+     */
+    private JTable getDishTableFromPanel(JPanel panel) {
+        Component comp = findComponentByName(panel, "dishTable");
+        return (JTable) comp;
+    }
+
+
+    /**
+     * 显示菜品销售报表（表格+双图表）
+     *
+     * @note 仅展示前10个热门菜品，自动计算总计
+     */
+    private void displayDishSalesData(List<Map<String, Object>> reportData, JTable dishTable,
+                                      DefaultTableModel tableModel, JPanel chartPanel) {
+        tableModel.setRowCount(0); // 清空表格
+
+        if (reportData == null || reportData.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "未找到相关菜品销售数据", "提示", JOptionPane.INFORMATION_MESSAGE);
+            // 显示空白图表
+            chartPanel.removeAll();
+            JLabel noDataLabel = new JLabel("暂无数据可展示", SwingConstants.CENTER);
+            noDataLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+            noDataLabel.setForeground(Color.GRAY);
+            chartPanel.add(noDataLabel);
+            chartPanel.revalidate();
+            chartPanel.repaint();
+            return;
+        }
+
+        double totalRevenue = 0.0;
+        int totalQuantity = 0;
+
+        // 准备图表数据
+        DefaultCategoryDataset revenueDataset = new DefaultCategoryDataset();
+        DefaultCategoryDataset quantityDataset = new DefaultCategoryDataset();
+
+        // 填充表格
+        for (Map<String, Object> data : reportData) {
+            String itemCode = (String) data.get("item_code");      // ← 改这里
+            String itemName = (String) data.get("item_name");      // ← 改这里
+            int quantity = ((Number) data.get("total_quantity")).intValue();
+            double revenue = ((Number) data.get("total_revenue")).doubleValue();
+            double avgPrice = revenue / quantity;
+          //  int activeDays = ((Number) data.get("active_days")).intValue();
+
+            Object[] row = {
+                    itemCode,
+                    itemName,
+                    quantity,
+                    String.format("%.2f", revenue),
+                    String.format("%.2f", avgPrice),
+            };
+
+            tableModel.addRow(row);
+
+            // 累计总计
+            totalRevenue += revenue;
+            totalQuantity += quantity;
+
+            // 为图表准备数据（只显示前10个菜品）
+            if (tableModel.getRowCount() <= 10) {
+                revenueDataset.addValue(revenue, "销售额", itemCode + " - " + itemName.substring(0, Math.min(8, itemName.length())));
+                quantityDataset.addValue(quantity, "销售量", itemCode + " - " + itemName.substring(0, Math.min(8, itemName.length())));
+            }
+        }
+
+        // 添加总计行
+        Object[] totalRow = {
+                "总计",
+                "",
+                totalQuantity,
+                String.format("%.2f", totalRevenue),
+                "",
+                ""
+        };
+        tableModel.addRow(totalRow);
+
+        // 创建图表
+        createDishCharts(revenueDataset, quantityDataset, chartPanel);
+    }
+
+    /**
+     * 生成菜品销售双图表（销售额/销售量排名）
+     *
+     * @note 适配中文并优化图表尺寸
+     */
+    private void createDishCharts(DefaultCategoryDataset revenueDataset,
+                                  DefaultCategoryDataset quantityDataset,
+                                  JPanel chartPanel) {
+        chartPanel.removeAll();//可能是null的原因
+
+        // 创建销售额图表
+        JFreeChart revenueChart = ChartFactory.createBarChart(
+                "热门菜品销售额排名",
+                "菜品",
+                "金额(元)",
+                revenueDataset,
+                PlotOrientation.VERTICAL,
+                true,
+                true,
+                false
+        );
+
+        // 创建销售量图表
+        JFreeChart quantityChart = ChartFactory.createBarChart(
+                "热门菜品销售量排名",
+                "菜品",
+                "数量",
+                quantityDataset,
+                PlotOrientation.VERTICAL,
+                true,
+                true,
+                false
+        );
+
+        // 修复中文乱码问题
+        Font labelFont;
+        Font titleFont;
+
+        // 检查系统是否支持微软雅黑
+        if (isFontAvailable("Microsoft YaHei")) {
+            labelFont = new Font("Microsoft YaHei", Font.PLAIN, 12);
+            titleFont = new Font("Microsoft YaHei", Font.BOLD, 14);
+        } else {
+            // 使用系统默认中文字体
+            labelFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+            titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 14);
+        }
+
+        // 设置图表样式
+        setChartStyle(revenueChart, labelFont, titleFont, "销售额");
+        setChartStyle(quantityChart, labelFont, titleFont, "销售量");
+
+        // 配置图表标签
+        configureChartLabels(revenueChart, true);  // 货币格式
+        configureChartLabels(quantityChart, false); // 普通数字格式
+
+        // 设置图表大小
+        ChartPanel revenuePanel = new ChartPanel(revenueChart);
+        revenuePanel.setPreferredSize(new Dimension(450, 450)); // 增加高度
+        revenuePanel.setMaximumSize(new Dimension(450, 600)); // 允许更大高度
+        revenuePanel.setMouseWheelEnabled(true);
+
+        ChartPanel quantityPanel = new ChartPanel(quantityChart);
+        quantityPanel.setPreferredSize(new Dimension(450, 450)); // 增加高度
+        quantityPanel.setMaximumSize(new Dimension(450, 600)); // 允许更大高度
+        quantityPanel.setMouseWheelEnabled(true);
+
+        chartPanel.add(revenuePanel);
+        chartPanel.add(quantityPanel);
+        chartPanel.revalidate();
+        chartPanel.repaint();
+    }
+
+    /**
+     * 导出菜品销售报表到Excel
+     *
+     * @note 自动格式化金额/数量列，失败时弹出错误
+     */
+    private void exportDishSalesToExcel(JTable table) {
+        try {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("保存菜品销售报表");
+            fileChooser.setSelectedFile(new File("菜品销售报表_" +
+                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date()) + ".xlsx"));
+            int userSelection = fileChooser.showSaveDialog(this);
+            if (userSelection != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            File fileToSave = fileChooser.getSelectedFile();
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.toLowerCase().endsWith(".xlsx")) {
+                filePath += ".xlsx";
+            }
+
+            // 创建目录（如果不存在）
+            File parentDir = fileToSave.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+
+            // 使用Apache POI创建Excel
+            try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+                XSSFSheet sheet = workbook.createSheet("菜品销售报表");
+
+                // 创建表头样式
+                CellStyle headerStyle = workbook.createCellStyle();
+                headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                XSSFFont headerFont = workbook.createFont();
+                headerFont.setBold(true);
+                headerFont.setColor(IndexedColors.WHITE.getIndex());
+                headerStyle.setFont(headerFont);
+                headerStyle.setBorderBottom(BorderStyle.THIN);
+                headerStyle.setBorderTop(BorderStyle.THIN);
+                headerStyle.setBorderLeft(BorderStyle.THIN);
+                headerStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建数据样式 - 金额列
+                CellStyle currencyStyle = workbook.createCellStyle();
+                currencyStyle.setDataFormat(workbook.createDataFormat().getFormat("#,##0.00"));
+                currencyStyle.setBorderBottom(BorderStyle.THIN);
+                currencyStyle.setBorderTop(BorderStyle.THIN);
+                currencyStyle.setBorderLeft(BorderStyle.THIN);
+                currencyStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建数据样式 - 普通数字
+                CellStyle numberStyle = workbook.createCellStyle();
+                numberStyle.setDataFormat(workbook.createDataFormat().getFormat("#,##0"));
+                numberStyle.setBorderBottom(BorderStyle.THIN);
+                numberStyle.setBorderTop(BorderStyle.THIN);
+                numberStyle.setBorderLeft(BorderStyle.THIN);
+                numberStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建表头
+                Row headerRow = sheet.createRow(0);
+                TableModel model = table.getModel();
+                for (int i = 0; i < model.getColumnCount(); i++) {
+                    Cell cell = headerRow.createCell(i);
+                    cell.setCellValue(model.getColumnName(i));
+                    cell.setCellStyle(headerStyle);
+                }
+
+                // 填充数据
+                for (int i = 0; i < model.getRowCount(); i++) {
+                    Row row = sheet.createRow(i + 1);
+                    for (int j = 0; j < model.getColumnCount(); j++) {
+                        Object value = model.getValueAt(i, j);
+                        Cell cell = row.createCell(j);
+
+                        // 设置边框
+                        CellStyle borderStyle = workbook.createCellStyle();
+                        borderStyle.setBorderBottom(BorderStyle.THIN);
+                        borderStyle.setBorderTop(BorderStyle.THIN);
+                        borderStyle.setBorderLeft(BorderStyle.THIN);
+                        borderStyle.setBorderRight(BorderStyle.THIN);
+                        cell.setCellStyle(borderStyle);
+
+                        if (value == null || value.toString().trim().isEmpty()) {
+                            cell.setCellValue("");
+                            continue;
+                        }
+
+                        String cellValue = value.toString().trim();
+                        cell.setCellValue(cellValue);
+
+                        // 根据列类型设置格式
+                        if (j == 3) { // 销售额列
+                            try {
+                                String cleanValue = cellValue.replaceAll("[^0-9.]", "");
+                                if (!cleanValue.isEmpty()) {
+                                    cell.setCellValue(Double.parseDouble(cleanValue));
+                                    cell.setCellStyle(currencyStyle);
+                                }
+                            } catch (NumberFormatException e) {
+                                // 保持字符串
+                            }
+                        } else if (j == 2 || j == 5) { // 销售数量和销售天数
+                            try {
+                                String cleanValue = cellValue.replaceAll("[^0-9]", "");
+                                if (!cleanValue.isEmpty()) {
+                                    cell.setCellValue(Integer.parseInt(cleanValue));
+                                    cell.setCellStyle(numberStyle);
+                                }
+                            } catch (NumberFormatException e) {
+                                // 保持字符串
+                            }
+                        } else if (j == 4) { // 平均单价
+                            try {
+                                String cleanValue = cellValue.replaceAll("[^0-9.]", "");
+                                if (!cleanValue.isEmpty()) {
+                                    cell.setCellValue(Double.parseDouble(cleanValue));
+                                    cell.setCellStyle(currencyStyle);
+                                }
+                            } catch (NumberFormatException e) {
+                                // 保持字符串
+                            }
+                        }
+                    }
+                }
+
+                // 自动调整列宽
+                for (int i = 0; i < model.getColumnCount(); i++) {
+                    sheet.setColumnWidth(i, Math.min((int) (sheet.getColumnWidth(i) * 1.5), 5000));
+                }
+
+                // 保存文件
+                try (FileOutputStream fileOut = new FileOutputStream(filePath)) {
+                    workbook.write(fileOut);
+                }
+
+                JOptionPane.showMessageDialog(this, "报表已成功导出到:\n" + filePath, "导出成功", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "导出报表失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 显示营业报表数据（表格+双图表）
+     *
+     * @note 自动计算总计并生成趋势图
+     */
+    private void displayReportData(List<Map<String, Object>> reportData, JTable reportTable,
+                                   DefaultTableModel tableModel, JPanel chartPanel) {
+        tableModel.setRowCount(0); // 清空表格
+
+        if (reportData == null || reportData.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "未找到相关营业数据", "提示", JOptionPane.INFORMATION_MESSAGE);
+            // 显示空白图表
+            chartPanel.removeAll();
+            JLabel noDataLabel = new JLabel("暂无数据可展示", SwingConstants.CENTER);
+            noDataLabel.setFont(new Font("微软雅黑", Font.BOLD, 16));
+            noDataLabel.setForeground(Color.GRAY);
+            chartPanel.add(noDataLabel);
+            chartPanel.revalidate();
+            chartPanel.repaint();
+            return;
+        }
+
+        double totalRevenue = 0.0;
+        int totalCustomers = 0;
+        int totalOrders = 0;
+
+        // 准备图表数据
+        DefaultCategoryDataset revenueDataset = new DefaultCategoryDataset();
+        DefaultCategoryDataset customersDataset = new DefaultCategoryDataset();
+
+        // 填充表格和计算总计
+        for (Map<String, Object> data : reportData) {
+            //  修复 date：使用 toString() 避免强转
+            String date = data.get("date") != null ? data.get("date").toString() : "未知日期";
+
+            //  修复 revenue：通过 Number 安全转换（支持 BigDecimal/Double/Integer）
+            Object revenueObj = data.get("revenue");
+            double revenue = 0.0;
+            if (revenueObj instanceof Number) {
+                revenue = ((Number) revenueObj).doubleValue();
+            }
+
+            //  修复 customers：同样通过 Number 安全转换
+            Object customersObj = data.get("customers");
+            int customers = 0;
+            if (customersObj instanceof Number) {
+                customers = ((Number) customersObj).intValue();
+            }
+
+            //  修复 takeoutOrderCount
+            Object orderCountObj = data.get("takeoutOrderCount");
+            int orderCount = 0;
+            if (orderCountObj instanceof Number) {
+                orderCount = ((Number) orderCountObj).intValue();
+            }
+
+            double avgRevenuePerCustomer = customers > 0 ? revenue / customers : 0;
+
+            Object[] row = {
+                    date,
+                    String.format("%.2f", revenue),
+                    customers,
+                    String.format("%.2f", avgRevenuePerCustomer),
+                    orderCount
+            };
+            tableModel.addRow(row);
+
+            // 累计总计
+            totalRevenue += revenue;
+            totalCustomers += customers;
+            totalOrders += orderCount;
+
+            // 为图表准备数据
+            revenueDataset.addValue(revenue, "营业额", date);
+            customersDataset.addValue(customers, "顾客数", date);
+        }
+
+        // 添加总计行
+        if (reportData.size() > 1) {
+            double avgRevenuePerCustomer = totalCustomers > 0 ? totalRevenue / totalCustomers : 0;
+            Object[] totalRow = {
+                    "总计",
+                    String.format("%.2f", totalRevenue),
+                    totalCustomers,
+                    String.format("%.2f", avgRevenuePerCustomer),
+                    totalOrders
+            };
+            tableModel.addRow(totalRow);
+        }
+
+        // 生成图表 - 修复：传递正确的数据集
+        createCharts(revenueDataset, customersDataset, chartPanel);
+    }
+
+    /**
+     * 创建双图表面板（营业额/顾客数量趋势）
+     *
+     * @note 自动处理中文字体和响应式布局，创建后立即设置坐标轴范围
+     */
+    private void createCharts(DefaultCategoryDataset revenueDataset,
+                              DefaultCategoryDataset customersDataset,
+                              JPanel chartPanel) {
+        chartPanel.removeAll();
+
+        // 创建营业额图表
+        JFreeChart revenueChart = ChartFactory.createBarChart(
+                "每日营业额趋势",  // 更清晰的标题
+                "日期",
+                "金额 (元)",
+                revenueDataset,
+                PlotOrientation.VERTICAL,
+                true,  // 显示图例
+                true,  // 生成工具提示
+                false  // 生成URL
+        );
+
+        // 创建顾客数量图表
+        JFreeChart customersChart = ChartFactory.createBarChart(
+                "每日顾客数量统计",  // 更清晰的标题
+                "日期",
+                "人数",
+                customersDataset,
+                PlotOrientation.VERTICAL,
+                true,
+                true,
+                false
+        );
+
+        // ═══════════════════════════════════════════════════════════
+        // 🔧【核心修改】创建图表后立即设置坐标轴范围
+        // ═══════════════════════════════════════════════════════════
+        setChartAxisRanges(revenueChart, customersChart);
+
+        // 修复中文乱码问题 - 跨平台兼容方案
+        Font labelFont;
+        Font titleFont;
+
+        // 检查系统是否支持微软雅黑
+        if (isFontAvailable("Microsoft YaHei")) {
+            labelFont = new Font("Microsoft YaHei", Font.PLAIN, 12);
+            titleFont = new Font("Microsoft YaHei", Font.BOLD, 14);
+        } else {
+            // 使用系统默认中文字体
+            labelFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+            titleFont = new Font(Font.SANS_SERIF, Font.BOLD, 14);
+        }
+
+        // 设置营业额图表样式
+        setChartStyle(revenueChart, labelFont, titleFont, "营业额");
+
+        // 设置顾客数量图表样式
+        setChartStyle(customersChart, labelFont, titleFont, "顾客数量");
+
+        // 兼容最新JFreeChart版本的标签设置
+        configureChartLabels(revenueChart, true);  // true表示货币格式
+        configureChartLabels(customersChart, false); // false表示整数格式
+
+        // 设置图表大小
+        ChartPanel revenuePanel = new ChartPanel(revenueChart);
+        revenuePanel.setPreferredSize(new Dimension(450, 300));
+        revenuePanel.setMouseWheelEnabled(true); // 启用滚轮缩放
+
+        ChartPanel customersPanel = new ChartPanel(customersChart);
+        customersPanel.setPreferredSize(new Dimension(450, 300));
+        customersPanel.setMouseWheelEnabled(true);
+
+        chartPanel.add(revenuePanel);
+        chartPanel.add(customersPanel);
+        chartPanel.revalidate();
+        chartPanel.repaint();
+    }
+
+    /**
+     * 🔧 新增辅助方法：为双图表设置合理的坐标轴范围
+     * 避免数据量少时图表显示异常，提升视觉体验
+     *
+     * @param revenueChart   营业额图表
+     * @param customersChart 顾客数量图表
+     */
+    private void setChartAxisRanges(JFreeChart revenueChart, JFreeChart customersChart) {
+        CategoryPlot revenuePlot = (CategoryPlot) revenueChart.getPlot();
+        CategoryPlot customersPlot = (CategoryPlot) customersChart.getPlot();
+
+        // ── 营业额图表：设置Y轴范围 ──
+        NumberAxis revenueAxis = (NumberAxis) revenuePlot.getRangeAxis();
+        CategoryDataset revenueDataset = revenuePlot.getDataset();  // ✅ 从图表中获取数据集
+        double maxRevenue = getMaxValueFromDataset((DefaultCategoryDataset) revenueDataset);
+        if (maxRevenue > 0) {
+            // 设置上限为最大值的1.2倍，留出顶部空间
+            revenueAxis.setUpperBound(maxRevenue * 1.2);
+            revenueAxis.setLowerBound(0);  // 下限始终为0
+            revenueAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits());
+        }
+
+        // ── 顾客数量图表：设置Y轴范围 ──
+        NumberAxis customersAxis = (NumberAxis) customersPlot.getRangeAxis();
+        CategoryDataset customersDataset = customersPlot.getDataset();  // ✅ 从图表中获取数据集
+        double maxCustomers = getMaxValueFromDataset((DefaultCategoryDataset) customersDataset);
+        if (maxCustomers > 0) {
+            // 设置上限为最大值的1.2倍，留出顶部空间
+            customersAxis.setUpperBound(maxCustomers * 1.2);
+            customersAxis.setLowerBound(0);  // 下限始终为0
+            customersAxis.setStandardTickUnits(NumberAxis.createIntegerTickUnits());
+        }
+    }
+    /**
+     * 🔧 辅助方法：从数据集获取最大值
+     *
+     * @param dataset 分类数据集
+     * @return 最大值，空数据集返回0
+     */
+    private double getMaxValueFromDataset(DefaultCategoryDataset dataset) {
+        if (dataset == null || dataset.getRowCount() == 0) {
+            return 0;
+        }
+        double maxValue = 0;
+        for (int row = 0; row < dataset.getRowCount(); row++) {
+            for (int col = 0; col < dataset.getColumnCount(); col++) {
+                Number value = dataset.getValue(row, col);
+                if (value != null && value.doubleValue() > maxValue) {
+                    maxValue = value.doubleValue();
+                }
+            }
+        }
+        return maxValue;
+    }
+
+    /**
+     * 配置图表样式（颜色/字体/网格线）
+     *
+     * @param seriesName 决定主色调（"营业额"=蓝/"顾客数量"=绿）
+     */
+    private void setChartStyle(JFreeChart chart, Font labelFont, Font titleFont, String seriesName) {
+        // 设置标题
+        TextTitle title = chart.getTitle();
+        if (title != null) {
+            title.setFont(titleFont);
+            title.setPaint(new Color(51, 51, 51)); // 深灰色标题
+        }
+
+        // 获取绘图区
+        CategoryPlot plot = (CategoryPlot) chart.getPlot();
+
+        // 设置背景
+        plot.setBackgroundPaint(Color.WHITE);
+        plot.setRangeGridlinePaint(new Color(230, 230, 230)); // 浅灰色网格线
+        plot.setOutlinePaint(new Color(200, 200, 200)); // 边框颜色
+
+        // 设置X轴
+        CategoryAxis domainAxis = plot.getDomainAxis();
+        domainAxis.setLabelFont(labelFont);
+        domainAxis.setTickLabelFont(labelFont);
+        domainAxis.setTickLabelPaint(new Color(80, 80, 80));
+        domainAxis.setAxisLinePaint(new Color(180, 180, 180));
+
+        // 设置Y轴
+        ValueAxis rangeAxis = plot.getRangeAxis();
+        rangeAxis.setLabelFont(labelFont);
+        rangeAxis.setTickLabelFont(labelFont);
+        rangeAxis.setTickLabelPaint(new Color(80, 80, 80));
+        rangeAxis.setAxisLinePaint(new Color(180, 180, 180));
+
+        // 设置图例
+        LegendTitle legend = chart.getLegend();
+        if (legend != null) {
+            legend.setItemFont(labelFont);
+            legend.setItemPaint(new Color(60, 60, 60));
+        }
+
+        // 设置渲染器样式
+        CategoryItemRenderer renderer = plot.getRenderer();
+
+        // 设置系列颜色
+        if (seriesName.equals("营业额")) {
+            renderer.setSeriesPaint(0, new Color(41, 128, 185)); // 蓝色
+        } else {
+            renderer.setSeriesPaint(0, new Color(39, 174, 96)); // 绿色
+        }
+
+        // 设置边框
+        if (renderer instanceof BarRenderer) {
+            BarRenderer barRenderer = (BarRenderer) renderer;
+            barRenderer.setSeriesOutlinePaint(0, new Color(30, 100, 150));
+            barRenderer.setSeriesOutlineStroke(0, new BasicStroke(0.5f));
+            barRenderer.setShadowVisible(false); // 禁用阴影，使图表更清晰
+        }
+    }
+
+    /**
+     * 检查字体是否可用
+     */
+    private boolean isFontAvailable(String fontName) {
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        String[] availableFontNames = ge.getAvailableFontFamilyNames();
+        for (String name : availableFontNames) {
+            if (name.equals(fontName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 兼容最新JFreeChart版本的图表标签配置
+     */
+    private void configureChartLabels(JFreeChart chart, boolean isCurrency) {
+        CategoryPlot plot = (CategoryPlot) chart.getPlot();
+        CategoryItemRenderer renderer = plot.getRenderer();
+
+        // 新版JFreeChart API - 使用set*方法而不是setBase*方法
+        if (isCurrency) {
+            // 货币格式
+            renderer.setDefaultItemLabelGenerator(
+                    new StandardCategoryItemLabelGenerator("{2}", NumberFormat.getCurrencyInstance())
+            );
+        } else {
+            // 整数格式
+            renderer.setDefaultItemLabelGenerator(
+                    new StandardCategoryItemLabelGenerator("{2}", NumberFormat.getIntegerInstance())
+            );
+        }
+
+        // 启用数据标签
+        renderer.setDefaultItemLabelsVisible(true);
+
+        // 设置标签位置
+        ItemLabelPosition position = new ItemLabelPosition(
+                ItemLabelAnchor.OUTSIDE12,
+                TextAnchor.BOTTOM_CENTER
+        );
+        renderer.setDefaultPositiveItemLabelPosition(position);
+
+        // 为条形图设置适当的内边距，确保标签可见
+        if (renderer instanceof BarRenderer) {
+            BarRenderer barRenderer = (BarRenderer) renderer;
+            barRenderer.setMaximumBarWidth(0.1); // 控制条形宽度
+            barRenderer.setItemMargin(0.2); // 条形之间的间距
+        }
+    }
+
+
+    /**
+     * 导出报表到Excel（自动识别金额/人数列格式）
+     *
+     * @note 失败时提供CSV备选方案
+     */
+    private void exportReportToExcel(JTable table) {
+        try {
+            // 修复Date类问题 - 明确使用java.util.Date
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("保存营业报表");
+            fileChooser.setSelectedFile(new File("营业报表_" +
+                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date()) + ".xlsx"));
+
+            int userSelection = fileChooser.showSaveDialog(this);
+            if (userSelection != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+
+            File fileToSave = fileChooser.getSelectedFile();
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.toLowerCase().endsWith(".xlsx")) {
+                filePath += ".xlsx";
+            }
+
+            // 创建目录（如果不存在）
+            File parentDir = fileToSave.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+
+            // 使用Apache POI创建Excel
+            try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+                XSSFSheet sheet = workbook.createSheet("营业报表");
+
+                // 创建表头样式
+                CellStyle headerStyle = workbook.createCellStyle();
+                headerStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+                headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                XSSFFont headerFont = workbook.createFont();
+                headerFont.setBold(true);
+                headerFont.setColor(IndexedColors.WHITE.getIndex());
+                headerStyle.setFont(headerFont);
+                headerStyle.setBorderBottom(BorderStyle.THIN);
+                headerStyle.setBorderTop(BorderStyle.THIN);
+                headerStyle.setBorderLeft(BorderStyle.THIN);
+                headerStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建数据样式 - 金额列
+                CellStyle currencyStyle = workbook.createCellStyle();
+                currencyStyle.setDataFormat(workbook.createDataFormat().getFormat("#,##0.00"));
+                currencyStyle.setBorderBottom(BorderStyle.THIN);
+                currencyStyle.setBorderTop(BorderStyle.THIN);
+                currencyStyle.setBorderLeft(BorderStyle.THIN);
+                currencyStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建数据样式 - 普通数字
+                CellStyle numberStyle = workbook.createCellStyle();
+                numberStyle.setDataFormat(workbook.createDataFormat().getFormat("#,##0"));
+                numberStyle.setBorderBottom(BorderStyle.THIN);
+                numberStyle.setBorderTop(BorderStyle.THIN);
+                numberStyle.setBorderLeft(BorderStyle.THIN);
+                numberStyle.setBorderRight(BorderStyle.THIN);
+
+                // 创建表头
+                Row headerRow = sheet.createRow(0);
+                TableModel model = table.getModel();
+                for (int i = 0; i < model.getColumnCount(); i++) {
+                    Cell cell = headerRow.createCell(i);
+                    cell.setCellValue(model.getColumnName(i));
+                    cell.setCellStyle(headerStyle);
+                }
+
+                // 填充数据
+                int revenueColumnIndex = -1;
+                int avgRevenueColumnIndex = -1;
+                int customerColumnIndex = -1;
+                int orderCountColumnIndex = -1;
+
+                // 自动检测列类型
+                for (int i = 0; i < model.getColumnCount(); i++) {
+                    String columnName = model.getColumnName(i);
+                    if (columnName.contains("总营业额") || columnName.contains("金额")) {
+                        revenueColumnIndex = i;
+                    } else if (columnName.contains("平均客单价")) {
+                        avgRevenueColumnIndex = i;
+                    } else if (columnName.contains("顾客总数") || columnName.contains("人数")) {
+                        customerColumnIndex = i;
+                    } else if (columnName.contains("订单数量")) {
+                        orderCountColumnIndex = i;
+                    }
+                }
+
+                for (int i = 0; i < model.getRowCount(); i++) {
+                    Row row = sheet.createRow(i + 1);
+                    for (int j = 0; j < model.getColumnCount(); j++) {
+                        Object value = model.getValueAt(i, j);
+                        Cell cell = row.createCell(j);
+
+                        // 设置边框
+                        CellStyle borderStyle = workbook.createCellStyle();
+                        borderStyle.setBorderBottom(BorderStyle.THIN);
+                        borderStyle.setBorderTop(BorderStyle.THIN);
+                        borderStyle.setBorderLeft(BorderStyle.THIN);
+                        borderStyle.setBorderRight(BorderStyle.THIN);
+                        cell.setCellStyle(borderStyle);
+
+                        if (value == null || value.toString().trim().isEmpty()) {
+                            cell.setCellValue("");
+                            continue;
+                        }
+
+                        String cellValue = value.toString().trim();
+
+                        // 特殊列处理 - 金额
+                        if (j == revenueColumnIndex || j == avgRevenueColumnIndex) {
+                            try {
+                                // 移除货币符号和逗号
+                                String cleanValue = cellValue.replaceAll("[^0-9.]", "");
+                                if (!cleanValue.isEmpty()) {
+                                    double numericValue = Double.parseDouble(cleanValue);
+                                    cell.setCellValue(numericValue);
+                                    cell.setCellStyle(currencyStyle);
+                                } else {
+                                    cell.setCellValue(cellValue);
+                                }
+                            } catch (NumberFormatException e) {
+                                cell.setCellValue(cellValue);
+                            }
+                        }
+                        // 特殊列处理 - 人数、订单数
+                        else if (j == customerColumnIndex || j == orderCountColumnIndex) {
+                            try {
+                                String cleanValue = cellValue.replaceAll("[^0-9]", "");
+                                if (!cleanValue.isEmpty()) {
+                                    int numericValue = Integer.parseInt(cleanValue);
+                                    cell.setCellValue(numericValue);
+                                    cell.setCellStyle(numberStyle);
+                                } else {
+                                    cell.setCellValue(cellValue);
+                                }
+                            } catch (NumberFormatException e) {
+                                cell.setCellValue(cellValue);
+                            }
+                        }
+                        // 普通文本
+                        else {
+                            cell.setCellValue(cellValue);
+                        }
+                    }
+                }
+
+                // 自动调整列宽
+                for (int i = 0; i < model.getColumnCount(); i++) {
+                    sheet.setColumnWidth(i, Math.min((int) (sheet.getColumnWidth(i) * 1.5), 5000));
+                }
+
+                // 保存文件
+                try (FileOutputStream fileOut = new FileOutputStream(filePath)) {
+                    workbook.write(fileOut);
+                }
+
+                JOptionPane.showMessageDialog(this, "报表已成功导出到:\n" + filePath, "导出成功", JOptionPane.INFORMATION_MESSAGE);
+
+                // 询问是否打开文件
+                int openOption = JOptionPane.showConfirmDialog(this, "是否打开导出的文件?", "操作完成", JOptionPane.YES_NO_OPTION);
+                if (openOption == JOptionPane.YES_OPTION) {
+                    if (Desktop.isDesktopSupported()) {
+                        try {
+                            Desktop.getDesktop().open(new File(filePath));
+                        } catch (Exception ex) {
+                            JOptionPane.showMessageDialog(this, "无法打开文件: " + ex.getMessage(), "提示", JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(this, "当前系统不支持自动打开文件，请手动打开。", "提示", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "导出报表失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+
+            // 提供备选方案
+            int retryOption = JOptionPane.showConfirmDialog(this,
+                    "导出失败，是否尝试导出为CSV格式？\n错误详情: " + e.getMessage(),
+                    "导出失败",
+                    JOptionPane.YES_NO_OPTION);
+
+            if (retryOption == JOptionPane.YES_OPTION) {
+                exportAsCSV(table);
+            }
+        }
+    }
+
+    /**
+     * 导出报表到CSV（UTF-8编码）
+     *
+     * @note 自动转义特殊字符
+     */
+    private void exportAsCSV(JTable table) {
+        try {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("保存营业报表 (CSV)");
+            fileChooser.setSelectedFile(new File("营业报表_" +
+                    new SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date()) + ".csv"));
+
+            int userSelection = fileChooser.showSaveDialog(this);
+            if (userSelection != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+
+            File fileToSave = fileChooser.getSelectedFile();
+            String filePath = fileToSave.getAbsolutePath();
+            if (!filePath.toLowerCase().endsWith(".csv")) {
+                filePath += ".csv";
+            }
+
+            StringBuilder csvContent = new StringBuilder();
+            TableModel model = table.getModel();
+
+            // 写入表头
+            for (int i = 0; i < model.getColumnCount(); i++) {
+                csvContent.append(escapeCSV(model.getColumnName(i)));
+                if (i < model.getColumnCount() - 1) csvContent.append(",");
+            }
+            csvContent.append("\n");
+
+            // 写入数据
+            for (int i = 0; i < model.getRowCount(); i++) {
+                for (int j = 0; j < model.getColumnCount(); j++) {
+                    Object value = model.getValueAt(i, j);
+                    csvContent.append(escapeCSV(value != null ? value.toString() : ""));
+                    if (j < model.getColumnCount() - 1) csvContent.append(",");
+                }
+                csvContent.append("\n");
+            }
+
+            // 保存文件
+            java.nio.file.Files.write(java.nio.file.Paths.get(filePath),
+                    csvContent.toString().getBytes("UTF-8"));
+
+            JOptionPane.showMessageDialog(this, "CSV格式报表已成功导出到:\n" + filePath, "导出成功", JOptionPane.INFORMATION_MESSAGE);
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "CSV导出失败: " + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 转义CSV特殊字符（逗号/引号/换行）
+     *
+     * @note 符合RFC4180标准
+     */
+    private String escapeCSV(String value) {
+        if (value == null) return "";
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
+
+    /**
+     * 获取支持中文的字体（优先系统中文字体）
+     *
+     * @param size 字体大小
+     */
+    private Font getChineseFont(int size) {
+        // 尝试使用系统支持的中文字体
+        String[] chineseFonts = {"微软雅黑", "Microsoft YaHei", "宋体", "SimSun", "黑体", "SimHei", "KaiTi", "楷体"};
+
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        Font font = null;
+
+        for (String fontName : chineseFonts) {
+            if (ge.getAvailableFontFamilyNames().length > 0) {
+                font = new Font(fontName, Font.PLAIN, size);
+                if (font.canDisplayUpTo("中文") == -1) {
+                    return font;
+                }
+            }
+        }
+
+        // 如果找不到中文字体，使用默认字体并尝试显示中文
+        return new Font("Dialog", Font.PLAIN, size);
+    }
+
+    /**
+     * 为JFreeChart应用中文字体（解决乱码）
+     *
+     * @note 自动适配饼图/柱状图并调整标签间距
+     */
+    private void applyChineseFontToChart(JFreeChart chart) {
+        Font chineseFont = getChineseFont(12);
+        Font chineseFontBold = getChineseFont(14);
+        chineseFontBold = chineseFontBold.deriveFont(Font.BOLD);
+
+        // 设置标题
+        if (chart.getTitle() != null) {
+            chart.getTitle().setFont(chineseFontBold);
+        }
+
+        // 设置图例
+        LegendTitle legend = chart.getLegend();
+        if (legend != null) {
+            legend.setItemFont(chineseFont);
+            legend.setItemPaint(Color.BLACK);
+        }
+
+        // 设置图表区域字体
+        Plot plot = chart.getPlot();
+        if (plot instanceof PiePlot) {
+            PiePlot piePlot = (PiePlot) plot;
+            piePlot.setLabelFont(chineseFont);
+            // 注意：PiePlot没有setLegendLabelFont方法，图例字体已在上面设置
+        } else if (plot instanceof CategoryPlot) {
+            CategoryPlot categoryPlot = (CategoryPlot) plot;
+            categoryPlot.getDomainAxis().setLabelFont(chineseFontBold);
+            categoryPlot.getRangeAxis().setLabelFont(chineseFontBold);
+            categoryPlot.getDomainAxis().setTickLabelFont(chineseFont);
+            categoryPlot.getRangeAxis().setTickLabelFont(chineseFont);
+
+            // 设置分类轴标签旋转，避免中文重叠
+            if (categoryPlot.getDomainAxis() instanceof CategoryAxis) {
+                CategoryAxis domainAxis = (CategoryAxis) categoryPlot.getDomainAxis();
+                domainAxis.setCategoryLabelPositions(CategoryLabelPositions.UP_45);
+            }
+        }
+
+        // 设置额外边距，确保中文字符有足够显示空间
+        chart.setPadding(new RectangleInsets(15, 20, 15, 20));
+    }
+
+    public void showTimeMessage(String message, String title) {
+        JOptionPane.showMessageDialog(this, message, title, JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * 创建取消预约统计面板
+     */
+    private JPanel createForfeitedDepositPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        // ===== 顶部：控制区域 (日期选择 + 查询按钮) =====
+        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        controlPanel.setBorder(BorderFactory.createTitledBorder("筛选条件"));
+
+        controlPanel.add(new JLabel("开始日期:"));
+        JDateChooser startDateChooser = new JDateChooser();
+        startDateChooser.setDateFormatString("yyyy-MM-dd");
+        startDateChooser.setDate(new java.util.Date()); // 默认今天
+        startDateChooser.setPreferredSize(new Dimension(120, 28));
+        controlPanel.add(startDateChooser);
+
+        controlPanel.add(new JLabel("结束日期:"));
+        JDateChooser endDateChooser = new JDateChooser();
+        endDateChooser.setDateFormatString("yyyy-MM-dd");
+        endDateChooser.setDate(new java.util.Date()); // 默认今天
+        endDateChooser.setPreferredSize(new Dimension(120, 28));
+        controlPanel.add(endDateChooser);
+
+        JButton queryButton = new JButton("查询");
+        queryButton.setPreferredSize(new Dimension(80, 30));
+        controlPanel.add(queryButton);
+
+        panel.add(controlPanel, BorderLayout.NORTH);
+
+        // ===== 中间：统计汇总区域 =====
+        JPanel summaryPanel = new JPanel(new GridLayout(1, 4, 10, 10));
+        summaryPanel.setBorder(BorderFactory.createTitledBorder("统计汇总"));
+
+        JLabel totalRecordsLabel = new JLabel("总取消次数: 0", SwingConstants.CENTER);
+        totalRecordsLabel.setFont(new Font("微软雅黑", Font.BOLD, 14));
+        summaryPanel.add(totalRecordsLabel);
+
+        JLabel totalAmountLabel = new JLabel("总没收金额: 0.00 元", SwingConstants.CENTER);
+        totalAmountLabel.setFont(new Font("微软雅黑", Font.BOLD, 14));
+        totalAmountLabel.setForeground(Color.RED);
+        summaryPanel.add(totalAmountLabel);
+
+        // 占位标签，保持布局平衡
+        JLabel label3 = new JLabel("");
+        summaryPanel.add(label3);
+        JLabel label4 = new JLabel("");
+        summaryPanel.add(label4);
+
+        panel.add(summaryPanel, BorderLayout.CENTER);
+
+        // ===== 下部：数据表格 =====
+        String[] columnNames = {"记录ID", "预约号", "客户姓名", "客户电话", "原定预约时间", "没收金额(元)", "取消时间", "取消原因"};
+        DefaultTableModel tableModel = new DefaultTableModel(columnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // 只读
+            }
+        };
+
+        JTable reportTable = new JTable(tableModel);
+        reportTable.setRowHeight(25);
+        reportTable.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        reportTable.getTableHeader().setFont(new Font("微软雅黑", Font.BOLD, 12));
+        reportTable.setFillsViewportHeight(true);
+
+        // 设置列宽
+        reportTable.getColumnModel().getColumn(0).setPreferredWidth(60);  // ID
+        reportTable.getColumnModel().getColumn(1).setPreferredWidth(120); // 预约号
+        reportTable.getColumnModel().getColumn(2).setPreferredWidth(100); // 姓名
+        reportTable.getColumnModel().getColumn(3).setPreferredWidth(110); // 电话
+        reportTable.getColumnModel().getColumn(4).setPreferredWidth(130); // 原定时间
+        reportTable.getColumnModel().getColumn(5).setPreferredWidth(100); // 金额
+        reportTable.getColumnModel().getColumn(6).setPreferredWidth(150); // 取消时间
+        reportTable.getColumnModel().getColumn(7).setPreferredWidth(200); // 原因
+
+        // 金额列右对齐
+        DefaultTableCellRenderer rightRenderer = new DefaultTableCellRenderer();
+        rightRenderer.setHorizontalAlignment(SwingConstants.RIGHT);
+        reportTable.getColumnModel().getColumn(5).setCellRenderer(rightRenderer);
+
+        JScrollPane scrollPane = new JScrollPane(reportTable);
+        scrollPane.setPreferredSize(new Dimension(950, 300));
+        panel.add(scrollPane, BorderLayout.SOUTH);
+
+        // ===== 事件处理：点击查询 =====
+        queryButton.addActionListener(e -> {
+            java.util.Date startDate = startDateChooser.getDate();
+            java.util.Date endDate = endDateChooser.getDate();
+
+            if (startDate == null || endDate == null) {
+                JOptionPane.showMessageDialog(panel, "请选择完整的日期范围");
+                return;
+            }
+            if (startDate.after(endDate)) {
+                JOptionPane.showMessageDialog(panel, "开始日期不能晚于结束日期");
+                return;
+            }
+
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            String startStr = sdf.format(startDate);
+            String endStr = sdf.format(endDate);
+
+            // 调用 Controller 获取数据
+            try {
+                List<Map<String, Object>> data = controller.getForfeitedDepositsReport(startStr, endStr);
+
+                // 清空旧数据
+                tableModel.setRowCount(0);
+
+                double totalAmount = 0.0;
+                int totalCount = 0;
+
+                if (data != null) {
+                    for (Map<String, Object> row : data) {
+                        Object[] rowData = {
+                                row.get("记录ID"),
+                                row.get("预约号"),
+                                row.get("客户姓名"),
+                                row.get("客户电话"),
+                                row.get("原定预约时间"),
+                                row.get("没收金额"),
+                                row.get("取消时间"),
+                                row.get("取消原因")
+                        };
+                        tableModel.addRow(rowData);
+
+                        // 累加统计
+                        totalCount++;
+                        if (row.get("没收金额") instanceof Number) {
+                            totalAmount += ((Number) row.get("没收金额")).doubleValue();
+                        }
+                    }
+                }
+
+                // 更新汇总标签
+                totalRecordsLabel.setText("总取消次数: " + totalCount);
+                totalAmountLabel.setText("总没收金额: " + String.format("%.2f", totalAmount) + " 元");
+
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(panel, "查询失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+                ex.printStackTrace();
+            }
+        });
+
+        return panel;
+    }
+
 }

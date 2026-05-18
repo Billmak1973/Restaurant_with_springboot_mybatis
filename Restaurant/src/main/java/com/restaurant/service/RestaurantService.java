@@ -489,6 +489,7 @@ public class RestaurantService {
                             " 已加入队列，等待 " + groupSize + " 人桌");
                 }
 
+
                 // ===== 5. 递增下一个叫号 =====
                 businessStatusMapper.incrementNextCallNumber(LocalDate.now());
 
@@ -666,7 +667,9 @@ public class RestaurantService {
             syncMergedTablesToCache(table1, table2, group, seats1, seats2);
             group.setAssigned(true);
             group.setTableId(table1.getTableId());
-
+            // 🔧【修复】累加當日顧客總數（合并桌分配也需统计）
+            businessStatusMapper.incrementDailyTotalCustomers(
+                    group.getGroupSize(), LocalDate.now());
             System.out.println(" 餐桌 #" + table1.getDisplayId() + " + #" + table2.getDisplayId()
                     + " 已合併，分配給顧客組 #" + group.getCallNumber()
                     + " (" + group.getGroupSize() + "人)");
@@ -841,6 +844,10 @@ public class RestaurantService {
         // 4.4 🔧【关键】迁移原订单到子桌 A（原顾客组继续使用）
         orderMapper.migrateOrdersToTable(targetTable.getTableId(), subTableA.getTableId());
         System.out.println(" 订单已迁移至子桌 #" + subTableA.getDisplayId());
+
+        // 🔧【修复】累加當日顧客總數（自动分裂分配也需统计）
+        businessStatusMapper.incrementDailyTotalCustomers(
+                group.getGroupSize(), LocalDate.now());
 
         // 5. 🔧 同步更新内存缓存（事务提交后由调用方刷新）
         syncMemoryAfterAutoSplit(targetTable, subTableA, subTableB, existingGroup, group, originalStartTime);
@@ -2000,6 +2007,7 @@ public class RestaurantService {
 
     @Transactional(rollbackFor = Exception.class)
     public void updateCustomerGroupSize(CustomerGroup group, int newSize) {
+        // ===== 1. 基础验证 =====
         if (newSize <= 0 || newSize > 12) {
             throw new IllegalArgumentException("客戶數量必須在 1-12 之間");
         }
@@ -2007,63 +2015,83 @@ public class RestaurantService {
             throw new IllegalArgumentException("已入座顧客組不能修改人數");
         }
 
-        // 1. 查詢當前隊列類型
-        String currentQueueType = queueMapper.findQueueTypeByGroupId(group.getGroup_id());
+        // ===== 2. 🔧【关键】从缓存获取权威对象引用 =====
+        CustomerGroup cachedGroup = customerGroupMap.get(group.getGroup_id());
+        if (cachedGroup == null) {
+            CustomerGroup dbGroup = customerGroupMapper.findById(group.getGroup_id());
+            if (dbGroup == null) {
+                throw new IllegalStateException("顧客組不存在: " + group.getGroup_id());
+            }
+            customerGroupMap.put(dbGroup.getGroup_id(), dbGroup);
+            cachedGroup = dbGroup;
+            System.out.println("🔧 從數據庫重新加載顧客組到緩存: " + group.getGroup_id());
+        }
+
+        // 🔧【核心】验证状态一致性（调试用）
+        if (cachedGroup.getGroupSize() != group.getGroupSize()) {
+            System.out.println("⚠️ 警告: 傳入對象與緩存對象狀態不一致，將以緩存為準");
+        }
+
+        // ===== 3. 查詢當前隊列類型 =====
+        String currentQueueType = queueMapper.findQueueTypeByGroupId(cachedGroup.getGroup_id());
         if (currentQueueType == null) {
             throw new IllegalArgumentException("顧客組不在隊列中");
         }
 
         String newQueueType = resolveQueueType(newSize);
 
-        // 2. 從舊隊列移除
-        queueMapper.removeFromQueue(group.getGroup_id(), currentQueueType);
+        // ===== 4. 從舊隊列移除 =====
+        queueMapper.removeFromQueue(cachedGroup.getGroup_id(), currentQueueType);
 
-        // 3. 更新數據庫中的顧客組人數
-        int updated = customerGroupMapper.updateGroupSize(group.getGroup_id(), newSize);
+        // ===== 5. 更新數據庫 =====
+        int updated = customerGroupMapper.updateGroupSize(cachedGroup.getGroup_id(), newSize);
         if (updated == 0) {
-            throw new RuntimeException("更新顧客組人數失敗：groupId=" + group.getGroup_id());
+            throw new RuntimeException("更新顧客組人數失敗：groupId=" + cachedGroup.getGroup_id());
         }
 
-        // 🔧【核心修复 1】从缓存中获取权威对象引用并更新
-        CustomerGroup cachedGroup = customerGroupMap.get(group.getGroup_id());
-        if (cachedGroup != null) {
-            cachedGroup.setGroupSize(newSize);  // 更新缓存中的对象
-            System.out.println(" 内存缓存已同步: groupId=" + group.getGroup_id() +
-                    ", newSize=" + newSize);
+        // ===== 6. 🔧【核心】直接更新缓存中的对象 =====
+        cachedGroup.setGroupSize(newSize);
+        System.out.println("✅ 內存緩存已同步: groupId=" + cachedGroup.getGroup_id() +
+                ", newSize=" + newSize);
+
+        // ===== 7. 🔧 可选：同步更新传入参数对象 =====
+        if (group != cachedGroup) {
+            group.setGroupSize(newSize);
         }
 
-        // 🔧【核心修复 2】同步更新传入对象（保持方法内一致性）
-        group.setGroupSize(newSize);
-
-        // 4. 插入新隊列
+        // ===== 8. 插入新隊列 =====
         int position = queueMapper.getNextQueuePosition(newQueueType);
-        queueMapper.insertQueue(newQueueType, group.getGroup_id(), position);
+        queueMapper.insertQueue(newQueueType, cachedGroup.getGroup_id(), position);
 
-        // 5. 重排新隊列位置
+        // ===== 9. 重排新隊列位置 =====
         queueMapper.updateQueuePositions(newQueueType);
 
-        // 🔧【核心修复 3】事务提交后同步内存队列
+        // ===== 10. 🔧 事务提交后同步内存队列 + 发布事件 =====
+        // 🔧【关键修复】创建 final 副本供匿名内部类使用
+        final CustomerGroup finalCachedGroup = cachedGroup;
+        final String finalQueueType = currentQueueType;
+        final int finalNewSize = newSize;
+        final String finalNewQueueType = newQueueType;
+
         TransactionSynchronizationManager.registerSynchronization(
                 new TransactionSynchronizationAdapter() {
                     @Override
                     public void afterCommit() {
-                        syncQueueToMemory(group.getGroup_id(), currentQueueType, newSize);
+                        // ✅ 使用 final 副本
+                        syncQueueToMemory(finalCachedGroup.getGroup_id(), finalQueueType, finalNewSize);
                         eventPublisher.publishEvent(
-                                new QueueChangedEvent(RestaurantService.this, newQueueType)
+                                new QueueChangedEvent(RestaurantService.this, finalNewQueueType)
                         );
+                        System.out.println("📡 隊列變更事件已發布: " + finalNewQueueType);
                     }
                 }
         );
 
-        System.out.println(" 顧客組 #" + group.getCallNumber() +
-                " 人數更新: " + group.getGroupSize() + " → " + newSize +
+        System.out.println("✅ 顧客組 #" + cachedGroup.getCallNumber() +
+                " 人數更新: " + cachedGroup.getGroupSize() +
                 "，隊列: " + currentQueueType + " → " + newQueueType);
     }
 
-
-    /**
-     * 🔧 增强版：同步内存队列 + 更新缓存对象
-     */
     private void syncQueueToMemory(int groupId, String oldQueueType, int newSize) {
         synchronized (queueLock) {
             // 1. 先更新 customerGroupMap 中的对象
@@ -2080,15 +2108,19 @@ public class RestaurantService {
             // 3. 重排旧队列位置
             repositionQueue(oldQueue);
 
-            // 4. 如果需要移动到新队列类型，处理新队列
+            // 4. 🔧【核心修复】无论队列类型是否改变，都要重新添加顾客组
             String newQueueType = resolveQueueType(newSize);
-            if (!oldQueueType.equals(newQueueType)) {
-                Queue<CustomerGroup> newQueue = getQueueByType(newQueueType);
-                if (cachedGroup != null) {
-                    cachedGroup.setPosition(newQueue.size() + 1);
-                    newQueue.add(cachedGroup);
-                    repositionQueue(newQueue);
-                }
+            Queue<CustomerGroup> targetQueue = getQueueByType(newQueueType);
+
+            if (cachedGroup != null) {
+                // 🔧 无论是否跨队列，都要添加回去
+                cachedGroup.setPosition(targetQueue.size() + 1);
+                targetQueue.add(cachedGroup);
+                repositionQueue(targetQueue);
+
+                System.out.println(" 内存队列已同步: groupId=" + groupId +
+                        ", queueType=" + newQueueType +
+                        ", position=" + cachedGroup.getPosition());
             }
         }
     }
@@ -5025,6 +5057,155 @@ public class RestaurantService {
             return OperationResult.error("餐桌编号不能为空");
         }
 
+        //先判断模式 → 再按需查库
+        // 🔧【关键修复】先检查合并模式，避免提前查询单个餐桌
+        if (isMerge) {
+            System.out.println("🔧 进入合并分支");
+            System.out.println("🔧 原始输入: [" + tableIdInput + "]");
+            // 1. 输入验证 + 中文逗号转换
+            if (tableIdInput == null || tableIdInput.trim().isEmpty()) {
+                return OperationResult.error("请输入餐桌编号（格式：7,8）");
+            }
+
+            String normalizedInput = tableIdInput.trim().replace("，", ",");
+            String[] tableIds = normalizedInput.split(",");
+
+            if (tableIds.length != 2) {
+                return OperationResult.error("合并操作必须输入 2 张餐桌编号，格式：7,8");
+            }
+
+            String tableId1 = tableIds[0].trim();
+            String tableId2 = tableIds[1].trim();
+
+            // 2. 🔧【关键】使用 Service 层方法查询（带缓存 + 顾客组关联）
+            Tables table1 = getTableById(tableId1);
+            Tables table2 = getTableById(tableId2);
+
+            System.out.println("🔍 [DEBUG] 查询餐桌 1: " + (table1 != null ? tableId1 : "null"));
+            System.out.println("🔍 [DEBUG] 查询餐桌 2: " + (table2 != null ? tableId2 : "null"));
+
+            if (table1 == null) return OperationResult.error("餐桌 #" + tableId1 + " 不存在");
+            if (table2 == null) return OperationResult.error("餐桌 #" + tableId2 + " 不存在");
+
+            // 3. 状态验证
+            if (table1.getStatus() != Tables.TableStatus.VACANT) {
+                return OperationResult.error("餐桌 #" + tableId1 + " 状态为【" +
+                        table1.getStatus().getDisplayName() + "】，必须为空闲");
+            }
+            if (table2.getStatus() != Tables.TableStatus.VACANT) {
+                return OperationResult.error("餐桌 #" + tableId2 + " 状态为【" +
+                        table2.getStatus().getDisplayName() + "】，必须为空闲");
+            }
+
+            // 4. 容量验证 + 用户选项匹配
+            int expectedCapacity = isTwoSeat ? 2 : (isFourSeat ? 4 : 6);
+            if (table1.getCapacity() != expectedCapacity || table2.getCapacity() != expectedCapacity) {
+                return OperationResult.error("餐桌容量与选择不符，请确认选项");
+            }
+
+            // 5. 相邻验证（左右相邻，不能上下）
+            try {
+                int num1 = Integer.parseInt(tableId1.replaceAll("[^0-9]", ""));
+                int num2 = Integer.parseInt(tableId2.replaceAll("[^0-9]", ""));
+                int row1 = (num1 - 1) / 3;
+                int row2 = (num2 - 1) / 3;
+
+                if (row1 != row2 || Math.abs(num1 - num2) != 1) {
+                    return OperationResult.error("餐桌 #" + tableId1 + " 和 #" + tableId2 +
+                            " 不是左右相邻，无法合并（如 7+8、10+11）");
+                }
+            } catch (NumberFormatException e) {
+                return OperationResult.error("餐桌编号格式错误");
+            }
+
+            // 6. 执行合并分配
+            try {
+                boolean success = assignMergedTables(table1, table2, peopleCount);
+                return success ? OperationResult.success(true) : OperationResult.error("合并分配失败");
+            } catch (Exception e) {
+                e.printStackTrace();  // 🔧 确保异常可见
+                return OperationResult.error("合并时发生错误：" + e.getMessage());
+            }
+        }
+
+        // ===== 5. 聚餐桌场景 =====
+        if (isGrouped) {
+            // 1. 输入验证
+            if (tableIdInput == null || tableIdInput.trim().isEmpty()) {
+                return OperationResult.error("请输入聚餐桌编号（格式：13,14,15）");
+            }
+
+            // 2. 解析餐桌号列表
+            String normalizedInput = tableIdInput.trim().replace("，", ",");
+            String[] tableIds = normalizedInput.split(",");
+
+            // 3. 验证数量（聚餐桌必须≥3张）
+            if (tableIds.length < 3) {
+                return OperationResult.error("聚餐桌必须选择 3 张或以上的餐桌，当前输入：" + tableIds.length + " 张");
+            }
+
+            // 4. 验证所有餐桌都是6人桌且状态空闲
+            List<Tables> groupedTables = new ArrayList<>();
+            for (String tid : tableIds) {
+                String trimmedId = tid.trim();
+                if (trimmedId.isEmpty()) {
+                    return OperationResult.error("餐桌编号格式错误，请检查输入");
+                }
+
+                Tables t = getTableById(trimmedId);
+                if (t == null) {
+                    return OperationResult.error("餐桌 #" + trimmedId + " 不存在");
+                }
+
+                // 🔧 验证是否为6人桌
+                if (t.getCapacity() != 6) {
+                    return OperationResult.error("餐桌 #" + trimmedId + " 是 " + t.getCapacity() + " 人桌，聚餐桌必须全部使用 6 人桌！");
+                }
+
+                // 验证餐桌状态
+                if (t.getStatus() != Tables.TableStatus.VACANT) {
+                    return OperationResult.error("餐桌 #" + trimmedId + " 状态为【" +
+                            t.getStatus().getDisplayName() + "】，必须为空闲");
+                }
+
+                groupedTables.add(t);
+            }
+
+            // 5. 验证桌号是否连续（聚餐桌要求桌号连续）
+            try {
+                List<Integer> tableNumbers = new ArrayList<>();
+                for (Tables t : groupedTables) {
+                    int num = Integer.parseInt(t.getDisplayId().replaceAll("[^0-9]", ""));
+                    tableNumbers.add(num);
+                }
+
+                // 排序并检查连续性
+                Collections.sort(tableNumbers);
+                for (int i = 1; i < tableNumbers.size(); i++) {
+                    if (tableNumbers.get(i) - tableNumbers.get(i - 1) != 1) {
+                        return OperationResult.error("聚餐桌桌号必须连续！\n" +
+                                "当前输入：" + String.join(",", tableIds) + "\n" +
+                                "缺少桌号：" + (tableNumbers.get(i - 1) + 1));
+                    }
+                }
+            } catch (NumberFormatException e) {
+                return OperationResult.error("餐桌编号格式错误，请输入纯数字");
+            }
+
+            // 6. 计算总人数（6人桌 × 数量）
+            int totalPeople = 6 * groupedTables.size();
+            System.out.println("🔧 聚餐桌分配：" + groupedTables.size() + "张6人桌，总容量=" + totalPeople + "人");
+
+            // 7. 执行聚餐桌分配
+            try {
+                boolean success = assignGroupedTables(groupedTables, totalPeople);
+                return success ? OperationResult.success(true) : OperationResult.error("聚餐桌分配失败");
+            } catch (Exception e) {
+                e.printStackTrace();
+                return OperationResult.error("聚餐桌分配时发生错误：" + e.getMessage());
+            }
+        }
+
         Tables table = tablesMapper.findByDisplayId(tableIdInput.trim());
         if (table == null) {
             return OperationResult.error("餐桌 #" + tableIdInput + " 不存在");
@@ -5038,8 +5219,10 @@ public class RestaurantService {
         }
         // ===== 4. 添加客人场景 =====
         if (isAddGuests) {
-            return handleAddToExistingGroup(table, peopleCount);
+            return handleAddToExistingGroup(table, peopleCount, isTwoSeat, isFourSeat, isSixSeat);
         }
+
+
         return OperationResult.success(true);
 
     }
@@ -5950,65 +6133,141 @@ public class RestaurantService {
             // ===== 10. 同步内存缓存 =====
             syncMemoryAfterShare(mainTable, subTableA, subTableB, newGroup, existingGroup);
 
-            System.out.println("✅ 共享餐桌分配成功: #" + mainTable.getDisplayId() +
+            System.out.println(" 共享餐桌分配成功: #" + mainTable.getDisplayId() +
                     " → 子桌 #" + subTableA.getDisplayId() + " + #" + subTableB.getDisplayId());
 
             return OperationResult.success(true);
 
         } catch (Exception e) {
-            System.err.println("❌ 共享餐桌分配失败: " + e.getMessage());
+            System.err.println(" 共享餐桌分配失败: " + e.getMessage());
             e.printStackTrace();
             return OperationResult.error("共享餐桌分配失败: " + e.getMessage());
         }
     }
 
+
+    /**
+     * 处理向现有顾客组添加顾客或为新顾客组分配餐桌
+     *
+     * @param table            餐桌对象
+     * @param additionalPeople 追加/初始人数
+     * @param isTwoSeat        是否选择2人桌
+     * @param isFourSeat       是否选择4人桌
+     * @param isSixSeat        是否选择6人桌
+     * @return OperationResult<Boolean> 操作结果
+     */
     @Transactional(rollbackFor = Exception.class)
     public OperationResult<Boolean> handleAddToExistingGroup(
-            Tables table, int additionalPeople) {
+            Tables table, int additionalPeople, boolean isTwoSeat, boolean isFourSeat, boolean isSixSeat) {
+
+        // ===== 1. 基础参数验证 =====
+        if (table == null) {
+            return OperationResult.error("餐桌对象不能为空");
+        }
+        if (additionalPeople <= 0 || additionalPeople > 12) {
+            return OperationResult.error("人数必须在 1-12 之间，当前输入：" + additionalPeople);
+        }
+
+        // ===== 2. 验证：餐桌实际容量与选择是否匹配 =====
+        int actualCapacity = table.getCapacity();
+        int selectedCapacity = 0;
+        String selectedCapacityName = "";
+
+        if (isTwoSeat) {
+            selectedCapacity = 2;
+            selectedCapacityName = "2人桌";
+        } else if (isFourSeat) {
+            selectedCapacity = 4;
+            selectedCapacityName = "4人桌";
+        } else if (isSixSeat) {
+            selectedCapacity = 6;
+            selectedCapacityName = "6人桌";
+        } else {
+            return OperationResult.error("请至少选择一种餐桌容量类型");
+        }
+
+        // 🔧【核心验证】餐桌实际容量必须与选择的容量匹配
+        if (actualCapacity != selectedCapacity) {
+            return OperationResult.error(
+                    "餐桌 #" + table.getDisplayId() + " 是 " + actualCapacity + "人桌，不是 " + selectedCapacityName + "！\n" +
+                            "请选择正确的餐桌容量类型。"
+            );
+        }
+
+        // 🔧【容量规则验证】- 针对空桌新入座的初始人数验证
+        if (table.getStatus() == Tables.TableStatus.VACANT) {
+            if (actualCapacity == 2 && (additionalPeople < 1 || additionalPeople > 2)) {
+                return OperationResult.error("2人桌只能容纳 1-2 人，当前输入：" + additionalPeople + "人");
+            } else if (actualCapacity == 4 && (additionalPeople < 1 || additionalPeople > 4)) {
+                return OperationResult.error("4人桌只能容纳 1-4 人，当前输入：" + additionalPeople + "人");
+            }
+            // 🔧 6人桌新入座：人数必须在 4-6 之间
+            else if (actualCapacity == 6 && (additionalPeople < 4 || additionalPeople > 6)) {
+                return OperationResult.error("6人桌只能容纳 4-6 人，当前输入：" + additionalPeople + "人\n" +
+                        "3人及以下请使用2人桌或4人桌");
+            }
+        }
 
         // ===== 场景 1: 空桌 → 创建新顾客组 =====
         if (table.getStatus() == Tables.TableStatus.VACANT) {
-            if (table.getPhysicalCapacity() == 6 && additionalPeople < 4) {
-                return OperationResult.error("3 人或以下的客户不能使用 6 人桌");
+            try {
+                // 🔧 获取下一个叫号
+                Integer callNumber = businessStatusMapper.getNextCallNumber(LocalDate.now());
+                if (callNumber == null) {
+                    callNumber = 1;
+                }
+
+                // 创建新顾客组
+                CustomerGroup newGroup = new CustomerGroup(callNumber, additionalPeople);
+                newGroup.setAssigned(true);
+                newGroup.setStartTime(LocalDateTime.now());
+                newGroup.setTableId(table.getTableId());
+
+                // 保存顾客组（MyBatis 自动回填 group_id）
+                int saved = customerGroupMapper.save(newGroup);
+                if (saved == 0 || newGroup.getGroup_id() <= 0) {
+                    return OperationResult.error("顾客组保存失败，请重试");
+                }
+
+                // 同步到内存缓存
+                customerGroupMap.put(newGroup.getGroup_id(), newGroup);
+
+                // 更新餐桌状态（内存）
+                table.setCurrentGroupId(newGroup.getGroup_id());
+                table.setStatus(Tables.TableStatus.OCCUPIED);
+                table.setActualSeats(additionalPeople);
+                table.setStartTime(LocalDateTime.now());
+
+                // 持久化到数据库
+                int tableUpdated = tablesMapper.update(table);
+                if (tableUpdated == 0) {
+                    return OperationResult.error("餐桌状态更新失败");
+                }
+
+                // 更新业务状态
+                businessStatusMapper.incrementNextCallNumber(LocalDate.now());
+                businessStatusMapper.incrementDailyTotalCustomers(additionalPeople, LocalDate.now());
+
+                // 🔧 刷新内存缓存
+                refreshTableCache();
+
+                System.out.println("✅ 新顾客组入座成功: 餐桌#" + table.getDisplayId() +
+                        ", 顾客组#" + newGroup.getGroup_id() +
+                        ", 人数:" + additionalPeople);
+
+                return OperationResult.success(true);
+
+            } catch (Exception e) {
+                System.err.println("❌ 创建新顾客组失败: " + e.getMessage());
+                e.printStackTrace();
+                return OperationResult.error("系统异常: " + e.getMessage());
             }
-
-            //  直接调用 Mapper，无需 conn
-            Integer callNumber = businessStatusMapper.getNextCallNumber(LocalDate.now());
-
-            CustomerGroup newGroup = new CustomerGroup(callNumber, additionalPeople);
-            newGroup.setAssigned(true);
-            newGroup.setStartTime(LocalDateTime.now());
-            newGroup.setTableId(table.getTableId());
-
-            //  保存后自动回填 group_id（MyBatis useGeneratedKeys）
-            customerGroupMapper.save(newGroup);
-
-            if (newGroup.getGroup_id() <= 0) {  //  int 类型，用 <= 0 判断
-                return OperationResult.error("顾客组 ID 生成失败，请重试");
-            }
-
-            // 同步到内存缓存
-            customerGroupMap.put(newGroup.getGroup_id(), newGroup);
-
-            // 更新餐桌对象
-            table.setCurrentGroupId(newGroup.getGroup_id());
-            table.setStatus(Tables.TableStatus.OCCUPIED);
-            table.setActualSeats(additionalPeople);
-            table.setStartTime(LocalDateTime.now());
-
-            //  直接调用 Mapper 更新
-            tablesMapper.update(table);
-
-            //  递增业务状态
-            businessStatusMapper.incrementNextCallNumber(LocalDate.now());
-            businessStatusMapper.incrementDailyTotalCustomers(additionalPeople, LocalDate.now());
-
-            return OperationResult.success(true);
         }
 
         // ===== 场景 2: 已占桌 → 追加人数 =====
         if (table.getStatus() != Tables.TableStatus.OCCUPIED) {
-            return OperationResult.error("餐桌 #" + table.getDisplayId() + " 状态异常");
+            return OperationResult.error("餐桌 #" + table.getDisplayId() + " 状态异常（" +
+                    table.getStatus().getDisplayName() + "），不能追加顾客");
         }
 
         Integer groupId = table.getCurrentGroupId();
@@ -6016,51 +6275,84 @@ public class RestaurantService {
             return OperationResult.error("餐桌 #" + table.getDisplayId() + " 无有效顾客组 ID");
         }
 
-        //  先从内存缓存获取
+        // 从内存缓存获取顾客组（优先）
         CustomerGroup group = customerGroupMap.get(groupId);
         if (group == null) {
-            //  缓存未命中 → 从 Mapper 加载
-            group = customerGroupMapper.findById(groupId);  //  无需传 conn
+            // 缓存未命中 → 从数据库加载
+            group = customerGroupMapper.findById(groupId);
             if (group == null) {
                 return OperationResult.error("顾客组数据异常（ID=" + groupId + " 不存在）");
             }
-            customerGroupMap.put(groupId, group);  // 同步到缓存
+            customerGroupMap.put(groupId, group);
         }
 
-        int currentSize = group.getGroupSize();  //  用 getter
-        int remainingSeats = table.getPhysicalCapacity() - currentSize;
+        // 🔧【核心计算】验证追加后的总人数
+        int currentSize = group.getGroupSize();
+        int newSize = currentSize + additionalPeople;
+        int physicalCapacity = table.getPhysicalCapacity();
 
-        if (additionalPeople > remainingSeats) {
+        // 🔧【容量验证】追加后总人数不能超过物理容量
+        if (newSize > physicalCapacity) {
             return OperationResult.error(
-                    "追加人数 (" + additionalPeople + ") 超过剩余座位 (" + remainingSeats + ")"
+                    "餐桌 #" + table.getDisplayId() + " 物理容量为 " + physicalCapacity + "人\n" +
+                            "当前已有 " + currentSize + "人，不能再追加 " + additionalPeople + "人\n" +
+                            "剩余座位：" + (physicalCapacity - currentSize) + "人"
             );
         }
 
-        if (table.getPhysicalCapacity() == 6 && (currentSize + additionalPeople) < 4) {
-            return OperationResult.error("3 人或以下的客户不能使用 6 人桌");
+        // 🔧【6人桌特殊规则】3人及以下不能使用6人桌（验证的是最终总人数）
+        if (physicalCapacity == 6 && newSize < 4) {
+            return OperationResult.error(
+                    "6人桌不能容纳 " + newSize + "人！\n" +
+                            "规则：6人桌最少需要4人，追加后总共只有 " + newSize + "人\n" +
+                            "请使用2人桌或4人桌"
+            );
         }
 
-        //  更新内存对象
-        group.setGroupSize(currentSize + additionalPeople);  //  用 setter
-        table.setActualSeats(currentSize + additionalPeople);
+        try {
+            // 更新内存对象
+            group.setGroupSize(newSize);
+            table.setActualSeats(newSize);
 
-        //  持久化到数据库
-        customerGroupMapper.update(group);
-        tablesMapper.update(table);
+            // 持久化到数据库
+            int groupUpdated = customerGroupMapper.update(group);
+            int tableUpdated = tablesMapper.update(table);
 
-        // 🔧 合并桌处理（如果需要）
-        if (table.getTableType() == Tables.TableType.MERGED && table.getMergedWith() != null) {
-            Tables partner = tablesMapper.findByDisplayId(table.getMergedWith());  //  无需 conn
-            if (partner != null) {
-                Tables master = table.getBaseId() <= partner.getBaseId() ? table : partner;
-                master.setActualSeats(currentSize + additionalPeople);
-                tablesMapper.update(master);
+            if (groupUpdated == 0 || tableUpdated == 0) {
+                return OperationResult.error("数据库更新失败");
             }
-        }
 
-        return OperationResult.success(true);
+            // 🔧【新增】更新当日顾客总数（累加追加的人数）
+            businessStatusMapper.incrementDailyTotalCustomers(additionalPeople, LocalDate.now());
+
+            // 🔧 合并桌处理：同步更新伙伴桌的实际入座人数
+            if (table.getTableType() == Tables.TableType.MERGED && table.getMergedWith() != null) {
+                Tables partner = tablesMapper.findByDisplayId(table.getMergedWith());
+                if (partner != null && partner.getStatus() == Tables.TableStatus.OCCUPIED) {
+                    // 确定主桌（base_id 较小的作为主桌）
+                    Tables master = (table.getBaseId() <= partner.getBaseId()) ? table : partner;
+                    master.setActualSeats(newSize);
+                    tablesMapper.update(master);
+                    System.out.println("🔗 合并桌伙伴已同步: #" + partner.getDisplayId());
+                }
+            }
+
+            // 🔧 刷新内存缓存确保一致性
+            refreshTableCache();
+
+            System.out.println("✅ 顾客追加成功: 餐桌#" + table.getDisplayId() +
+                    ", 顾客组#" + group.getGroup_id() +
+                    ", 人数:" + currentSize + " → " + newSize);
+
+            return OperationResult.success(true);
+
+        } catch (Exception e) {
+            System.err.println("❌ 追加顾客失败: " + e.getMessage());
+            e.printStackTrace();
+            return OperationResult.error("系统异常: " + e.getMessage());
+        }
     }
-// RestaurantService.java - 新增只读查询方法
+
     /**
      * 🔧 根据顾客组 ID 查询顾客组（只读，供 Controller 预检查使用）
      */
@@ -6076,6 +6368,167 @@ public class RestaurantService {
 
         // 缓存未命中时查数据库
         return customerGroupMapper.findById(groupId);
+    }
+
+    /**
+     * 🔧 合并两张餐桌并分配给顾客组（@Transactional 版本）
+     *
+     * @param table1      第一张餐桌
+     * @param table2      第二张餐桌
+     * @param peopleCount 顾客组人数
+     * @return true=成功，false=失败
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean assignMergedTables(Tables table1, Tables table2, int peopleCount) throws SQLException {
+        // 1. 確定主桌（编号较小的为主桌）
+        Tables mainTable = table1.getBaseId() <= table2.getBaseId() ? table1 : table2;
+        Tables partnerTable = (mainTable == table1) ? table2 : table1;
+
+        // 2. 創建顧客組（獲取叫號 + 立即遞增）
+        Integer nextCall = businessStatusMapper.getNextCallNumber(LocalDate.now());
+        int callNumber = (nextCall != null) ? nextCall : 1;
+
+        CustomerGroup group = new CustomerGroup(callNumber, peopleCount);
+        group.setStartTime(LocalDateTime.now());
+        group.setAssigned(false);
+
+        // 保存到数据库（生成 group_id）
+        customerGroupMapper.save(group);
+
+        // ✅ 關鍵：保存成功后立即递增叫号
+        businessStatusMapper.incrementNextCallNumber(LocalDate.now());
+
+        // 3. 分配座位（优先填满主桌）
+        int seatsMain = Math.min(peopleCount, mainTable.getCapacity());
+        int seatsPartner = peopleCount - seatsMain;
+
+        // 4. 更新餐桌狀態（调用 Mapper 方法）
+        int updated1 = tablesMapper.updateTableToMergedOccupied(
+                mainTable.getTableId(),
+                partnerTable.getDisplayId(),  // main 指向 partner
+                group.getGroup_id(),
+                seatsMain
+        );
+        int updated2 = tablesMapper.updatePartnerTableToMergedOccupied(
+                partnerTable.getTableId(),
+                mainTable.getDisplayId(),     // partner 指向 main
+                group.getGroup_id(),
+                seatsPartner
+        );
+
+        if (updated1 == 0 || updated2 == 0) {
+            throw new SQLException("更新合并餐桌状态失败");
+        }
+
+        // 5. 更新顧客組分配狀態
+        int groupUpdated = customerGroupMapper.updateAssignmentStatus(
+                group.getGroup_id(),
+                mainTable.getTableId(),  // 关联到主桌
+                true,
+                false
+        );
+        if (groupUpdated == 0) {
+            throw new SQLException("更新顾客组失败");
+        }
+
+        // 6. 同步內存緩存
+        syncMergedTablesToCache(mainTable, partnerTable, group, seatsMain, seatsPartner);
+
+        // 7. 增加當日顧客數
+        businessStatusMapper.incrementDailyTotalCustomers(peopleCount, LocalDate.now());
+
+        System.out.println("🔗 合并餐桌分配成功: #" + mainTable.getDisplayId() +
+                " + #" + partnerTable.getDisplayId() +
+                " → 顾客组 #" + group.getCallNumber() +
+                " (" + peopleCount + "人)");
+
+        return true;
+    }
+
+    /**
+     * 分配聚餐桌（3张或以上6人桌）
+     *
+     * @param groupedTables 聚餐桌列表
+     * @param totalPeople   总人数
+     * @return true=分配成功
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public boolean assignGroupedTables(List<Tables> groupedTables, int totalPeople) {
+        if (groupedTables == null || groupedTables.size() < 3) {
+            throw new IllegalArgumentException("聚餐桌必须至少3张");
+        }
+
+        // 1. 获取主桌（编号最小的桌）
+        Tables mainTable = groupedTables.get(0);
+        String mainTableDisplayId = mainTable.getDisplayId();
+
+        // 2. 构建关联桌号字符串（如 "13,14,15"）
+        List<String> allTableIds = groupedTables.stream()
+                .map(Tables::getDisplayId)
+                .collect(Collectors.toList());
+        String groupWithIds = String.join(",", allTableIds);
+
+        System.out.println("🔧 聚餐桌分配：主桌=" + mainTableDisplayId +
+                "，关联桌=" + groupWithIds + "，总人数=" + totalPeople);
+
+        // 3. 创建顾客组（使用当前叫号）
+        Integer nextCall = businessStatusMapper.getNextCallNumber(LocalDate.now());
+        int callNumber = (nextCall != null) ? nextCall : 1;
+
+        CustomerGroup group = new CustomerGroup(callNumber, totalPeople);
+        group.setStartTime(LocalDateTime.now());
+        group.setAssigned(true);
+        group.setTableId(mainTable.getTableId());  // 关联主桌
+
+        // 保存到数据库
+        customerGroupMapper.save(group);
+        customerGroupMap.put(group.getGroup_id(), group);
+
+        // 4. 批量更新所有聚餐桌状态
+        for (Tables table : groupedTables) {
+            // 4.1 更新数据库：状态→OCCUPIED，类型→GROUPED，设置group_with
+            int updated = tablesMapper.updateTableForGroupedCheckIn(
+                    table.getTableId(),
+                    Tables.TableStatus.OCCUPIED.name(),
+                    group.getGroup_id(),
+                    table.getCapacity(),  // 每桌6人
+                    groupWithIds,
+                    "GROUPED"
+            );
+
+            if (updated == 0) {
+                throw new RuntimeException("更新聚餐桌 #" + table.getDisplayId() + " 状态失败");
+            }
+
+            // 4.2 同步更新内存缓存
+            Tables memoryTable = tableMap.get(table.getDisplayId());
+            if (memoryTable != null) {
+                memoryTable.setStatus(Tables.TableStatus.OCCUPIED);
+                memoryTable.setTableType(Tables.TableType.GROUPED);
+                memoryTable.setGroupWith(groupWithIds);
+                memoryTable.setCurrentGroupId(group.getGroup_id());
+                memoryTable.setCurrentGroup(group);
+                memoryTable.setActualSeats(table.getCapacity());  // 每桌6人
+                memoryTable.setStartTime(LocalDateTime.now());
+                memoryTable.setOrderStatus(Tables.OrderStatus.NO_ORDER);
+            }
+
+            System.out.println("  餐桌 #" + table.getDisplayId() + " 已更新为聚餐桌状态");
+        }
+
+        // 5. 累加当日顾客总数
+        businessStatusMapper.incrementDailyTotalCustomers(totalPeople, LocalDate.now());
+
+        // 6. 递增下一个叫号
+        businessStatusMapper.incrementNextCallNumber(LocalDate.now());
+
+        // 7. 刷新内存缓存
+        refreshTableCache();
+
+        System.out.println("✅ 聚餐桌分配成功：主桌 #" + mainTableDisplayId +
+                "，顾客组 #" + callNumber + "（" + totalPeople + "人）");
+
+        return true;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -6726,6 +7179,62 @@ public class RestaurantService {
         }
 
         return cleanedAny;
+    }
+
+
+    /**
+     * 单日报表查询
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getDailyBusinessReport(String date) {
+        if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            throw new IllegalArgumentException("无效的日期格式，应为 yyyy-MM-dd");
+        }
+        //  MyBatis 自动获取连接、执行SQL、映射结果、释放连接
+        return businessStatusMapper.getDailyReport(date);
+    }
+
+    /**
+     * 日期范围报表查询
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getDateRangeBusinessReport(String startDate, String endDate) {
+        if (startDate == null || endDate == null ||
+                !startDate.matches("\\d{4}-\\d{2}-\\d{2}") ||
+                !endDate.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            throw new IllegalArgumentException("日期格式错误，应为 yyyy-MM-dd");
+        }
+        return businessStatusMapper.getDateRangeReport(startDate, endDate);
+    }
+
+    /**
+     * 季度菜品销售报表
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getQuarterlyDishSalesReport(int year, String quarter, String category) {
+        // 可选：校验 year/quarter 合法性
+        return orderMapper.getQuarterlyDishSalesReport(year, quarter, category);
+    }
+
+    /**
+     * 获取可用的销售年份列表
+     */
+    @Transactional(readOnly = true)
+    public List<String> getAvailableYearsForDishSales() {
+        List<String> years = orderMapper.getAvailableYearsForDishSales();
+        // 🔧 兜底逻辑：如果数据库没有数据，返回当前年份
+        if (years == null || years.isEmpty()) {
+            return Collections.singletonList(String.valueOf(LocalDate.now().getYear()));
+        }
+        return years;
+    }
+
+    /**
+     * 获取取消预约没收定金报表
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getForfeitedDepositsReport(String startDate, String endDate) {
+        return businessStatusMapper.selectForfeitedDeposits(startDate, endDate);
     }
     // ===== 根據 displayId 獲取餐桌 =====
 

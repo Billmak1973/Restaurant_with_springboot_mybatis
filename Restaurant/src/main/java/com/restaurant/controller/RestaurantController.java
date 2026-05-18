@@ -531,6 +531,7 @@ public class RestaurantController {
     }
 
     private void handleShowBusinessReport() {
+        view.showBusinessReportDialog();
     }
 
 
@@ -1942,6 +1943,57 @@ public class RestaurantController {
             return null;
         }
         return service.getTableById(displayId.trim());
+    }
+
+    /**
+     * 获取单日营业报表
+     * @param date 日期（格式：YYYY-MM-DD）
+     * @return 报表数据列表
+     */
+    public List<Map<String, Object>> getDailyBusinessReport(String date) {
+        return service.getDailyBusinessReport(date);
+    }
+
+    /**
+     * 获取日期范围营业报表
+     * @param startDate 起始日期（YYYY-MM-DD）
+     * @param endDate 结束日期（YYYY-MM-DD）
+     * @return 报表数据列表
+     */
+    public List<Map<String, Object>> getDateRangeBusinessReport(String startDate, String endDate) {
+        return service.getDateRangeBusinessReport(startDate, endDate);
+    }
+
+    /**
+     * 获取季度菜品销售报表
+     * @param year 年份
+     * @param quarter 季度（Q1-Q4）
+     * @param category 菜品类别（可选）
+     * @return 销售数据列表，异常时抛出运行时异常
+     */
+    public List<Map<String, Object>> getQuarterlyDishSalesReport(int year, String quarter, String category) {
+        try {
+            return service.getQuarterlyDishSalesReport(year, quarter, category);
+        } catch (Exception e) {
+            System.err.println("控制器获取季度菜品销售报表失败: " + e.getMessage());
+            throw new RuntimeException("获取报表数据失败: " + e.getMessage(), e);
+        }
+    }
+    /**
+     * 获取菜品销售数据中有记录的年份列表
+     *
+     * @return 按降序排列的年份字符串列表（例如["2026", "2025"]）
+     *         无数据或异常时返回包含当前年份的列表
+     */
+    public List<String> getAvailableYearsForDishSales() {
+        return service.getAvailableYearsForDishSales();
+    }
+
+    /**
+     * 获取取消预约没收定金报表
+     */
+    public List<Map<String, Object>> getForfeitedDepositsReport(String startDate, String endDate) {
+        return service.getForfeitedDepositsReport(startDate, endDate);
     }
 
     private void handleOpenOrderSystem() {

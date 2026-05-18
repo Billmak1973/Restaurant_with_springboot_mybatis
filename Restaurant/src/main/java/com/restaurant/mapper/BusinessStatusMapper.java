@@ -15,7 +15,6 @@ public interface BusinessStatusMapper {
 
     Integer getNextCallNumber(@Param("date") LocalDate date);
 
-    int countByDate(@Param("date") LocalDate date);
 
     int incrementNextCallNumber(@Param("date") LocalDate date);
 
@@ -52,4 +51,14 @@ public interface BusinessStatusMapper {
     int incrementDailyCancelledPrepaidAmount(
             @Param("date") java.sql.Date date,
             @Param("amount") Double amount);
+
+    /**
+     * 查询指定日期范围内的没收定金记录
+     * @param startDate 开始日期 (yyyy-MM-dd)
+     * @param endDate   结束日期 (yyyy-MM-dd)
+     * @return 记录列表
+     */
+    List<Map<String, Object>> selectForfeitedDeposits(
+            @Param("startDate") String startDate,
+            @Param("endDate") String endDate);
 }

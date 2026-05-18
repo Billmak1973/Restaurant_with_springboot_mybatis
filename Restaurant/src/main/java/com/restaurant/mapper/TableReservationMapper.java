@@ -14,8 +14,7 @@ public interface TableReservationMapper {
     TableReservation findById(@Param("id") String id);  // 🔧 int → String
     int updateStatus(@Param("id") String id, @Param("status") String status);  // 🔧 int → String
 
-    // 🔧 新增方法
-    TableReservation findByCode(@Param("code") String code);
+
     boolean existsByCode(@Param("code") String code);
     Integer getMaxSequenceToday(@Param("datePrefix") String datePrefix);
 

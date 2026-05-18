@@ -54,58 +54,7 @@
             </choose>
         </foreach>
     </update>
-<!--    <update id="updateExistingOrderItems">-->
-<!--        <foreach collection="items" item="item" separator=";">-->
-<!--            UPDATE order_items oi-->
-<!--            JOIN menu_items mi ON oi.item_id = mi.item_id-->
-<!--            SET-->
-<!--            oi.quantity = oi.quantity + #{item.quantity},-->
-<!--            oi.status = CASE-->
-<!--            WHEN oi.served_quantity = (oi.quantity + #{item.quantity}) THEN 'SERVED'-->
-<!--            WHEN oi.served_quantity > 0 THEN 'PARTIALLY_SERVED'-->
-<!--            ELSE 'UNSERVED'-->
-<!--            END,-->
-<!--            oi.price_at_order = #{item.priceAtOrder}-->
-<!--            WHERE oi.order_id = #{orderId}-->
-<!--            AND mi.item_code = #{item.itemCode}-->
-<!--            &lt;!&ndash;  新增：精确匹配 assigned_table_display_id &ndash;&gt;-->
-<!--            <choose>-->
-<!--                <when test="item.assignedTableDisplayId != null and item.assignedTableDisplayId != ''">-->
-<!--                    AND oi.assigned_table_display_id = #{item.assignedTableDisplayId}-->
-<!--                </when>-->
-<!--                <otherwise>-->
-<!--                    AND oi.assigned_table_display_id IS NULL-->
-<!--                </otherwise>-->
-<!--            </choose>-->
-<!--        </foreach>-->
-<!--    </update>-->
 
-
-    <insert id="insertNewOrderItems">
-        <foreach collection="items" item="item" separator=";">
-            INSERT INTO order_items (
-            order_id,
-            item_id,
-            quantity,
-            served_quantity,
-            status,
-            price_at_order,
-            assigned_table_display_id,
-            quantity_distribution  <!-- 🔧 新增字段 -->
-            )
-            SELECT
-            #{orderId},
-            mi.item_id,
-            #{item.quantity},
-            0,
-            'UNSERVED',
-            #{item.priceAtOrder},
-            #{item.assignedTableDisplayId},
-            #{item.quantityDistribution, jdbcType=VARCHAR}  <!-- 🔧 新增字段 -->
-            FROM menu_items mi
-            WHERE mi.item_code = #{item.itemCode}
-        </foreach>
-    </insert>
 
     <!-- 替代方案：单条插入，由 MyBatis 批量执行 -->
     <insert id="insertNewOrderItemsSingle">
@@ -276,11 +225,6 @@
         </if>
     </select>
 
-    <update id="updateServedQuantityAndStatus">
-        UPDATE order_items
-        SET served_quantity = #{servedQuantity}, status = #{newStatus}
-        WHERE order_id = #{orderId} AND item_id = #{itemId}
-    </update>
 
     <!-- 预约订单专用：使用 PREPARING/PREPARED 状态 -->
     <update id="updateExistingOrderItemsForReservation">
@@ -383,23 +327,6 @@
         ORDER BY oi.order_item_id ASC
     </select>
 
-    <select id="fetchServingStatusByOrderItem" resultType="OrderItemServingStatus">
-        SELECT quantity, served_quantity
-        FROM order_items
-        WHERE order_id = #{orderId} AND item_id = #{itemId}
-        LIMIT 1  <!-- 🔧 添加 LIMIT 1 防止返回多条 -->
-    </select>
-
-    <update id="updatePreparedQuantity">
-        UPDATE order_items
-        SET
-        prepared_quantity = #{preparedQuantity},
-        status = #{newStatus}
-        WHERE order_item_id = #{orderItemId}  <!-- 🔧 新增：精确匹配主键 -->
-        <!-- 下面的条件其实可以保留作为防御性编程，或者去掉，因为 order_item_id 已经唯一了 -->
-        AND order_id = #{orderId}
-        AND item_id = #{itemId}
-    </update>
 
 
     <!--聚餐桌共享菜品模糊匹配查询 -->

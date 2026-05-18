@@ -4,7 +4,6 @@
 <mapper namespace="com.restaurant.mapper.BusinessStatusMapper">
 
     <!-- 1. 插入当日营业状态 (更新版：支持冪等性，避免重複插入報錯) -->
-    <!-- 修改后：动态计算 status_id = 当前最大值 + 1 -->
     <insert id="insertTodayStatus">
         INSERT IGNORE INTO business_status (
         status_id,
@@ -35,12 +34,6 @@
         WHERE business_date = #{date}
     </select>
 
-    <!-- 3. 检查记录是否存在 -->
-    <select id="countByDate" resultType="int">
-        SELECT COUNT(*)
-        FROM business_status
-        WHERE business_date = #{date}
-    </select>
 
     <!-- 4. 递增下一个叫号 -->
     <update id="incrementNextCallNumber">
@@ -87,12 +80,7 @@
         bs.business_date AS date,
         bs.daily_revenue AS revenue,
         bs.daily_total_customers AS customers,
-        (
-        SELECT COUNT(*)
-        FROM table_orders
-        WHERE DATE(order_time) = bs.business_date
-        AND status = 'CHECKED_OUT'
-        ) AS orderCount
+        bs.daily_takeout_count AS takeoutOrderCount
         FROM business_status bs
         WHERE bs.business_date = #{date}
     </select>
@@ -100,16 +88,12 @@
     <!-- 9. 日期范围报表查询 -->
     <select id="getDateRangeReport" resultType="java.util.Map">
         SELECT
-        bs.business_date as report_date,
-        COALESCE(COUNT(o.order_id), 0) as order_count,
-        bs.daily_revenue as total_revenue,
-        bs.daily_total_customers as total_customers
+        bs.business_date AS report_date,
+        bs.daily_revenue AS revenue,
+        bs.daily_total_customers AS customers,
+        bs.daily_takeout_count AS takeoutOrderCount
         FROM business_status bs
-        LEFT JOIN table_orders o ON
-        DATE(o.order_time) = bs.business_date AND
-        o.status = 'CHECKED_OUT'
         WHERE bs.business_date BETWEEN #{startDate} AND #{endDate}
-        GROUP BY bs.business_date, bs.daily_revenue, bs.daily_total_customers
         ORDER BY bs.business_date
     </select>
 
@@ -126,5 +110,21 @@
         SET daily_cancelled_prepaid_amount = daily_cancelled_prepaid_amount + #{amount}
         WHERE business_date = #{date}
     </update>
+
+    <!-- 查询取消预约没收定金记录 -->
+    <select id="selectForfeitedDeposits" resultType="java.util.Map">
+        SELECT
+        record_id AS "记录ID",
+        reservation_id AS "预约号",
+        customer_name AS "客户姓名",
+        customer_phone AS "客户电话",
+        DATE_FORMAT(reservation_time, '%Y-%m-%d %H:%i') AS "原定预约时间",
+        forfeited_amount AS "没收金额",
+        DATE_FORMAT(cancellation_time, '%Y-%m-%d %H:%i:%s') AS "取消时间",
+        cancellation_reason AS "取消原因"
+        FROM forfeited_deposits
+        WHERE DATE(cancellation_time) BETWEEN #{startDate} AND #{endDate}
+        ORDER BY cancellation_time ASC
+    </select>
 
 </mapper>

@@ -109,17 +109,4 @@
         WHERE item_code = #{itemCode}
     </delete>
 
-    <select id="findByCode" parameterType="string" resultType="MenuItem">
-        SELECT
-        item_id,
-        item_code,
-        name,
-        price,
-        category_id,
-        is_active
-        FROM menu_items
-        WHERE item_code = #{itemCode}
-        LIMIT 1
-    </select>
-
 </mapper>

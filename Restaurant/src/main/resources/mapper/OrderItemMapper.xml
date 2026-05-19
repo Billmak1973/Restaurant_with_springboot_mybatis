@@ -471,12 +471,6 @@
         WHERE order_id = #{orderId}
     </update>
 
-    <!-- 🔧 聚餐桌专用：更新订单项数量 -->
-    <update id="updateQuantityByOrderItemId">
-        UPDATE order_items
-        SET quantity = #{newQuantity}
-        WHERE order_item_id = #{orderItemId}
-    </update>
 
     <!-- 🔧 聚餐桌专用：更新订单项数量 -->
     <update id="updateOrderItemQuantity">

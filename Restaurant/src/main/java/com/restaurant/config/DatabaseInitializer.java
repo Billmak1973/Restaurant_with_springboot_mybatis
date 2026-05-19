@@ -20,7 +20,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 @Component
-@Order(0)
+//1.3. 數據庫結構自動初始化 (CommandLineRunner)
+//技術說明：實現 CommandLineRunner 接口，在 Spring 容器啟動後自動執行數據庫結構初始化（建庫建表），無需手動導入 SQL。
+@Order(0)//確保最高優先級執行
+//@Order(0) 保證了在業務 Bean 初始化前先完成數據庫準備。executeSchemaScript() 會讀取 classpath:db/schema.sql 並執行建表語句，實現“零配置”部署。
 public class DatabaseInitializer implements CommandLineRunner {
 
     private final JdbcTemplate jdbcTemplate;

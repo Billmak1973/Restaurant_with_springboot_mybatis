@@ -33,6 +33,9 @@ public class RestaurantController {
     private final MenuItemService menuItemService;  //  新增注入
     private final OrderService orderService;  //  新增注入
 
+    //1.5. 依賴注入與構造函數綁定
+    //技術說明：使用 Spring 的依賴注入 (DI) 管理 Service 和 Controller 之間的依賴關係，推薦使用構造函數注入而非字段注入。
+    //構造函數注入確保了依賴不可變且易於測試。Spring 容器自動解析參數並實例化 Controller，避免了手動 new 對象導致的 Bean 管理混亂。
     @Autowired
     public RestaurantController(RestaurantService service, MenuItemService menuItemService, OrderService orderService) {
         this.service = service;

@@ -7,7 +7,9 @@
 spring:
   application:
     name: restaurant-system
-
+#1.2 . 外部化配置管理 (application.yml)
+  #技術說明：使用 YAML 格式配置文件管理數據庫連接、MyBatis 設置、日誌級別及自定義數據庫初始化參數，支持環境變量覆蓋。
+  #通過 ${VAR:default} 語法實現了開發環境與生產環境的隔離。hikari 連接池配置確保了數據庫連接的高效管理。db.init 自定義配置專用於數據庫初始化邏輯。
   datasource:
 #    url: jdbc:mysql://localhost:3306/restaurant_sys_db?useSSL=false&serverTimezone=UTC&characterEncoding=utf-8&allowPublicKeyRetrieval=true
     url: jdbc:mysql://localhost:3306/restaurant_sys_db?useSSL=false&serverTimezone=UTC&characterEncoding=utf-8&allowPublicKeyRetrieval=true&allowMultiQueries=true
@@ -22,6 +24,9 @@ spring:
       max-lifetime: 1800000
       pool-name: RestaurantHikariCP
 
+#1.6  MyBatis 集成與 XML 映射
+#技術說明：通過 application.yml 配置 Mapper XML 路徑，使用 XML 文件編寫複雜 SQL，實現 ORM 映射。
+#type-aliases-package 允許在 XML 中直接使用 BusinessStatusMapper 而不是全限定名。XML 分離了 SQL 與 Java 代碼，便於維護複雜查詢（如報表統計）。
 mybatis:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.restaurant.entity
@@ -42,6 +47,9 @@ db:
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:1234}
 
+#1.8  日誌系統配置與分級控制
+#技術說明：使用 Spring Boot 內置的 Logback，通過 application.yml 控制不同包的路徑級別，平衡調試信息與性能。
+#將 mapper 包設置為 WARN 可以避免在生產環境輸出大量 SQL 語句，影響性能。自定義 pattern 確保日誌包含時間戳和線程名，便於排查併發問題。
 logging:
   level:
     root: INFO

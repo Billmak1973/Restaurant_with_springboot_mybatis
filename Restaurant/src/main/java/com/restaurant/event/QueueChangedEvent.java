@@ -8,12 +8,19 @@ import java.util.List;
  * 用于通知前端刷新排队队列显示
  * 🔧 支持指定受影响的餐桌列表（合并桌/聚餐桌精准刷新）
  */
+//5.1. Spring 事件驅動架構 (ApplicationEvent & Publisher)
+//技術說明：利用 Spring 內置的事件發布機制，將 Service 層的狀態變更（如隊列變動、餐桌分配）抽象為事件對象，實現業務邏輯與 UI 刷新的徹底解耦。
+    //事件機制避免了 Service 直接持有 View 引用。Service 只負責「發生了什麼」，不關心「誰來響應」，極大提升了模塊的可測試性與擴展性。
+//6.事件驅動與異步通訊模型
+//6.1 Spring ApplicationEvent 自定義事件定義
+//技術說明：繼承 Spring 的 ApplicationEvent 基類，自定義業務事件載體，將業務觸發點與處理邏輯解耦。
+//通過靜態工廠方法（fullRefresh, of, ofTables）封裝事件創建邏輯，提供語義化 API，使業務層發佈事件時意圖清晰、代碼簡潔。
 public class QueueChangedEvent extends ApplicationEvent {
 
     // 🔹 可选：携带变更的队列类型，用于局部刷新
     private final String queueType;  // "2_SEAT" / "4_SEAT" / "6_SEAT" / null(全量刷新)
 
-    // 🔧 新增：受影响的餐桌显示ID列表（用于精准刷新指定餐桌）
+    // 受影响的餐桌显示ID列表（用于精准刷新指定餐桌）
     private final List<String> affectedTableDisplayIds;
 
     /**

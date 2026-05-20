@@ -38,6 +38,9 @@ mybatis:
     # log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 # ===== 新增：数据库初始化专用配置 =====
+# 2.4 外部化數據庫配置 (Externalized Configuration)
+#技術說明：通過 application.yml 和 @Value 註解注入數據庫連接信息，支持環境變量覆蓋，實現開發、測試、生產環境的配置隔離。
+#：這種設計避免了硬編碼敏感信息（如密碼）。生產環境可通過 -DDA_PASSWORD=xxx 或環境變量注入，符合十二因子應用原則（12-Factor App）。
 db:
   init:
     host: ${DB_HOST:localhost}

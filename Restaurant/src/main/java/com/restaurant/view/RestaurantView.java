@@ -157,6 +157,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         tableStatusScrollPane.setBorder(BorderFactory.createTitledBorder("餐桌状态详情"));
 
 // 🔧【修复】先创建 innerSplitPane，再设置组件
+        //7  Swing 複合佈局管理與響應式設計
+        //7.1. Swing 複合佈局管理與響應式設計
+        //技術說明：採用 BorderLayout + GridLayout + BoxLayout + JSplitPane 的組合策略，實現多區域協同與窗口自適應。
+        //通過 JSplitPane 實現用戶可拖拽調整的區域比例，setResizeWeight(0.65) 確保內容區域優先擴展。結合 JScrollPane 的 VERTICAL_SCROLLBAR_AS_NEEDED 策略，即使預約記錄達數百條也能保持界面流暢，體現了「內容優先」的響應式設計思想。
         innerSplitPane = new JSplitPane(//无法解析符号 'innerSplitPane'
                 JSplitPane.VERTICAL_SPLIT,
                 tableStatusScrollPane,
@@ -270,6 +274,24 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
     }
 
     // ===== 事件綁定方法（空實現，後續由Controller填充）=====
+    //5.8 解決 Spring 容器管理的 Bean 如何被 Swing 事件調用的問題
+    //技術說明：Spring 管理的 Bean 通常由框架調用，而 Swing 按鈕點擊是由 AWT 事件隊列觸發的。本項目通過 「事件註冊器模式」+「方法引用橋接」 完美解決了這一痛點。View 提供監聽器註冊方法，Controller 將自身業務方法作為回調傳入，AWT 事件觸發時直接調用 Controller 的方法。
+    //這是本項目架構設計最精妙之處。它避開了「在 Swing 中手動獲取 Spring ApplicationContext」的笨重做法，而是利用 事件監聽器作為橋樑，將 AWT 的 ActionEvent 無縫轉發給 Spring 管理的 Controller 方法。這種設計既保持了 Swing 的事件驅動特性，又完全復用了 Spring 的依賴注入與聲明式事務，是桌面端與現代框架融合的優秀實踐。
+    //// ① View 層暴露註冊方法
+    //public void setAddGroupListener(ActionListener listener) {
+    //    addGroupButton.addActionListener(listener);
+    //}
+    //
+    //// ② Controller 層綁定自身方法（方法引用）
+    //view.setAddGroupListener(this::handleAddGroup);
+    //
+
+    /// / ③ 用戶點擊按鈕 -> AWT 事件隊列 -> 觸發 Controller 的 handleAddGroup
+    //private void handleAddGroup(ActionEvent e) {
+    //    // 直接調用 Spring 管理的 Service
+    //    CustomerGroup group = service.addCustomerGroup(Integer.parseInt(view.getGroupSizeInput()));
+    //    // ...
+    //}
     public void setAddGroupListener(ActionListener listener) {
         addGroupButton.addActionListener(listener);
     }
@@ -322,6 +344,9 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         updateTablesDisplay(tables);
     }
 
+    //7.3 3. Swing 線程安全與 EDT 規範實踐
+    //技術說明：嚴格遵循 Swing 單線程規則，所有 UI 更新通過 SwingUtilities.invokeLater() 在事件調度線程 (EDT) 執行，避免多線程競爭導致的界面卡頓或崩潰
+    //後端 Service 層通過 ApplicationEventPublisher 發佈 QueueChangedEvent，QueueChangeListener 捕獲後再透過 invokeLater 安全轉發至 UI。這種「後端業務線程 → 事件總線 → EDT 更新」的三級橋接，既保證了業務處理的並發性能，又確保了 UI 操作的線程安全。
     public void updateTablesDisplay(List<Tables> tables) {
         SwingUtilities.invokeLater(() -> {
             if (tablesPanel == null) return;
@@ -1899,7 +1924,9 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         }
     }
 
-
+    //7.6. 複雜對話框交互與返回值統一設計
+    //技術說明：通過 Map<String, Object> 統一封裝對話框輸入結果，支持多模式（新建/取消/修改/分配）的預約管理表單。
+    //通過 mode 參數動態切換表單結構，實現「一個對話框支持四種業務場景」。使用 Map 作為通用返回容器，避免定義多個 DTO 類。模態對話框 (setModal(true)) 確保用戶必須完成操作才能繼續，符合業務流程的順序性要求
     public Map<String, Object> showReservationDialog(String mode, Map<String, Object> existingReservation) {
         final String finalMode = (mode == null) ? "CREATE" : mode;
 
@@ -1996,8 +2023,6 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
             // 🔧【關鍵修復】使用標誌位控制是否關閉對話框
             boolean shouldClose = true;
-            //String selectedMode = finalMode;   错误代码：直接使用了方法入口的 finalMode，不会随界面切换改变
-
             //  正确代码：替换为下面这段，实时读取界面上选中的单选框
             String selectedMode = createRadio.isSelected() ? "CREATE" :
                     cancelRadio.isSelected() ? "CANCEL" :
@@ -5899,9 +5924,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
             System.out.println(" 预约列表刷新完成：" + reservations.size() + " 条记录");
 
-            // ═══════════════════════════════════════════════════════════
-            // 🔧【核心新增】根据查询结果自动启停定时器
-            // ═══════════════════════════════════════════════════════════
+            //7.7. Spring 數據綁定與實時刷新機制
+            //技術說明：通過 Controller.setView() 建立前後端連接，結合 javax.swing.Timer 與事件驅動實現數據實時同步。
+            //定時器 (REFRESH_INTERVAL_MS = 600000) 每 10 分鐘自動刷新預約列表，但通過 hasData 判斷智能啟停，避免無意義的輪詢。SwingUtilities.invokeLater 確保數據解析與 UI 更新在 EDT 執行，防止後端查詢阻塞界面響應。
+            // 根据查询结果自动启停定时器
             boolean hasData = !reservations.isEmpty();
             if (hasData) {
                 startRefreshTimer();
@@ -9384,6 +9410,9 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
      *
      * @note 失败时提供CSV备选方案
      */
+    //7.5. Apache POI Excel 導出與智能格式控制
+    //技術說明：使用 Apache POI 將報表數據導出為 .xlsx 文件，並根據列類型自動應用貨幣格式、數字格式與邊框樣式。
+    //通過列名關鍵詞（如「總營業額」「顧客總數」）自動識別列類型，避免硬編碼列索引。導出失敗時提供 CSV 備份方案，增強系統魯棒性。FileOutputStream 配合 try-with-resources 確保資源正確釋放，防止文件鎖死。
     private void exportReportToExcel(JTable table) {
         try {
             // 修复Date类问题 - 明确使用java.util.Date
@@ -9645,6 +9674,9 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
      *
      * @param size 字体大小
      */
+    //7.4 JFreeChart 圖表集成與中文適配方案
+    //技術說明：集成 JFreeChart 庫實現營業數據可視化，並通過字體探測與動態替換解決中文亂碼問題。
+    //通過 canDisplayUpTo() 動態探測系統可用中文字體，實現跨平台兼容（Windows/macOS/Linux）。將字體配置封裝為獨立方法，便於在柱狀圖、餅圖、圖例等多處複用。這種「探測 + 兜底」策略確保了圖表在任何環境下都能正確顯示中文標籤。
     private Font getChineseFont(int size) {
         // 尝试使用系统支持的中文字体
         String[] chineseFonts = {"微软雅黑", "Microsoft YaHei", "宋体", "SimSun", "黑体", "SimHei", "KaiTi", "楷体"};

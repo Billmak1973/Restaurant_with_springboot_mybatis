@@ -12,6 +12,9 @@
     <!-- ===== 批量插入 ===== -->
 
     <!-- 1. addOrderItems -->
+<!--    3.4. <foreach> 批量插入與多語句執行-->
+<!--    技術說明：使用 <foreach> 構建批量 INSERT 或分號分隔的多條 UPDATE 語句，結合 JDBC URL 的 allowMultiQueries=true 實現高性能數據寫入。-->
+<!--    批量插入將多條記錄壓縮為單次網絡往返，顯著提升下單性能。多語句更新依賴 allowMultiQueries=true 配置，避免了在 Java 層遍歷調用帶來的連接池壓力與事務碎片化。-->
     <insert id="addOrderItems">
         INSERT INTO order_items (
         order_id, item_id, quantity, served_quantity,

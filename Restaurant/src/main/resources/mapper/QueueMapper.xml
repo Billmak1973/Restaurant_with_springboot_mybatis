@@ -42,6 +42,9 @@
     <!-- ===== 队列位置管理 ===== -->
 
     <!-- 4. updateQueuePositions（窗口函数重排） -->
+<!--    3.4 窗口函數與隊列重排 (ROW_NUMBER() OVER)-->
+<!--    技術說明：直接利用 MySQL 8.0+ 窗口函數在數據庫層完成排隊位置重計算，避免在內存中加載全量隊列再排序的性能開銷。-->
+<!--    當顧客取消或分配離隊時，傳統做法需 Java 遍歷 List 重新賦值 position。使用 ROW_NUMBER() OVER 可在單條 UPDATE 內原子性完成重排，保證了高併發排隊場景下的數據一致性與執行效率。-->
     <update id="updateQueuePositions">
         UPDATE queues q1
         JOIN (

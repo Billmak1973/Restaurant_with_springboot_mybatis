@@ -441,6 +441,9 @@ public class Tables {
      * @param tableColor 餐桌主体颜色
      * @note 支持合并/拆分/聚餐桌状态，不同容量布局（1-6人）
      */
+    //7.2. 自定義繪圖與餐桌狀態可視化 (Icon 接口)
+    //技術說明：重寫 Icon.paintIcon() 方法，使用 Graphics2D 動態繪製帶椅子狀態的餐桌圖標，實現業務狀態的直觀表達。
+    //將業務狀態（占用人數、餐桌類型）轉化為視覺元素（椅子顏色、佈局），實現「所見即所得」的直觀管理。通過 RenderingHints 啟用抗鋸齒，提升圖標繪製品質。此設計避免了預先渲染大量圖片的內存開銷，實現動態按需繪製。
     public Icon createTableIcon(Color tableColor) {
         int size = 80;
         int chairSize = 15;

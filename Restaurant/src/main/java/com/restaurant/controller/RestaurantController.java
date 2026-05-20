@@ -78,6 +78,9 @@ public class RestaurantController {
         }
     }
 
+    //5.5 ActionListener 綁定與事件分發解耦
+    //技術說明：View 層不直接編寫業務邏輯，而是通過提供 setXxxListener() 方法暴露事件註冊入口。Controller 層在 bindEvents() 中將自身的業務方法（方法引用或 Lambda）綁定到這些入口上，實現「UI 與邏輯徹底解耦」。
+    //這種設計避免了在 JButton.addActionListener() 中直接寫業務代碼的混亂。View 僅負責「收集用戶輸入」並「調用綁定的回調」，Controller 負責「調度 Service」並「更新 UI 狀態」，嚴格遵循單一職責原則（SRP）。
     private void bindEvents() {
         view.updateTableStatusDisplay(service.getAllTables());
         view.setAddGroupListener(e -> handleAddGroup(e));
@@ -94,6 +97,9 @@ public class RestaurantController {
         view.setSelectTableListener(e -> view.showSelectTableDialog());
     }
 
+    //5.6 MVC 模式在 Spring + Swing 混合架構中的變體
+    //傳統 Web MVC 中，View 是 HTML/JSP，由框架自動渲染；而在本系統中，View 是主動渲染的 Swing 窗口。架構變體為：Spring 容器 -> Controller (Spring Bean) -> View (Swing)。Controller 持有 Service 引用（Spring 注入）和 View 引用（手動注入），成為真正的「協調中樞」。
+    //這是一種針對桌面端的 MVC 變體。Controller 作為 Spring Bean 享受事務管理與 DI 便利，同時通過顯式持有的 view 引用完成 UI 狀態同步，完美彌合了框架生命周期與桌面事件循環的鴻溝。
     private void handleAddGroup(ActionEvent e) {
         try {
             // 1. 获取输入

@@ -192,7 +192,10 @@ public class HomePanel extends JPanel {
                 leftPanel,
                 rightPanel
         );
-
+        //7 前端界面交互與可視化實現
+       //7.1. Swing 複雜佈局管理與動態分割
+        //技術說明：採用 JSplitPane、BorderLayout、BoxLayout 等多重嵌套佈局，並通過動態計算分割比例（如 70/30、40/60）實現窗口縮放時的自適應佈局。
+        //Swing 佈局管理器本身不記憶比例，僅記憶像素值。通過 addComponentListener + SwingUtilities.invokeLater 實現動態比例鎖定，解決了傳統 Swing 窗口拉伸時佈局錯亂的痛點。
         // 修改分割比例：左侧70%，右侧30%
         mainSplitPane.setResizeWeight(0.70);      // 左侧占70%
         mainSplitPane.setDividerLocation(0.70);   // 初始分割位置70%
@@ -761,6 +764,9 @@ public class HomePanel extends JPanel {
     }
 
 
+    //7.2 Spring 後端數據 → Swing 實時渲染機制
+    //技術說明：前端不直接持有業務邏輯，而是通過 OrderSystemGUI 作為代理層，調用注入的 Spring @Service 獲取數據。獲取後，通過 EDT (Event Dispatch Thread) 安全機制將數據轉為 HTML 字符串並綁定至 JEditorPane。
+    //這是 Swing 與 Spring 融合的關鍵實踐。後端數據通過 Service 層統一提供，前端通過 SwingUtilities.invokeLater 確保所有 UI 更新嚴格在 EDT 執行，避免 ConcurrentModificationException 或界面卡死。HTML 渲染取代了複雜的 JTable 自定義渲染器，大幅降低開發成本並提升排版靈活性。
     public void refreshTemporaryOrderDisplay() {
         Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
         StringBuilder html = new StringBuilder();

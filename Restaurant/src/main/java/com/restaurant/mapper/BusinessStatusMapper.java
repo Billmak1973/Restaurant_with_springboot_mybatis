@@ -5,7 +5,10 @@ import org.apache.ibatis.annotations.Param;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-
+//第三章：MyBatis 持久層架構與動態 SQL
+//3.1. @Mapper 接口定義與 Spring 自動掃描
+//技術說明：使用 @Mapper 標註數據訪問接口，並通過 @MapperScan 統一註冊到 Spring 容器，實現代理對象的自動生成與依賴注入。
+//@MapperScan 避免了在每個接口上重複添加 @Mapper，提升了代碼整潔度。Spring Boot 啟動時會自動為這些接口創建動態代理，並將它們註冊為 Spring Bean，方便 Service 層通過構造函數注入
 @Mapper
 public interface BusinessStatusMapper {
 

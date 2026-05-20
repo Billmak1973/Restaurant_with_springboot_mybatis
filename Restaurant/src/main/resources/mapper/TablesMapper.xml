@@ -4,6 +4,9 @@
 <mapper namespace="com.restaurant.mapper.TablesMapper">
 
     <!-- 结果映射：数据库字段 → Java 属性 -->
+<!--    3.3. <resultMap> 複雜映射與嵌套枚舉處理-->
+<!--    技術說明：通過 <resultMap> 精確控制數據庫字段到 Java 屬性的映射關係，並使用 javaType 明確指定嵌套枚舉類型的轉換規則。-->
+<!--    分析：雖然全局啟用了 map-underscore-to-camel-case: true，但針對狀態字段（如 status -> TableStatus 枚舉），顯式聲明 javaType 能避免 MyBatis 默認類型處理器解析失敗。這保證了實體層與數據庫層類型的安全對齊。-->
     <resultMap id="TablesResult" type="Tables">
         <id property="table_id" column="table_id"/>
         <result property="displayId" column="display_id"/>

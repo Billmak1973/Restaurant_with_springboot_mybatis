@@ -20,10 +20,18 @@ import java.util.HashSet;
 import java.util.Set;
 
 @Component
-//1.3. 數據庫結構自動初始化 (CommandLineRunner)
-//技術說明：實現 CommandLineRunner 接口，在 Spring 容器啟動後自動執行數據庫結構初始化（建庫建表），無需手動導入 SQL。
+
+//2.3  @Order 註解控制執行優先級 (Execution Priority)
+//技術說明：使用 @Order(0) 註解確保數據庫初始化在所有其他 CommandLineRunner 之前執行，防止業務邏輯因數據庫未準備好而失
 @Order(0)//確保最高優先級執行
 //@Order(0) 保證了在業務 Bean 初始化前先完成數據庫準備。executeSchemaScript() 會讀取 classpath:db/schema.sql 並執行建表語句，實現“零配置”部署。
+//1.3. 數據庫結構自動初始化 (CommandLineRunner)
+//技術說明：實現 CommandLineRunner 接口，在 Spring 容器啟動後自動執行數據庫結構初始化（建庫建表），無需手動導入 SQL。
+
+//2.2. Spring CommandLineRunner 生命周期鉤子 (Lifecycle Hook)
+//技術說明：實現 CommandLineRunner 接口，利用 Spring Boot 應用啟動後的回調機制，在容器完全初始化後自動執行數據庫初始化邏輯。
+//CommandLineRunner 是 Spring Boot 標準的啟動後任務執行接口。將其用於數據庫初始化，確保了業務代碼運行前，基礎數據結構已經就緒，避免了 Table doesn't exist 錯誤。
+//Spring 容器中可能存在多個 CommandLineRunner（如定時任務初始化、緩預熱等）。@Order(0) 保證了數據庫結構創建的原子性和優先級，是系統穩健啟動的關鍵。
 public class DatabaseInitializer implements CommandLineRunner {
 
     private final JdbcTemplate jdbcTemplate;
@@ -69,7 +77,7 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
 
         try {
-            ensureDatabaseExists();
+            ensureDatabaseExists();// 確保庫存在
 
             if (!hasRequiredTables()) {
                 // 表不存在：创建表 + 插入默认数据
@@ -241,6 +249,8 @@ public class DatabaseInitializer implements CommandLineRunner {
     /**
      * 插入默认餐桌数据（仅在首次建表时调用）
      */
+    //2.6. 默認數據種子 (Default Data Seeding)
+    //技術說明：在表結構創建後，自動插入基礎數據（如 15 張默認餐桌、4 個菜單分類），確保系統首次啟動即可使用，無需手動錄入基礎資料。
     private void insertDefaultTables() {
         String sql = "INSERT INTO restaurant_tables " +
                 "(display_id, base_id, capacity, physical_capacity, status, table_type) " +

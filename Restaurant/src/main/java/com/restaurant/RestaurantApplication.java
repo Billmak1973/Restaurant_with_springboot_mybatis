@@ -35,6 +35,10 @@ public class RestaurantApplication {
     @Bean
     // 🔧 新增注入 QueueChangeListener
     //這是 Spring 與 Swing 混合架構的核心。利用 Spring 管理 Controller 和 Service，然後通過 initGui 將視圖層綁定到這些 Bean 上，確保了 MVC 架構在 Spring 容器內的完整性。
+
+    //5.4 Spring Bean 注入 Swing 組件與生命周期整合
+    //技術說明：Spring 容器負責管理 RestaurantController 和 RestaurantService 的生命周期，而 RestaurantView（Swing 主窗口）由開發者手動實例化。通過在 CommandLineRunner 中調用 controller.setView(view)，將 Swing 組件反向注入到 Spring Bean 中，完成生命周期橋接。
+    //這是一種經典的「混合架構適配」策略。Spring 專注於業務組件的管理與事務控制，Swing 專注於 UI 渲染。通過 setView() 建立雙向引用，既保留了 Spring 的 DI 優勢，又兼容了 Swing 的實時渲染需求。
     public CommandLineRunner initGui(RestaurantController controller, QueueChangeListener queueListener) {
         return args -> SwingUtilities.invokeLater(() -> {
             try {

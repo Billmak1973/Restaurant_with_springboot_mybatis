@@ -3,7 +3,12 @@
 -- 說明：專為新建數據庫設計，無欄位遷移 ALTER 語句，支持外賣配送區分
 
 -- ============== 无依赖的表 ==============
+    --2.數據庫結構設計與自動化初始化
+    --2.1. MySQL 引擎與字符集規範 (MySQL Engine & Charset)
+-- 技術說明：所有表結構統一指定 InnoDB 引擎和 utf8mb4 字符集，支持事務處理和完整的 Unicode 字符（包括 emoji 表情），確保數據存儲的穩定性和兼容性。
+    --分析：ENGINE=InnoDB 確保了外鍵約束和事務支持（ACID），對於訂單、結賬等關鍵業務至關重要。utf8mb4 避免了傳統 utf8 無法存儲 emoji 或特殊符號的問題，適合現代應用場景。
 -- 1. 业务状态表
+--2.7 將統計數據與業務訂單分離，避免了每次查詢報表都需 SUM 大量訂單記錄，提升了查詢性能。UNIQUE 約束和 INSERT IGNORE 保證了每日記錄的唯一性。
 CREATE TABLE IF NOT EXISTS business_status (
                                                status_id INT PRIMARY KEY AUTO_INCREMENT COMMENT '業務狀態 ID',
                                                business_date DATE NOT NULL UNIQUE COMMENT '營業日期',
@@ -17,6 +22,9 @@ CREATE TABLE IF NOT EXISTS business_status (
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='營業狀態表';
 
 -- 2. 顾客组表
+--2.5 冪等性表結構創建 (Idempotent Schema Creation)
+--技術說明：使用 CREATE TABLE IF NOT EXISTS 語句，確保腳本多次執行不會報錯，支持系統升級或重啟時的無損初始化。
+--冪等性是自動化運維的核心。無論數據庫是全新的還是已存在的，執行該腳本都能達到相同的最終狀態，無需人工干預判斷表是否存在。
 CREATE TABLE IF NOT EXISTS customer_groups (
                                                group_id INT PRIMARY KEY AUTO_INCREMENT COMMENT '顾客组 ID',
                                                call_number INT NOT NULL UNIQUE COMMENT '排队号码',
@@ -290,6 +298,9 @@ CREATE TABLE IF NOT EXISTS queues (
 -- ============== 循环依赖外键（延迟添加） ==============
 -- 注意：由於 restaurant_tables 和 customer_groups 互相引用，必須在表創建後添加外鍵
 -- 這屬於結構約束，非欄位遷移
+--2.8. 循環依賴外鍵處理 (Circular Dependency Handling)
+--技術說明：針對 restaurant_tables 和 customer_groups 之間的互相引用（餐桌關聯顧客組，顧客組關聯餐桌），採用延遲添加外鍵約束的策略，避免建表時報錯。
+--MySQL 不支持在創建表時直接建立循環外鍵。通過先創建表（無外鍵），再通過 ALTER TABLE 添加約束，巧妙解決了數據完整性與建表順序的矛盾，確保了數據的一致性（如刪除顧客組時自動清空餐桌關聯）
 ALTER TABLE restaurant_tables
     ADD CONSTRAINT fk_current_group
         FOREIGN KEY (current_group_id)

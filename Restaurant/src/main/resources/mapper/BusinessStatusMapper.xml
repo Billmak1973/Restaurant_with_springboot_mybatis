@@ -4,6 +4,8 @@
 <mapper namespace="com.restaurant.mapper.BusinessStatusMapper">
 
     <!-- 1. 插入当日营业状态 (更新版：支持冪等性，避免重複插入報錯) -->
+<!--    2.7. 業務狀態表設計 (Business Status Table Design)-->
+<!--    技術說明：設計 business_status 表記錄每日營業狀態、叫號、營收等統計數據，支持按日期查詢報表，並通過 INSERT IGNORE 確保每日記錄唯一。-->
     <insert id="insertTodayStatus">
         INSERT IGNORE INTO business_status (
         status_id,
@@ -75,6 +77,10 @@
     </update>
 
     <!-- 8. 单日报表查询 -->
+<!--    3.8. 靈活返回值 (resultType="java.util.Map") 與視圖層對接-->
+<!--    技術說明：報表與狀態查詢直接返回 Map<String, Object>，跳過 DTO 創建，適應前端動態列渲染與 JSON 序列化需求。-->
+<!--    營業報表、菜品銷量等場景列數可能隨需求調整。返回 Map 列表使 Service 層無需為每個查詢定義專屬 VO/DTO，View 層（如 JTable 或 JFreeChart）可直接通過 row.get("revenue") 獲取數據，實現了「查詢即展示」的敏捷開發模式。-->
+
     <select id="getDailyReport" resultType="java.util.Map">
         SELECT
         bs.business_date AS date,

@@ -132,6 +132,9 @@ public class RestaurantService {
     // 🔧 数量模式预约缓存：预约号 → 匹配信息
     private final Map<String, ReservationMatchInfo> quantityReservationCache = new ConcurrentHashMap<>();
 
+    //4.2. 構造函數依賴注入 (Constructor DI)
+    //技術說明：採用 Spring 官方推薦的構造函數注入，明確聲明 Service 依賴的 Mapper、事件發布器等組件。
+    //避免了字段注入 @Autowired 帶來的隱式依賴與測試困難。所有依賴在實例化時一次性注入，保證了對象的不可變性與線程安全性，並完美契合 Spring 的 IoC 容器生命週期。
     public RestaurantService(
             ApplicationEventPublisher eventPublisher,
             TablesMapper tablesMapper,
@@ -316,7 +319,9 @@ public class RestaurantService {
         }
     }
 
-
+    //4.4. 內存緩存與數據庫同步策略 (ConcurrentHashMap)
+    //技術說明：為滿足 Swing 界面即時響應需求，Service 層維護一份內存態 tableMap 與 queue 快照，並在事務成功後同步更新。
+    //採用「寫入數據庫 → 刷新內存 → 發佈事件」的三段式同步。ConcurrentHashMap 保證多線程下的讀寫安全，避免 Swing EDT 線程與後端工作線程競爭數據。
     public void refreshTableCache() {
         List<Tables> tables = tablesMapper.findAllTables();
         enrichTablesWithGroups(tables);
@@ -401,7 +406,11 @@ public class RestaurantService {
      * @param groupSize 顾客组人数
      * @return 创建的顾客组，或 null（如果无法添加）
      */
-    @Transactional(rollbackFor = Exception.class)
+    //第四章：服務層業務邏輯與事務管理 (Service Layer & Transaction Management)
+    //4.1. @Transactional 聲明式事務管理
+    //技術說明：使用 Spring 的 @Transactional 註解替代手動 conn.commit()/rollback()，由 Spring AOP 自動管理事務的開啟、提交與回滾。
+    @Transactional(rollbackFor = Exception.class)//標註此方法為事務方法，且當方法內拋出任何 Exception 類型的異常時，強制回滾整個事務。
+    //事務回滾（Transaction Rollback）是指在執行資料庫操作或程式碼邏輯時，若遇到錯誤或異常，將系統狀態恢復到事務開始前的狀態。這能確保資料的一致性與完整性。
     public CustomerGroup addCustomerGroup(int groupSize) {
         // ===== 1. 前置检查 =====
         if (!isOpenForBusiness) {
@@ -522,6 +531,9 @@ public class RestaurantService {
 
         // 第一層：容量完全匹配的空閒主桌
         List<Tables> available = tablesMapper.findAvailableTables(groupSize, "MAIN");
+        //3.7業務狀態機與前置守門員 (State Gatekeeper)
+        //技術說明：嚴格控制實體狀態流轉，防止非法躍遷（如已結帳的訂單再次下單、佔用中的餐桌被強制分配）。
+        //Service 層作為「狀態守門員」，確保所有寫入操作都符合預定義的狀態機（VACANT → OCCUPIED → SETTING_UP → VACANT）。結合 Mapper 層的 WHERE status = 'VACANT' 查詢，實現了業務規則與數據層查詢的雙重防護。
         for (Tables table : available) {
             if (table.getCapacity() == 6 && groupSize < 4) continue; // 3 人以下不能坐 6 人桌
             return table;
@@ -1951,6 +1963,12 @@ public class RestaurantService {
         }
     }
 
+    //3.5. Spring 事件驅動架構 (ApplicationEventPublisher)
+    //技術說明：使用 Spring 內置事件機制解耦 Service 層與 View 層，避免業務層直接持有 UI 組件引用。
+    //通過 TransactionSynchronizationAdapter 確保事件只在事務成功提交後才發送。這防止了因事務回滾導致 UI 誤刷新。QueueChangeListener 捕獲事件後再透過 SwingUtilities.invokeLater 安全更新界面。
+    //5.3. 事務同步與事件發布 (TransactionSynchronizationManager)
+    //技術說明：利用 Spring 的事務同步管理器，註冊回調函數，確保事件僅在數據庫事務成功提交後才發布，防止事務回滾時觸發虛假 UI 更新。
+    //這是企業級應用的標準實踐。如果直接 publishEvent，當後續代碼拋出異常觸發 rollback 時，UI 已經刷新了錯誤數據，導致狀態不一致。afterCommit 保證了「數據落盤」與「界面響應」的原子性。
     @Transactional(rollbackFor = Exception.class)
     public void removeFromQueue(int groupId, String queueType) {
         // ═══════════════════════════════════════════════════════════
@@ -3477,6 +3495,9 @@ public class RestaurantService {
      * @param reservationId      預約號
      * @param selectedDisplayIds 選中的餐桌顯示 ID 列表
      */
+    //4.3. 複雜業務邏輯原子化封裝
+    //技術說明：將涉及多個實體與多表操作的業務流程（如顧客分配、預約取消、結賬）封裝在單一 Service 方法中，確保業務原子性。
+    //分析：Service 層充當「業務編排者」，將底層 Mapper 的 CRUD 呼叫組合成有意義的業務操作。即使中間涉及狀態驗證、規則計算、多表更新，也能在單一事務內安全完成。
     @Transactional(rollbackFor = Exception.class)
     public void assignTablesToReservation(String reservationId, List<String> selectedDisplayIds) {
         // 1. 查詢預約詳情
@@ -3689,7 +3710,7 @@ public class RestaurantService {
                     String[] tableIdArray = idsStr.split(",");
                     tableCount = tableIdArray.length;
 
-                    System.out.println("🔧 聚餐桌预点餐处理：reservationId=" + reservationId +
+                    System.out.println(" 聚餐桌预点餐处理：reservationId=" + reservationId +
                             ", 桌号列表=" + idsStr + ", 桌子数量=" + tableCount);
 
                     for (OrderItem item : orderItems) {
@@ -3750,7 +3771,7 @@ public class RestaurantService {
                                 distributionJson
                         );
                     }
-                    System.out.println("✅ 聚餐桌预点餐菜品分配完成，共更新 " + orderItems.size() + " 个菜品");
+                    System.out.println(" 聚餐桌预点餐菜品分配完成，共更新 " + orderItems.size() + " 个菜品");
                 }
             }
         }
@@ -4198,6 +4219,9 @@ public class RestaurantService {
 
 
     @Transactional(rollbackFor = Exception.class)
+    //4.6精確異常處理與 Fail-Fast 機制
+    //技術說明：採用快速失敗（Fail-Fast）設計，在方法入口或關鍵節點進行嚴格的參數與狀態校驗，無效則立即拋出 IllegalArgumentException 或 IllegalStateException。
+    //提前攔截非法狀態，減少無效的數據庫交互。返回 Map 結構的結果對象，將成功標誌、錯誤訊息、場景標誌（如 preOrderDeleted）統一封裝，方便 Controller 層構建對話框。
     public Map<String, Object> cancelReservation(String reservationId, String cancellationReason) {
         Map<String, Object> result = new HashMap<>();
 

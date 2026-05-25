@@ -94,7 +94,7 @@
     <!-- 9. 日期范围报表查询 -->
     <select id="getDateRangeReport" resultType="java.util.Map">
         SELECT
-        bs.business_date AS report_date,
+        bs.business_date AS date,
         bs.daily_revenue AS revenue,
         bs.daily_total_customers AS customers,
         bs.daily_takeout_count AS takeoutOrderCount

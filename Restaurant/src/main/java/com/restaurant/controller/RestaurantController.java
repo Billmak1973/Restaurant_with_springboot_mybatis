@@ -139,7 +139,6 @@ public class RestaurantController {
                 }
 
                 // 记录日志 + 清空输入 + 刷新视图
-                view.appendToLog(message);
                 view.clearGroupSizeInput();
                 refreshTablesDisplay();
                 view.updateTableStatusDisplay(service.getAllTables());
@@ -147,17 +146,14 @@ public class RestaurantController {
             } else {
                 // 添加失败：餐厅未营业或系统异常
                 view.showError("添加失败：餐厅未营业或系统错误");
-                view.appendToLog("顾客组添加失败 - 人数: " + groupSize);
             }
 
         } catch (NumberFormatException ex) {
             view.showError("请输入有效的人数");
-            view.appendToLog("输入格式错误: '" + view.getGroupSizeInput() + "'");
 
         } catch (Exception ex) {
             ex.printStackTrace();
             view.showError("系统异常：" + ex.getMessage());
-            view.appendToLog("系统异常: " + ex.getClass().getSimpleName() + " - " + ex.getMessage());
         }
     }
 
@@ -208,12 +204,6 @@ public class RestaurantController {
                 refreshTablesDisplay();
                 //如果需要单独更新状态面板
                 view.updateTableStatusDisplay(service.getAllTables());
-
-                //lambda 表达式中使用的变量应为 final 或有效 final
-                view.appendToLog(" 餐桌 #" + displayId +
-                        " 已拆分為: " +
-                        subTables.get(0).getDisplayId() + ", " +
-                        subTables.get(1).getDisplayId());
 
                 JOptionPane.showMessageDialog(view,
                         "餐桌 #" + displayId + " 拆分成功！\n" +
@@ -293,9 +283,6 @@ public class RestaurantController {
                         String subTableNames = subTableDisplayIds.isEmpty() ? "無" :
                                 String.join(", ", subTableDisplayIds);
 
-                        view.appendToLog(" 餐桌 #" + mainTableDisplayId +
-                                " 合併成功，子桌 [" + subTableNames + "] 已恢復");
-
                         JOptionPane.showMessageDialog(view,
                                 "餐桌 #" + mainTableDisplayId + " 合併成功！\n" +
                                         "子桌已恢復為主桌狀態",
@@ -306,13 +293,12 @@ public class RestaurantController {
                 } catch (IllegalArgumentException | IllegalStateException ex) {
                     SwingUtilities.invokeLater(() -> {
                         view.showError("合併失敗: " + ex.getMessage());
-                        view.appendToLog(" 合併失敗: " + ex.getMessage());
+
                     });
                 } catch (Exception ex) {
                     ex.printStackTrace();
                     SwingUtilities.invokeLater(() -> {
                         view.showError("系統錯誤: " + ex.getMessage());
-                        view.appendToLog(" 系統異常: " + ex.getClass().getSimpleName());
                     });
                 }
             }
@@ -340,7 +326,6 @@ public class RestaurantController {
                 SwingUtilities.invokeLater(() -> {
                     refreshTablesDisplay();
                     view.updateTableStatusDisplay(service.getAllTables());
-                    view.appendToLog("✓ 已将餐桌 #" + fromInput + " 的顾客组转移到餐桌 #" + toInput);
                     view.showInfo("换桌成功！");
                 });
             }
@@ -449,11 +434,10 @@ public class RestaurantController {
                 // 1️⃣ 純內存查詢未結賬餐桌（零 SQL，避免 UI 卡頓）
                 List<String> unpaidTables = service.getTablesWithUnpaidOrdersInMemory();
 
-                // 2️⃣ 未結賬訂單提醒（不阻止打烊，僅提示）
+                // 2 未結賬訂單提醒（不阻止打烊，僅提示）
                 if (!unpaidTables.isEmpty()) {
                     boolean confirmed = view.showUnpaidWarningDialog(unpaidTables);
                     if (!confirmed) {
-                        view.appendToLog("✗ 打烊操作已取消");
                         return; // 用戶取消，直接返回
                     }
                 }
@@ -472,7 +456,6 @@ public class RestaurantController {
                 );
 
                 if (confirm != JOptionPane.YES_OPTION) {
-                    view.appendToLog("✗ 打烊操作已取消");
                     return;
                 }
 
@@ -481,10 +464,6 @@ public class RestaurantController {
 
                 // 5️⃣ 更新 UI（僅負責顯示，不處理業務）
                 SwingUtilities.invokeLater(() -> {
-                    view.appendToLog("✓ 餐廳已打烊，停止接待新顧客。");
-                    if (!unpaidTables.isEmpty()) {
-                        view.appendToLog("⚠️ 提醒：未結賬餐桌：" + String.join(", ", unpaidTables));
-                    }
                     view.clearGroupSizeInput();
                     refreshTablesDisplay(); // 刷新餐桌狀態
                     view.setCloseDayButtonText(false); // 按鈕變為「開始營業」
@@ -509,7 +488,6 @@ public class RestaurantController {
                 );
 
                 if (confirm != JOptionPane.YES_OPTION) {
-                    view.appendToLog("✗ 開業操作已取消");
                     return;
                 }
 
@@ -518,7 +496,6 @@ public class RestaurantController {
 
                 // 更新 UI
                 SwingUtilities.invokeLater(() -> {
-                    view.appendToLog("✓ 餐廳重新開始營業");
                     refreshTablesDisplay();
                     view.setCloseDayButtonText(true); // 按鈕變為「結束營業」
                     view.updateBusinessStatusDisplay(true); // 狀態欄變綠
@@ -530,7 +507,6 @@ public class RestaurantController {
             ex.printStackTrace();
             SwingUtilities.invokeLater(() -> {
                 String action = service.isOpenForBusiness() ? "打烊" : "開業";
-                view.appendToLog("❌ " + action + "失敗：" + ex.getMessage());
                 JOptionPane.showMessageDialog(view,
                         action + "失敗：" + ex.getMessage(),
                         "操作錯誤",
@@ -697,7 +673,6 @@ public class RestaurantController {
                     if (partner != null) {
                         refreshSingleTable(partner.getDisplayId());
                     }
-                    view.appendToLog("餐桌 #" + displayId + " 顾客已离店，状态更新为「准备中」");
                     view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
@@ -831,7 +806,6 @@ public class RestaurantController {
                     String tableList = groupedTables.stream()
                             .map(Tables::getDisplayId)
                             .collect(Collectors.joining(","));
-                    view.appendToLog("聚餐桌组 [" + tableList + "] 顾客已离店，状态更新为「准备中」");
                     view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
@@ -895,7 +869,6 @@ public class RestaurantController {
                 service.processCustomerDeparture(displayId);
                 SwingUtilities.invokeLater(() -> {
                     refreshSingleTable(displayId);
-                    view.appendToLog("餐桌 #" + displayId + " 顾客已离店，状态更新为「准备中」");
                     view.updateTableStatusDisplay(service.getAllTables());
                 });
             } catch (Exception e) {
@@ -925,15 +898,14 @@ public class RestaurantController {
                         table.getSubTableSuffix() != null &&
                                 !table.getSubTableSuffix().isEmpty();
 
-                // 🔧【关键2】执行清理（数据库+内存同步更新）
+                // 执行清理（数据库+内存同步更新）
                 service.cleanTable(displayId);
 
-                // 🔧【关键3】刷新界面
+                // 刷新界面
                 refreshSingleTable(displayId);
-                view.appendToLog("餐桌 #" + displayId + " 已清理完成，恢复为空闲状态");
                 view.updateTableStatusDisplay(service.getAllTables());
 
-                // 🔧【关键4】清理后检查合并机会（⚠️ 必须在Controller层执行！）
+                // 清理后检查合并机会（ 必须在Controller层执行！）
                 if (isSubTable) {
                     handleSubTableMergeCheck(displayId);
                 } else {
@@ -1039,15 +1011,6 @@ public class RestaurantController {
                 CustomerGroup newGroup = service.addCustomerGroup(customerCount);
 
                 if (newGroup != null) {
-                    // 3. 根据分配状态给出差异化反馈
-                    if (newGroup.isAssigned()) {
-                        view.appendToLog("✓ 顾客组 #" + newGroup.getCallNumber() +
-                                " (" + customerCount + "人) 已直接入座餐桌 #" +
-                                newGroup.getTableId());
-                    } else {
-                        view.appendToLog("✓ 顾客组 #" + newGroup.getCallNumber() +
-                                " (" + customerCount + "人) 已加入等待队列");
-                    }
                     // 4. 检查并分配等待顾客（触发队列调度）
                     service.checkAndAssignWaitingCustomers();
                 } else {
@@ -1077,7 +1040,6 @@ public class RestaurantController {
 
                     // 执行删除（事务内完成）
                     service.removeFromQueue(targetGroup.getGroup_id(), queueType);
-                    view.appendToLog(" 已删除排队号 #" + callNumber + " 的顾客组");
 
                     // 删除后释放资源，重新检查队列分配
                     service.checkAndAssignWaitingCustomers();
@@ -1099,8 +1061,6 @@ public class RestaurantController {
                     // 执行人数变更
                     int originalSize = targetGroup.getGroupSize();
                     service.updateCustomerGroupSize(targetGroup, customerCount);
-                    view.appendToLog("✏️ 排队号 #" + callNumber + " 人数变更: " +
-                            originalSize + "人 → " + customerCount + "人");
 
                     // 人数变更后重新评估餐桌分配
                     service.checkAndAssignWaitingCustomers();
@@ -1446,7 +1406,6 @@ public class RestaurantController {
                 Map<String, Object> serviceResult = service.createReservation(result);
                 if ((Boolean) serviceResult.get("success")) {
                     view.showInfo(" 预约成功！预约号：" + serviceResult.get("reservationId"));
-                    view.appendToLog("新增预约：" + serviceResult.get("reservationId"));
                     refreshTablesDisplay();
                     view.updateTableStatusDisplay(service.getAllTables());
                     String tableSelectionMode = (String) result.get("tableSelectionMode");
@@ -1489,7 +1448,6 @@ public class RestaurantController {
 
                 // 4️⃣ 成功反馈 + 刷新界面
                 view.showInfo("✅ 餐桌分配成功！\n已锁定：" + String.join(", ", selectedDisplayIds));
-                view.appendToLog("预约 " + reservationId + " 已分配餐桌: " + String.join(",", selectedDisplayIds));
                 refreshTablesDisplay();
 
                 // 可选：刷新预约监控面板
@@ -1533,7 +1491,7 @@ public class RestaurantController {
 
                 // 5 处理返回结果
                 if ((Boolean) cancelResult.get("success")) {
-                    // 🔧【核心修改】优先使用 Service 返回的用户友好消息
+                    // 【核心修改】优先使用 Service 返回的用户友好消息
                     String message = (String) cancelResult.get("userMessage");
 
                     // 🔧 可选：如果需要根据场景自定义更详细的提示，可以覆盖 message
@@ -1544,7 +1502,6 @@ public class RestaurantController {
 
                     // 🔧 显示成功提示（使用 userMessage 或自定义 message）
                     view.showInfo(message);
-                    view.appendToLog("已取消预约：" + reservationId + " | 原因: " + cancellationReason);
 
                     // 🔧 根据需要刷新界面
                     Boolean needRefresh = (Boolean) cancelResult.get("needRefresh");
@@ -1586,7 +1543,6 @@ public class RestaurantController {
 
                 // 4️ 成功反馈 + 刷新界面
                 view.showInfo("✅ 预约修改成功！\n预约号：" + reservationId);
-                view.appendToLog("预约 " + reservationId + " 已修改");
                 refreshTablesDisplay();
 
                 // 刷新预约监控面板
@@ -1606,8 +1562,6 @@ public class RestaurantController {
                             JOptionPane.ERROR_MESSAGE,              // 🔴 错误图标
                             null                                     // 自定义图标（可选）
                     );
-                    // 同时记录到系统日志
-                    view.appendToLog(" 预约修改失败: " + ex.getMessage());
                 });
 
             } catch (Exception ex) {
@@ -1814,7 +1768,6 @@ public class RestaurantController {
 
             // 成功反馈
             view.showInfo(" 餐桌分配成功！\n已锁定：" + String.join(", ", selectedTables));
-            view.appendToLog("预约 " + reservationId + " 已分配餐桌：" + String.join(",", selectedTables));
 
             // 刷新界面
             refreshTablesDisplay();

@@ -117,7 +117,7 @@ public class OrderService {
             Double deliveryFee,
             Double totalAmount,
             List<OrderItem> orderItems,
-            Order.DeliveryStatus deliveryStatus  // 🔧 新增参数
+            Order.DeliveryStatus deliveryStatus  //  新增参数
     ) {
         // ═══════════════════════════════════════════════════════════
         // 🔧【新增】校验 delivery_status 合法性
@@ -171,7 +171,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 校验 delivery_status 合法性
+     *  校验 delivery_status 合法性
      * 规则：仅 DELIVERY 模式允许非空状态，其他必须为 NULL
      */
     private void validateDeliveryStatus(String orderType, String deliveryMethod, Order.DeliveryStatus deliveryStatus) {
@@ -250,7 +250,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 根据 reservation_id 查找活跃订单（预约订单专用）
+     *  根据 reservation_id 查找活跃订单（预约订单专用）
      *
      * @param reservationId 预约号
      * @return 订单对象，不存在返回 null
@@ -264,7 +264,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧【核心修复】根据 served_quantity 和 total_quantity 计算合并后的正确状态
+     * 【核心修复】根据 served_quantity 和 total_quantity 计算合并后的正确状态
      * 4种情况：
      * 1. 预约订单（客人未入座）→ PREPARING/PREPARED
      * 2. 客人已入座 + 菜品未上桌 → PREPARING
@@ -628,7 +628,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 辅助方法：排序餐桌ID（确保 "14,13,15" = "13,14,15"）
+     *  辅助方法：排序餐桌ID（确保 "14,13,15" = "13,14,15"）
      */
     private String sortTableIds(String tableIds) {
         if (tableIds == null || tableIds.isEmpty()) {
@@ -752,7 +752,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 处理【多桌共享菜品】上桌逻辑（聚餐桌专用）
+     *  处理【多桌共享菜品】上桌逻辑（聚餐桌专用）
      * <p>
      * 📋 核心规则：
      * 1. 共享菜品必须按桌号顺序上桌，不能跳过中间桌号
@@ -939,7 +939,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 辅助方法：解析 quantity_distribution JSON 字符串为 Map
+     *  辅助方法：解析 quantity_distribution JSON 字符串为 Map
      * 格式示例：{"13":4,"14":4,"15":3} → Map{"13"=4, "14"=4, "15"=3}
      *
      * @param jsonStr JSON 格式的 distribution 字符串
@@ -977,7 +977,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 处理【单桌分配菜品】上桌逻辑（聚餐桌专用）
+     *  处理【单桌分配菜品】上桌逻辑（聚餐桌专用）
      * 规则：跳过 prepared_quantity 校验，直接累加 served_quantity
      */
     private void handleSingleTableDishServing(OrderItem item, int inputQuantity) {
@@ -1136,7 +1136,7 @@ public class OrderService {
 
 
     /**
-     * 🔧【核心修复】根据 served_quantity 和总数量计算撤销后的正确状态
+     * 【核心修复】根据 served_quantity 和总数量计算撤销后的正确状态
      */
     private String calculateCancelledStatus(int servedQty, int originalQty, int cancelQuantity,
                                             String originalStatus,
@@ -1283,7 +1283,7 @@ public class OrderService {
 
         String originalStatus = orderItemMapper.getItemStatus(orderId, itemId);
 
-        // 🔧【核心修复】处理 PARTIALLY_SERVED 状态的撤销逻辑
+        // 【核心修复】处理 PARTIALLY_SERVED 状态的撤销逻辑
         if ("PARTIALLY_SERVED".equals(originalStatus)) {
             if (shouldCancelServed) {
                 if (cancelQuantity > servedQty) {
@@ -1300,7 +1300,7 @@ public class OrderService {
             }
         }
 
-        // 🔧【核心修复】使用 calculateCancelledStatus 計算新狀態 应为5 个实参，但实际为 7 个
+        // 【核心修复】使用 calculateCancelledStatus 計算新狀態 应为5 个实参，但实际为 7 个
         String newStatus = calculateCancelledStatus(
                 servedQty, totalQty, cancelQuantity, originalStatus,
                 isReservationOrder, isReservationSeated, shouldCancelServed);
@@ -1539,7 +1539,7 @@ public class OrderService {
                 return result;
             }
 
-            // 🔧 ===== 2. 加强结账前状态验证 =====
+            //  ===== 2. 加强结账前状态验证 =====
             String deliveryMethod = order.getDeliveryMethod();
 
             // 先检查是否已结账（最优先）
@@ -1847,7 +1847,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 根据 reservation_id 查询订单明细（预约订单专用）
+     *  根据 reservation_id 查询订单明细（预约订单专用）
      */
     @Transactional(readOnly = true)
     public List<OrderItem> loadFormalOrderItemsByReservationId(String reservationId) {
@@ -1859,7 +1859,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 更新预约订单菜品准备状态（精确到 order_item_id）
+     *  更新预约订单菜品准备状态（精确到 order_item_id）
      *
      * @param reservationId          预约号
      * @param orderItemId            订单项 ID（精确标识）
@@ -2029,7 +2029,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 确认删除预约订单（用户选择"否"时调用）
+     *  确认删除预约订单（用户选择"否"时调用）
      */
     @Transactional
     public Map<String, Object> confirmDeleteReservationOrder(String reservationId, Integer orderId) {
@@ -2065,7 +2065,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 保留預約訂單（用戶選擇"是"時調用）
+     *  保留預約訂單（用戶選擇"是"時調用）
      * 刪除所有菜品後，將訂單狀態改為 NO_ORDER，pre_order 保持為 1
      */
     @Transactional
@@ -2295,7 +2295,7 @@ public class OrderService {
     }
 
     /**
-     * 🔧 將預點餐訂單狀態從 NO_ORDER 升級為 ORDERED
+     *  將預點餐訂單狀態從 NO_ORDER 升級為 ORDERED
      * @param orderId 訂單ID
      * @return true=更新成功，false=訂單不存在或狀態已變更
      */
@@ -2345,10 +2345,6 @@ public class OrderService {
                 orderId = orderMapper.findOrderIdByTableIdAndStatus(mainTable.getTableId(), "NO_ORDER");
             }
         }
-//        if (orderId == null) {
-//            throw new IllegalStateException("餐桌 " + mainTableDisplayId + " 沒有活躍訂單");
-//        }
-
         // ═══════════════════════════════════════════════════════════
         // 🔧【核心修复】步骤 2：查询现有明细 + 构建精确匹配 Map
         // ═══════════════════════════════════════════════════════════
@@ -2525,13 +2521,13 @@ public class OrderService {
     }
 
     /**
-     * 🔧 生成数量分配记录（JSON格式）
+     *  生成数量分配记录（JSON格式）
      *
      * @param itemCode               菜品编号
-     * @param originalQty            🔧 菜品原有数量（合并时=数据库中的值，新增时=0）
-     * @param totalQuantity          🔧 菜品总数量（合并后 = originalQty + 新增数量）
+     * @param originalQty             菜品原有数量（合并时=数据库中的值，新增时=0）
+     * @param totalQuantity           菜品总数量（合并后 = originalQty + 新增数量）
      * @param assignedTableDisplayId 分配的餐桌显示ID（已标准化排序）
-     * @param isMerge                🔧 是否为合并操作（由数据库精确匹配决定）
+     * @param isMerge                 是否为合并操作（由数据库精确匹配决定）
      * @param existingDistribution   现有的 distribution JSON 字符串（合并时传入）
      * @return JSON 字符串，或 null（不需要记录时）
      */
@@ -2645,7 +2641,7 @@ public class OrderService {
 
 
     /**
-     * 🔧 根据 orderItemId 获取菜品总数量（精确查询，不聚合）
+     *  根据 orderItemId 获取菜品总数量（精确查询，不聚合）
      */
     @Transactional(readOnly = true)
     public int getOrderItemQuantityByOrderItemId(Integer orderItemId) {

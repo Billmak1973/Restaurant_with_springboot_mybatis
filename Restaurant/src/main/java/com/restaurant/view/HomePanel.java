@@ -1869,7 +1869,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 新增：处理预约号验证通过后的逻辑
+     *  新增：处理预约号验证通过后的逻辑
      * （复用之前外卖确认成功的逻辑，但去掉格式校验）
      */
     private void handleReservationConfirmed(String reservationId) {
@@ -2487,11 +2487,11 @@ public class HomePanel extends JPanel {
 
             itemsTotal = Math.round(itemsTotal * 100.0) / 100.0;
 
-            // 🔧 调用现有方法（传入 groupedTableIds）
+            //  调用现有方法（传入 groupedTableIds）
             frame.addOrderItemsForGroupedTable(
                     currentTableNumber,      // mainTableDisplayId
                     processedItems,          // 菜品列表
-                    dineInGroupedTableIds    // targetTableIds ⭐ 需要传入
+                    dineInGroupedTableIds    // targetTableIds  需要传入
             );
 
             SwingUtilities.invokeLater(() -> {
@@ -2504,7 +2504,7 @@ public class HomePanel extends JPanel {
                 JOptionPane.showMessageDialog(this, "✅ 堂食聚餐桌订单已提交！", "成功",
                         JOptionPane.INFORMATION_MESSAGE);
             });
-            return;  // 🔑 提前返回
+            return;  //  提前返回
         }
 
 // ═══════════════════════════════════════════════════════════
@@ -3246,7 +3246,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 解析 quantity_distribution JSON 字符串
+     *  解析 quantity_distribution JSON 字符串
      * 支持格式：{"16":4,"17":4,"18":4} 或 {"16": 2, "17": 3}
      *
      * @param jsonStr JSON 字符串
@@ -3279,7 +3279,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 根据菜品编号查询菜品名称
+     *  根据菜品编号查询菜品名称
      * 通过 order_items.item_id → menu_items.item_id 关联查询 name
      *
      * @param itemCode 菜品编号（如 "A1"）
@@ -4789,7 +4789,7 @@ public class HomePanel extends JPanel {
                                     );
 
                                 } else {
-                                    // 🔧 删除所有关联餐桌的菜品：直接物理删除整条记录
+                                    //  删除所有关联餐桌的菜品：直接物理删除整条记录
                                     int currentQty = targetItem.getQuantity();
                                     int currentServedQty = targetItem.getServedQuantity();
 
@@ -5874,7 +5874,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 解析 quantity_distribution JSON 字符串为 Map
+     *  解析 quantity_distribution JSON 字符串为 Map
      * 格式示例：{"13":4,"14":4,"15":3} → Map{"13"=4, "14"=4, "15"=3}
      */
     private Map<String, Integer> parseDistribution(String jsonStr) {
@@ -5906,7 +5906,10 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 格式化 distribution Map 为 JSON 字符串
+     * 将分配数量 Map 转换为 JSON 格式字符串
+     *
+     * @param distribution 餐桌号与分配数量的映射关系（如桌号"13"对应数量4）
+     * @return JSON 字符串（格式示例：{"13":4,"14":4}），若参数为空则返回 null
      */
     private String formatDistribution(Map<String, Integer> distribution) {
         if (distribution == null || distribution.isEmpty()) {
@@ -5914,8 +5917,9 @@ public class HomePanel extends JPanel {
         }
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
+        // 遍历 Map 拼接键值对
         for (Map.Entry<String, Integer> entry : distribution.entrySet()) {
-            if (!first) json.append(",");
+            if (!first) json.append(",");        // 非首个元素前添加逗号分隔符
             json.append("\"").append(entry.getKey()).append("\":").append(entry.getValue());
             first = false;
         }
@@ -5924,25 +5928,32 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 从逗号分隔的桌号列表中移除指定桌号
-     * 示例：输入 "13,14,15,16", "14" → 输出 "13,15,16"
+     * 從逗號分隔的餐桌編號字符串中移除指定的餐桌編號
+     *  示例：输入 "13,14,15,16", "14" → 输出 "13,15,16"
+     * @param tableList 原始逗號分隔的餐桌編號字符串
+     * @param tableIdToRemove 欲移除的餐桌編號
+     * @return 移除指定編號後重新組合的字符串，若原字符串為空或移除後無剩餘編號則返回 null
      */
     private String removeTableFromList(String tableList, String tableIdToRemove) {
         if (tableList == null || tableList.isEmpty()) {
             return null;
         }
-        String[] tables = tableList.split(",");
+        String[] tables = tableList.split(","); // 按逗号拆分字符串
         List<String> result = new ArrayList<>();
-        for (String t : tables) {
-            if (!tableIdToRemove.equals(t.trim())) {
-                result.add(t.trim());
+        for (String t : tables) {// 遍历桌号数组
+            if (!tableIdToRemove.equals(t.trim())) {// 过滤掉指定桌号（自动去除空格）
+                result.add(t.trim());// 收集保留的桌号
             }
         }
-        return result.isEmpty() ? null : String.join(",", result);
+        return result.isEmpty() ? null : String.join(",", result);// 拼接结果或返回null
     }
 
     /**
-     * 🔧 辅助方法：计算撤销后状态
+     * 根据撤销后的新总数量和已上桌数量，计算并返回菜品的最新上菜状态
+     *
+     * @param newQty    撤销后的新总数量
+     * @param servedQty 当前已上桌数量
+     * @return 计算后的菜品状态（UNSERVED / PARTIALLY_SERVED / SERVED）
      */
     private String calculateStatusAfterCancel(int newQty, int servedQty) {
         if (newQty <= 0) return "UNSERVED";
@@ -5951,9 +5962,13 @@ public class HomePanel extends JPanel {
         return "UNSERVED";
     }
 
-    // ═══════════════════════════════════════════════════════════
-// 🔧 辅助方法：检查数组是否包含指定餐桌号
-// ═══════════════════════════════════════════════════════════
+    /**
+     * 检查餐桌编号数组中是否包含指定的目标餐桌编号
+     *
+     * @param tableIds 餐桌编号数组
+     * @param targetId 待查找的目标餐桌编号
+     * @return 如果数组中包含目标编号（忽略前后空格）则返回 true，否则返回 false
+     */
     private boolean containsTable(String[] tableIds, String targetId) {
         for (String tid : tableIds) {
             if (targetId.equals(tid.trim())) {

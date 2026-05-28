@@ -473,9 +473,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         updateButtonBackground(button, table);
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修复】根据餐桌容量决定颜色，支持任意 baseId 扩展
-        // ═══════════════════════════════════════════════════════════
+        // 【核心修复】根据餐桌容量决定颜色，支持任意 baseId 扩展
         Color tableColor = switch (table.getCapacity()) {
             case 1 -> color1Seat;    // 1 人桌獨立顏色
             case 2 -> color2Seat;    // 2人桌 → 浅紫色
@@ -744,7 +742,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     // 编号较小的为主桌
                     queryTableId = (currentNum <= partnerNum) ? table.getDisplayId() : partnerId;
 
-                    System.out.println("🔧 合并桌订单查询：餐桌#" + table.getDisplayId() +
+                    System.out.println(" 合并桌订单查询：餐桌#" + table.getDisplayId() +
                             " → 查询主桌#" + queryTableId);
                 }
 
@@ -765,7 +763,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             }
                         }
 
-                        System.out.println("🔧 聚餐桌订单查询：餐桌#" + table.getDisplayId() +
+                        System.out.println(" 聚餐桌订单查询：餐桌#" + table.getDisplayId() +
                                 " → 查询主桌#" + queryTableId + " (关联桌: " + table.getGroupWith() + ")");
                     }
                 }
@@ -1282,15 +1280,15 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
                 // 2.  查询餐桌的 current_reservation_id 和预付信息
                 Tables table = controller.getTableById(tableNumber);
-                System.out.println(" [DEBUG] 餐桌信息:");
-                System.out.println("   tableNumber: " + tableNumber);
-                System.out.println("   table: " + (table != null ? "存在" : "null"));
-                if (table != null) {
-                    System.out.println("   currentReservationId: " + table.getCurrentReservationId());
-                }
+//                System.out.println(" [DEBUG] 餐桌信息:");
+//                System.out.println("   tableNumber: " + tableNumber);
+//                System.out.println("   table: " + (table != null ? "存在" : "null"));
+//                if (table != null) {
+//                    System.out.println("   currentReservationId: " + table.getCurrentReservationId());
+//                }
                 if (table != null && table.getCurrentReservationId() != null) {
                     String reservationId = table.getCurrentReservationId();
-                    System.out.println("   reservationId: " + reservationId);
+                    //System.out.println("   reservationId: " + reservationId);
 
                     // 通过 reservation_id 查询订单的预付信息
                     Map<String, Object> prepaidInfo = controller.getPrepaidInfoByReservationId(reservationId);
@@ -1304,13 +1302,13 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         if (isPrepaid != null && isPrepaid && prepaidAmount != null && prepaidAmount > 0) {
                             hasPrepaidRef[0] = true;
                             prepaidAmountRef[0] = prepaidAmount;
-                            System.out.println("    检测到预付定金: " + prepaidAmount);
+                         //   System.out.println("    检测到预付定金: " + prepaidAmount);
                         } else {
-                            System.out.println("    没有有效的预付定金");
+                           // System.out.println("    没有有效的预付定金");
                         }
                     }
                 } else {
-                    System.out.println("    餐桌没有关联预约记录");
+                  //  System.out.println("    餐桌没有关联预约记录");
                 }
 
                 // 3. 提取菜品总额
@@ -1319,7 +1317,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     itemsTotalRef[0] = ((Number) itemsTotalObj).doubleValue();
                 }
 
-                final boolean finalHasPrepaid = hasPrepaidRef[0];
+                // [0] 是因为用单元素数组当"可变容器"：Lambda 要求外部变量必须 final，但数组引用 final 时元素仍可修改，[0] 就是取数组里那个唯一元素
+                //hasPrepaidRef[0] 是"可变容器"，值可能变
+                //finalHasPrepaid 是"不可变快照"，保证传给 invokeLater 时值不会中途被改
+                final boolean finalHasPrepaid = hasPrepaidRef[0];// 捕获后台线程计算出的"是否有预付"快照值，供 EDT 线程安全使用
                 final double finalPrepaidAmount = prepaidAmountRef[0];
                 final double finalItemsTotal = itemsTotalRef[0];
 
@@ -2381,9 +2382,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         // 根据模式重建表单面板内容
         rebuildFormPanel(formPanel, mode, idField, nameField, phoneField, timeField, existingReservation);
-        // ═══════════════════════════════════════════════════════════
+
         // 将 formPanel 包装在 JScrollPane 中（支持滚动）
-        // ═══════════════════════════════════════════════════════════
         JScrollPane scrollPane = new JScrollPane(formPanel);
         scrollPane.setBorder(null);  // 去除边框
         scrollPane.getViewport().setBackground(new Color(245, 248, 255));  // 设置背景色
@@ -2431,9 +2431,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             try {
                 if ("CREATE".equals(selectedMode)) {
                     System.out.println(" [EXEC] 进入 CREATE 分支");
-                    // ═══════════════════════════════════════════════════════════
                     // 【步驟1】收集基礎信息（姓名、電話、時間）
-                    // ═══════════════════════════════════════════════════════════
                     String name = nameField.getText().trim();
                     String phone = phoneField.getText().trim();
 
@@ -2501,17 +2499,13 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
                     String reservationTime = dateStr + " " + timeStr;
 
-                    // ═══════════════════════════════════════════════════════════
                     // 【步驟2】判斷餐桌選擇模式
-                    // ═══════════════════════════════════════════════════════════
                     JRadioButton manualModeRadio = (JRadioButton) formPanel.getClientProperty("manualModeRadio");
                     JRadioButton quantityModeRadio = (JRadioButton) formPanel.getClientProperty("quantityModeRadio");
 
                     boolean isManualMode = (manualModeRadio != null && manualModeRadio.isSelected());
 
-                    // ═══════════════════════════════════════════════════════════
                     // 【步驟3】收集餐桌類型 + 1.5小時確認
-                    // ═══════════════════════════════════════════════════════════
                     JRadioButton personalRadio = (JRadioButton) formPanel.getClientProperty("tableTypePersonal");
                     JRadioButton mergedRadio = (JRadioButton) formPanel.getClientProperty("tableTypeMerged");
                     JRadioButton groupRadio = (JRadioButton) formPanel.getClientProperty("tableTypeGroup");
@@ -2529,9 +2523,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     JRadioButton within15hNo = (JRadioButton) formPanel.getClientProperty("within15hNo");
                     boolean within15Hours = (within15hYes != null && within15hYes.isSelected());
 
-                    // ═══════════════════════════════════════════════════════════
                     // 【步驟4】根據模式分別驗證（ 核心修復位置）
-                    // ═══════════════════════════════════════════════════════════
                     List<String> selectedTables = new ArrayList<>();
                     Map<String, Integer> tableConfig = new HashMap<>();
 
@@ -2811,11 +2803,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         }
                     }
 
-                    // ═══════════════════════════════════════════════════════════
                     // 【步驟6】【核心修復】計算桌子總數 + 組裝結果
-                    // ═══════════════════════════════════════════════════════════
-
-                    // 🔧 關鍵修復：從數據計算 tableCount，不再依賴 tableSpinner
+                    //  關鍵修復：從數據計算 tableCount，不再依賴 tableSpinner
                     int totalTableCount;
                     if (isManualMode) {
                         // 手動模式：桌子數量 = 輸入的餐桌號數量
@@ -2873,11 +2862,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         shouldClose = false;
                         return;
                     }
-
-                    // ═══════════════════════════════════════════════════════════
                     // 【新增】餐桌连续性和相邻性验证（聚餐桌/合并桌专用）
-                    // ═══════════════════════════════════════════════════════════
-
                     //  先查询预约详情，获取餐桌类型配置
                     TableReservation reservation = null;
                     if (controller != null) {
@@ -3141,9 +3126,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         }
                     }
 
-                    // ═══════════════════════════════════════════════════════════
                     // 修改預點餐（只能從「否」改成「是」）
-                    // ═══════════════════════════════════════════════════════════
                     JCheckBox checkPreOrder = (JCheckBox) formPanel.getClientProperty("editCheckPreOrder");
                     JRadioButton changeToYesRadio = (JRadioButton) formPanel.getClientProperty("editPreOrderRadio");
                     Boolean currentPreOrder = (Boolean) formPanel.getClientProperty("editCurrentPreOrder");
@@ -3378,7 +3361,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         }
 
                         if (timeFieldComp.isFocusOwner() && lockStatusLabelRef[0] != null) {
-                            // 🔧【关键修复】先格式化时间，再更新到输入框
+                            // 【关键修复】先格式化时间，再更新到输入框
                             String currentTime = timeFieldComp.getText().trim();//获取当前输入
                             String formattedTime = formatTimeToStandard(currentTime);// 格式化为标准格式
 
@@ -3648,7 +3631,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                                 manualTableField.setToolTipText(" 聚餐桌必须选择 3 张或以上的餐桌！");
                                 return;
                             }
-                            // 🔧【新增】验证聚餐桌桌号必须连续
+                            // 【新增】验证聚餐桌桌号必须连续
                             try {
                                 // 1. 将桌号转换为整数数组
                                 int[] tableNumbersInt = new int[tableNumbers.length];
@@ -3703,7 +3686,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                                 }
                             }
 
-                            // 验证3：🔧【核心】必须是左右相邻的桌子（不能上下相邻）
+                            // 验证3：【核心】必须是左右相邻的桌子（不能上下相邻）
                             if (tableNumbers.length == 2) {
                                 try {
                                     // 解析两张桌子的编号
@@ -3831,9 +3814,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             manualTablePanel.add(manualHint, BorderLayout.NORTH);
             manualTablePanel.add(manualTableField, BorderLayout.CENTER);
 
-            // ═══════════════════════════════════════════════════════════
-            // 🔧【模式 B】填写桌子数量面板（完整修复版 - 保留清空逻辑 + 数组引用）
-            // ═══════════════════════════════════════════════════════════
+            
+            // 【模式 B】填写桌子数量面板（完整修复版 - 保留清空逻辑 + 数组引用）
             // final JPanel quantityPanel = new JPanel();
             quantityPanel.setLayout(new BoxLayout(quantityPanel, BoxLayout.Y_AXIS));
             quantityPanel.setBackground(new Color(245, 248, 255));
@@ -3894,14 +3876,14 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
             fourSeatRadio.addActionListener(e -> {
                 if (fourSeatRadio.isSelected()) {
-                    // 🔧 合并桌模式下强制数量为2
+                    //  合并桌模式下强制数量为2
                     if (mergedRadio != null && mergedRadio.isSelected()) {
                         fourSeatQty.setText("2");
                     } else {
                         fourSeatQty.setText("1");
                     }
                     fourSeatQty.requestFocus();
-                    // 🔧【核心】清空其他桌型数量（保留用户要求的代码）
+                    // 【核心】清空其他桌型数量（保留用户要求的代码）
                     if (twoSeatQtyRef[0] != null) twoSeatQtyRef[0].setText("");
                     if (sixSeatQtyRef[0] != null) sixSeatQtyRef[0].setText("");
                 }
@@ -3928,7 +3910,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
             sixSeatRadio.addActionListener(e -> {
                 if (sixSeatRadio.isSelected()) {
-                    // 🔧 合并桌模式下强制数量为2
+                    //  合并桌模式下强制数量为2
                     if (mergedRadio != null && mergedRadio.isSelected()) {
                         sixSeatQty.setText("2");//默認兩張
                     } else if (groupRadio != null && groupRadio.isSelected()) {
@@ -3937,7 +3919,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         sixSeatQty.setText("1");
                     }
                     sixSeatQty.requestFocus();
-                    // 🔧【核心】清空其他桌型数量（保留用户要求的代码）
+                    // 【核心】清空其他桌型数量（保留用户要求的代码）
                     if (twoSeatQtyRef[0] != null) twoSeatQtyRef[0].setText("");
                     if (fourSeatQtyRef[0] != null) fourSeatQtyRef[0].setText("");
                 }
@@ -3950,7 +3932,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             quantityPanel.add(sixSeatPanel);
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【核心】餐桌类型切换监听器（禁用2人桌 + 强制数量 + 清空逻辑）
+            // 【核心】餐桌类型切换监听器（禁用2人桌 + 强制数量 + 清空逻辑）
             // ═══════════════════════════════════════════════════════════
             ActionListener handleTableType = e -> {
                 if (mergedRadio.isSelected()) {
@@ -3959,10 +3941,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     if (!fourSeatRadio.isSelected() && !sixSeatRadio.isSelected()) {
                         fourSeatRadio.setSelected(true);
                     }
-                    // 🔧 强制数量为2（不变灰）
+                    //  强制数量为2（不变灰）
                     fourSeatQty.setText("2");
                     sixSeatQty.setText("2");
-                    // 🔧 清空2人桌数量
+                    //  清空2人桌数量
                     if (twoSeatQtyRef[0] != null) twoSeatQtyRef[0].setText("");
                 } else if (groupRadio.isSelected()) {
                     // 聚餐桌：禁用2人桌和4人桌
@@ -3970,7 +3952,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     twoSeatRadio.setSelected(false);
                     if (twoSeatQtyRef[0] != null) twoSeatQtyRef[0].setText("");
 
-                    // 🔧【核心修复】禁用4人桌并清空
+                    // 【核心修复】禁用4人桌并清空
                     fourSeatRadio.setEnabled(false);
                     fourSeatRadio.setSelected(false);
                     if (fourSeatQtyRef[0] != null) fourSeatQtyRef[0].setText("");
@@ -3982,10 +3964,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 } else {
                     // 个人桌：恢复所有选项
                     twoSeatRadio.setEnabled(true);
-                    fourSeatRadio.setEnabled(true);  // 🔧【关键修复】恢复4人桌
+                    fourSeatRadio.setEnabled(true);  // 【关键修复】恢复4人桌
                     sixSeatRadio.setEnabled(true);
 
-                    // 🔧【关键修复】清空所有数量
+                    // 【关键修复】清空所有数量
                     if (twoSeatQtyRef[0] != null) twoSeatQtyRef[0].setText("");
                     if (fourSeatQtyRef[0] != null) fourSeatQtyRef[0].setText("");
                     if (sixSeatQtyRef[0] != null) sixSeatQtyRef[0].setText("");
@@ -4092,7 +4074,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             formPanel.add(createFormField("備註:", new JScrollPane(notes)));
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧 保存引用供确认按钮使用 這些 putClientProperty 是為 確認按鈕的事件處理邏輯 服務的，用於跨作用域傳遞組件引用，是 Swing 開發中處理動態表單的經典實踐。
+            //  保存引用供确认按钮使用 這些 putClientProperty 是為 確認按鈕的事件處理邏輯 服務的，用於跨作用域傳遞組件引用，是 Swing 開發中處理動態表單的經典實踐。
             //如：  JSpinner dateSpinner = (JSpinner) formPanel.getClientProperty("dateSpinner");
             // ═══════════════════════════════════════════════════════════
             formPanel.putClientProperty("dateSpinner", dateSpinner);// 保存日期选择器引用
@@ -4124,7 +4106,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         //分配模式
         else if ("ASSIGN".equals(mode)) {
-            // 🔧 查询方式选择：预约号 OR 电话
+            //  查询方式选择：预约号 OR 电话
             JPanel queryPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 10));
             queryPanel.setBackground(new Color(245, 248, 255));
             JRadioButton byIdRadio = new JRadioButton("按预约号查询");
@@ -4145,12 +4127,12 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             inputPanel.add(queryLabel);
             idField.setEditable(true);
             idField.setPreferredSize(new Dimension(200, 25));
-            // 🔧【关键修改】如果 existingReservation 不为空，预填预约号
+            // 【关键修改】如果 existingReservation 不为空，预填预约号
             if (existingReservation != null) {
                 String resId = (String) existingReservation.get("reservation_id");
                 if (resId != null && !resId.isEmpty()) {
                     idField.setText(resId);
-                    System.out.println("🔧 ASSIGN 模式：已预填预约号 " + resId);
+                    System.out.println(" ASSIGN 模式：已预填预约号 " + resId);
                 }
             }
             inputPanel.add(idField);
@@ -4170,9 +4152,9 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             formPanel.add(Box.createVerticalStrut(10));
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【修改点1】客人信息区域 - 添加预约号显示字段
+            // 【修改点1】客人信息区域 - 添加预约号显示字段
             // ═══════════════════════════════════════════════════════════
-            JPanel infoPanel = new JPanel(new GridLayout(6, 2, 10, 5));  // 🔧 修改：从 4 行改为 5 行
+            JPanel infoPanel = new JPanel(new GridLayout(6, 2, 10, 5));  //  修改：从 4 行改为 5 行
             infoPanel.setBackground(new Color(255, 255, 255));
             infoPanel.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createTitledBorder(
@@ -4254,13 +4236,13 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             ));
             tableSelectionPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 180));
 
-            // 🔧【关键】动态生成餐桌复选框容器
+            // 【关键】动态生成餐桌复选框容器
             JPanel tablesGrid = new JPanel();
             tablesGrid.setLayout(new GridLayout(0, 3, 10, 10));  // 0行3列，自动扩展
             tablesGrid.setBackground(new Color(255, 255, 255));
             Map<String, JCheckBox> assignTableCheckBoxes = new HashMap<>();
 
-            // 🔧【核心】从数据库获取餐桌列表（通过Controller）
+            // 【核心】从数据库获取餐桌列表（通过Controller）
             if (controller != null) {
                 try {
                     List<Tables> allTables = controller.getAllVacantTables();
@@ -4305,7 +4287,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             formPanel.add(createFormField("", tableSelectionPanel, false));
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【修改点4】查询按钮事件 - 支持模糊查询 + 弹窗选择
+            // 【修改点4】查询按钮事件 - 支持模糊查询 + 弹窗选择
             // ═══════════════════════════════════════════════════════════
             queryBtn.addActionListener(ev -> {
                 String queryValue = idField.getText().trim();
@@ -4341,14 +4323,14 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         results = controller.findReservationsByCode(queryValue);
                     }
 
-                    // 🔧 处理查询结果
+                    //  处理查询结果
                     if (results == null || results.isEmpty()) {
                         showError("未找到匹配的预约记录！\n请检查输入是否正确。");
                         infoReservationId.setText("");
                         return;
                     }
 
-                    // 🔧 如果只有一个结果，直接显示
+                    //  如果只有一个结果，直接显示
                     if (results.size() == 1) {
                         Map<String, Object> reservation = results.get(0);
                         fillReservationInfo(reservation, infoReservationId, infoName,
@@ -4372,7 +4354,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             fillReservationInfo(selectedReservation, infoReservationId, infoName,
                                     infoPhone, infoTime, tableConfigLabel, infoNotes);
 
-                            // 🔧【关键修复】更新输入框为完整预约号
+                            // 【关键修复】更新输入框为完整预约号
                             String fullReservationId = (String) selectedReservation.get("reservation_id");
                             if (fullReservationId != null) {
                                 idField.setText(fullReservationId);
@@ -4409,7 +4391,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     tableConfigLabel.setText("未查询");
                     tableConfigLabel.setForeground(Color.GRAY);
 
-                    // 🔧 清空餐桌复选框
+                    //  清空餐桌复选框
                     for (JCheckBox checkBox : assignTableCheckBoxes.values()) {
                         checkBox.setSelected(false);
                     }
@@ -4418,7 +4400,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     queryLabel.setText("电话号码 *:");
                     idField.setText("");
 
-                    // 🔧 清空所有信息显示
+                    //  清空所有信息显示
                     infoReservationId.setText("");
                     infoName.setText("");
                     infoPhone.setText("");
@@ -4437,7 +4419,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             byPhoneRadio.addActionListener(switchQuery);
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【修改点6】存引用供确认按钮使用 - 添加预约号字段引用
+            // 【修改点6】存引用供确认按钮使用 - 添加预约号字段引用
             // ═══════════════════════════════════════════════════════════
             formPanel.putClientProperty("assignIdField", idField);
             formPanel.putClientProperty("assignInfoReservationId", infoReservationId);  //  新增
@@ -4462,13 +4444,13 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             idField.setPreferredSize(new Dimension(200, 25));
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【关键修改】如果 existingReservation 不为空，预填预约号
+            // 【关键修改】如果 existingReservation 不为空，预填预约号
             // ═══════════════════════════════════════════════════════════
             if (existingReservation != null) {
                 String resId = (String) existingReservation.get("reservation_id");
                 if (resId != null && !resId.isEmpty()) {
                     idField.setText(resId);
-                    System.out.println("🔧 CANCEL 模式：已预填预约号 " + resId);
+                    System.out.println(" CANCEL 模式：已预填预约号 " + resId);
                 }
             }
             formPanel.add(createFormField("预约号 *:", idField));
@@ -4561,12 +4543,12 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 String resId = (String) existingReservation.get("reservation_id");
                 if (resId != null && !resId.isEmpty()) {
                     idField.setText(resId);
-                    System.out.println("🔧 EDIT_TIME 模式：已预填预约号 " + resId);
+                    System.out.println(" EDIT_TIME 模式：已预填预约号 " + resId);
                 }
             }
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【关键修复】先声明显示字段变量（供查询按钮事件使用）
+            // 【关键修复】先声明显示字段变量（供查询按钮事件使用）
             // ═══════════════════════════════════════════════════════════
             JTextField infoReservationId = new JTextField();
             infoReservationId.setEditable(false);
@@ -4642,7 +4624,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     BorderFactory.createEmptyBorder(10, 10, 10, 10)
             ));
 
-            // 🔧【关键】添加预约号显示行（放在第一位）
+            // 【关键】添加预约号显示行（放在第一位）
             infoPanel.add(new JLabel("预约号:"));
             infoPanel.add(infoReservationId);
             infoPanel.add(new JLabel("客人姓名:"));
@@ -4874,7 +4856,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         String incStr = incrementField.getText().trim();
                         double increment = incStr.isEmpty() ? 0.0 : Double.parseDouble(incStr);
                         if (increment >= 0) {
-                            // 🔧【核心修复】获取最新的原定金值
+                            // 【核心修复】获取最新的原定金值
                             Double currentOriginalPrepaid = originalPrepaid;
 
                             // 尝试从 originalLabel 提取最新值（如果查询后更新了）
@@ -5188,7 +5170,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             LocalDateTime reserveTime = LocalDateTime.parse(dateStr + " " + timeStr, formatter);
             long minutes = java.time.Duration.between(LocalDateTime.now(), reserveTime).toMinutes();
 
-            // 🔧 核心邏輯：自動選擇
+            //  核心邏輯：自動選擇
             if (minutes < 0) {
                 // 過去的時間，選擇"否"
                 noRadio.setSelected(true);
@@ -5500,7 +5482,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-        // 🔧 从传入的 formPanel 获取组件引用
+        //  从传入的 formPanel 获取组件引用
         JTextField infoReservationId = (JTextField) formPanel.getClientProperty("editInfoReservationId");
         if (infoReservationId != null) {
             infoReservationId.setText(reservation.getReservationId());
@@ -5528,7 +5510,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             infoConfigLabel.setForeground(Color.BLACK);
         }
 
-        // 🔧 新增：填充预点餐信息
+        //  新增：填充预点餐信息
         JLabel infoPreOrderLabel = (JLabel) formPanel.getClientProperty("editInfoPreOrderLabel");
         if (infoPreOrderLabel != null) {
             Boolean preOrder = reservation.getPreOrder();
@@ -5536,7 +5518,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             infoPreOrderLabel.setForeground(preOrder != null && preOrder ? new Color(0, 128, 0) : new Color(100, 100, 100));
         }
 
-        // 🔧【关键修复】更新原定金显示
+        // 【关键修复】更新原定金显示
         JLabel originalPrepaidLabel = (JLabel) formPanel.getClientProperty("editOriginalPrepaidLabel");
         if (originalPrepaidLabel != null) {
             Double prepaidAmount = reservation.getPrepaidAmount();
@@ -5786,9 +5768,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         tablesGrid.removeAll();// 清空前端餐桌网格容器中的所有旧组件，防止多次点击导致画面叠加
         assignTableCheckBoxes.clear();// 清空内存中的餐桌复选框映射集合，为重新计算和绑定建立干净的数据底座
 
-        // ═══════════════════════════════════════════════════════════
         // 【步骤 1】解析预约配置（桌子数量 + 容量）
-        // ═══════════════════════════════════════════════════════════
         String configDesc = (String) reservation.get("table_config_desc");// 从预约单的 Map 字典中提取出规格描述字符串（例如 "4人桌 x1"）
         String selectionMode = (String) reservation.get("table_selection_mode");
         String groupType = (String) reservation.get("group_type");
@@ -5797,7 +5777,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         int tableCount = 0;
 
         if (configDesc != null && !configDesc.isEmpty()) {
-            // 🔧【修复】同时支持带空格和不带空格的格式
+            // 【修复】同时支持带空格和不带空格的格式
             String normalizedDesc = configDesc.replaceAll("\\s+", "");
 
             if (normalizedDesc.contains("2人桌")) {
@@ -5842,12 +5822,10 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             }
         }
 
-        System.out.println("🔧 分配餐桌 - 配置解析：容量=" + targetCapacity +
+        System.out.println(" 分配餐桌 - 配置解析：容量=" + targetCapacity +
                 "人，数量=" + tableCount + "张，桌型=" + groupType);
 
-        // ═══════════════════════════════════════════════════════════
         // 【步骤 2】根据规则计算允许的容量范围
-        // ═══════════════════════════════════════════════════════════
         boolean allow2Seat = false;
         boolean allow4Seat = false;
         boolean allow6Seat = false;
@@ -5891,10 +5869,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             allow6Seat = true;
             System.out.println("  规则：聚餐桌 → 只允许6人桌");
         }
-
-        // ═══════════════════════════════════════════════════════════
         // 【步骤 3】获取空闲餐桌并应用过滤规则
-        // ═══════════════════════════════════════════════════════════
         if (controller != null) {
             try {
                 List<Tables> allTables = controller.getAllVacantTables();
@@ -5967,9 +5942,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         infoPanel.add(new JLabel("容量:"));
         infoPanel.add(new JLabel(table.getCapacity() + "人"));
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】显示预约入座时间（从 table_reservations 表查询）
-        // ═══════════════════════════════════════════════════════════
+        // 【核心修改】显示预约入座时间（从 table_reservations 表查询）
         String reservationTimeStr = "未设置";
         String rescheduledTimeStr = "";  // 【新增】延迟预约时间
         String reservationId = table.getCurrentReservationId();
@@ -5999,7 +5972,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         infoPanel.add(new JLabel("预约入座时间:"));
         infoPanel.add(new JLabel(reservationTimeStr));
 
-        // 🔧【新增】延迟预约时间行（仅当有延迟时间时添加）
+        // 【新增】延迟预约时间行（仅当有延迟时间时添加）
         if (!rescheduledTimeStr.isEmpty()) {
             JLabel delayLabel = new JLabel("延迟的预约时间:");
             JLabel delayValue = new JLabel(
@@ -6008,11 +5981,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             infoPanel.add(delayLabel);
             infoPanel.add(delayValue);
         }
-        // ═══════════════════════════════════════════════════════════
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增】关联桌号：仅合并桌/聚餐桌显示
-        // ═══════════════════════════════════════════════════════════
+        // 【新增】关联桌号：仅合并桌/聚餐桌显示
         JLabel relatedTableLabel = new JLabel("关联桌号:");
         JLabel relatedTableValue = new JLabel("无");
 
@@ -6187,12 +6157,12 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
                         showInfo(successMsg);
 
-                        // 🔧 刷新界面（通过 Controller）
+                        //  刷新界面（通过 Controller）
                         SwingUtilities.invokeLater(() -> {
                             if (controller != null) {
                                 controller.refreshTablesDisplay();
 
-                                // 🔧【核心修改】只有 releaseTables=true 时才刷新预约列表
+                                // 【核心修改】只有 releaseTables=true 时才刷新预约列表
                                 Boolean releaseTables = (Boolean) delayResult.get("releaseTables");// 提取后端计算的关于是否真正腾空释放了餐桌资源的总闸标志
                                 if (Boolean.TRUE.equals(releaseTables)) {// 若符合释放逻辑
                                     refreshQuantityReservationsLog();
@@ -6200,9 +6170,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                                 }
                             }
                         });
-                        // ═══════════════════════════════════════════════════════════
-                        // 🔧【关键修复】设置返回值 + 关闭主对话框
-                        // ═══════════════════════════════════════════════════════════
+
+                        // 【关键修复】设置返回值 + 关闭主对话框
                         result[0] = "DELAY";  // ← 标记用户选择了"延迟"
                         dialog.dispose();     // ← 关闭主对话框（不是子对话框！）
 
@@ -6241,7 +6210,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             return -1;
         }
 
-        // 2. 🔧 计算有效容量（支持普通桌/合并桌/聚餐桌）
+        // 2.  计算有效容量（支持普通桌/合并桌/聚餐桌）
         int effectiveCapacity = table.getCapacity();
         String tableLabel = "餐桌 #" + displayId;
 
@@ -6253,7 +6222,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 tableLabel = "合并桌 #" + displayId + "+" + partner.getDisplayId();
             }
         }
-        // ── 🔧 情况 2: 聚餐桌（3 张或以上）──
+        // ──  情况 2: 聚餐桌（3 张或以上）──
         else if (table.getTableType() == Tables.TableType.GROUPED && table.getGroupWith() != null) {
             // 解析 group_with 字段（格式："7,8,9"）
             String[] groupIds = table.getGroupWith().split(",");
@@ -6274,7 +6243,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             tableLabel = labelBuilder.toString();
 
             // 【调试日志】确认聚餐桌容量计算
-       //     System.out.println("🔧 聚餐桌容量计算: " + tableLabel + " = " + effectiveCapacity + "人");
+       //     System.out.println(" 聚餐桌容量计算: " + tableLabel + " = " + effectiveCapacity + "人");
         }
 
         // 3. 弹出输入框
@@ -6359,7 +6328,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             resTime = (LocalDateTime) timeObj;// 进行安全的直接类型强转分配
                         }
 
-                        // 🔧【核心】解析延迟时间（如果有）
+                        // 【核心】解析延迟时间（如果有）
                         LocalDateTime rescheduledTime = null;
                         if (rescheduledObj instanceof java.sql.Timestamp) {
                             rescheduledTime = ((java.sql.Timestamp) rescheduledObj).toLocalDateTime();
@@ -6367,11 +6336,11 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             rescheduledTime = (LocalDateTime) rescheduledObj;
                         }
 
-                        // 🔧【四色状态判断逻辑】
+                        // 【四色状态判断逻辑】
                         enum ReservationStatus {EXPIRED, URGENT, DELAYED, NORMAL}
                         ReservationStatus status = ReservationStatus.NORMAL;
 
-                        // 🔧【核心】根据数据库状态 + 延迟时间判断显示状态
+                        // 【核心】根据数据库状态 + 延迟时间判断显示状态
                         if ("DELAYED".equals(statusStr) && rescheduledTime != null) {
                             status = ReservationStatus.DELAYED;  // 🟡 已延迟（优先级最高）
                         } else if (resTime != null) {
@@ -6387,7 +6356,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             }
                         }
 
-                        // 🔧 根据状态设置样式
+                        //  根据状态设置样式
                         Color bgColor, borderColor, circleColor, textColor;
                         String circleSymbol;
 
@@ -6422,7 +6391,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                                 break;
                         }
 
-                        // 🔧【关键】创建面板时传入延迟时间
+                        // 【关键】创建面板时传入延迟时间
                         JPanel reservationPanel = createReservationPanelSeparated(
                                 resId, resTime, rescheduledTime, formatter, status,
                                 bgColor, borderColor, circleColor, textColor, circleSymbol
@@ -6538,8 +6507,8 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 BorderFactory.createMatteBorder(0, 3, 1, 0, borderColor),  // 左侧彩色条 + 底部细线
                 BorderFactory.createEmptyBorder(10, 12, 10, 12)            // 内边距
         ));
-        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 55));  // 🔧 限制最大高度
-        panel.setPreferredSize(new Dimension(0, 55));                 // 🔧 设置首选高度
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 55));  //  限制最大高度
+        panel.setPreferredSize(new Dimension(0, 55));                 //  设置首选高度
         panel.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));  // 默认光标（非手型）
 
         // ── 左侧：状态圆圈 + 文本信息 ──
@@ -6568,7 +6537,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         if (resTime != null) {
             String timeStr;
 
-            // 🔧 如果有延迟时间，显示延迟后的时间（DELAYED 状态）
+            //  如果有延迟时间，显示延迟后的时间（DELAYED 状态）
             if (rescheduledTime != null) {
                 timeStr = rescheduledTime.format(formatter);
             } else {
@@ -6580,16 +6549,16 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             if (status.toString().equals("EXPIRED")) {
                 statusText = " (已過期)";
             } else if (rescheduledTime != null) {
-                statusText = " (已延遲)";  // 🔧 新增延迟标签
+                statusText = " (已延遲)";  //  新增延迟标签
             }
 
             JLabel timeLabel = new JLabel(timeStr + statusText);
 
-            // 🔧 颜色逻辑：EXPIRED=蓝色，DELAYED=橙色，其他=灰色
+            //  颜色逻辑：EXPIRED=蓝色，DELAYED=橙色，其他=灰色
             if (status.toString().equals("EXPIRED")) {
                 timeLabel.setForeground(new Color(33, 150, 243));  // 蓝色
             } else if (rescheduledTime != null) {
-                timeLabel.setForeground(new Color(255, 152, 0));    // 🔧 橙色
+                timeLabel.setForeground(new Color(255, 152, 0));    //  橙色
             } else {
                 timeLabel.setForeground(new Color(120, 120, 120));  // 灰色
             }
@@ -6608,12 +6577,12 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         viewBtn.setBackground(bgColor);
         viewBtn.setFocusPainted(false);
         viewBtn.setBorderPainted(false);
-        viewBtn.setContentAreaFilled(false);  // 🔧 关键：不填充背景
+        viewBtn.setContentAreaFilled(false);  //  关键：不填充背景
         viewBtn.setPreferredSize(new Dimension(95, 35));  //  限制按钮大小
         viewBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));  // 手型光标
         viewBtn.setToolTipText("查看預約詳情");
 
-        // 🔧 按钮悬停效果（仅按钮变色，不影响整行）
+        //  按钮悬停效果（仅按钮变色，不影响整行）
         final Color originalBtnFg = viewBtn.getForeground();
         viewBtn.addMouseListener(new MouseAdapter() {
             @Override
@@ -6629,7 +6598,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             }
         });
 
-        // 🔧 绑定点击事件（只有按钮点击才触发）
+        //  绑定点击事件（只有按钮点击才触发）
         viewBtn.addActionListener(e -> handleReservationClick(resId));
 
         panel.add(viewBtn, BorderLayout.EAST);
@@ -6714,7 +6683,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         String originalTimeStr = reservation.getReservationTime()
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
 
-        // 🔧 检查是否为延迟预约
+        //  检查是否为延迟预约
         if ("DELAYED".equals(reservation.getStatus()) && reservation.getRescheduledTime() != null) {
             // 延迟预约：显示两行时间
             String rescheduledTimeStr = reservation.getRescheduledTime()
@@ -6752,7 +6721,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         if ("CONFIRMED".equals(reservation.getStatus())) {
             statusLabel.setForeground(new Color(0, 128, 0));
         } else if ("DELAYED".equals(reservation.getStatus())) {
-            statusLabel.setForeground(new Color(255, 152, 0));  // 🔧 橙色
+            statusLabel.setForeground(new Color(255, 152, 0));  //  橙色
         } else if ("PRE_CONFIRMED".equals(reservation.getStatus())) {
             statusLabel.setForeground(new Color(30, 144, 255));  // 蓝色
         }
@@ -6768,9 +6737,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         JButton closeBtn = new JButton("关闭");
         closeBtn.addActionListener(e -> dialog.dispose());
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【修改】分配餐桌按钮事件 - 打开分配餐桌对话框
-        // ═══════════════════════════════════════════════════════════
+        // 【修改】分配餐桌按钮事件 - 打开分配餐桌对话框
         // ===== 在 RestaurantView.java 的 showReservationDetailDialog 方法内 =====
         AssignBtn.addActionListener(e -> {
             // 1. 关闭当前详情对话框
@@ -6834,7 +6801,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     Map<String, Object> edits = (Map<String, Object>) result.get("edits");
 
                     if (edits != null && !edits.isEmpty()) {
-                        // 🔧【核心】直接调用 Controller 的专用方法保存（不打开新对话框！）
+                        // 【核心】直接调用 Controller 的专用方法保存（不打开新对话框！）
                         controller.updateReservationDirectly(resId, edits);
 
                         //  修改成功：刷新界面
@@ -6866,9 +6833,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
             }
         });
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增】取消预约按钮事件处理
-        // ═══════════════════════════════════════════════════════════
+        // 【新增】取消预约按钮事件处理
         cancelBtn.addActionListener(e -> {
             // 1 二次确认弹窗（防止误操作）
             int confirm = JOptionPane.showConfirmDialog(
@@ -6894,7 +6859,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 return;  // 用户点击取消输入框，终止操作
             }
 
-            // 3️ 🔧 调用 Controller 执行取消逻辑
+            // 3️  调用 Controller 执行取消逻辑
             try {
                 Map<String, Object> cancelResult = controller.cancelReservation(
                         reservation.getReservationId(),
@@ -6962,7 +6927,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         reasonArea.setWrapStyleWord(true);
         reasonArea.setFont(new Font("Microsoft YaHei", Font.PLAIN, 13));
 
-        // 🔧【新增】设置默认提示文本（灰色，输入后消失）
+        // 【新增】设置默认提示文本（灰色，输入后消失）
         reasonArea.setText("（可选）如留空则默认：顾客主动取消预约");
         reasonArea.setForeground(Color.GRAY);
         reasonArea.addFocusListener(new FocusAdapter() {
@@ -7574,7 +7539,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         JCheckBox shareOption = new JCheckBox("共享餐桌（拼桌）");
         JCheckBox groupedOption = new JCheckBox("聚餐桌（3张或以上）");
 
-        // 🔧【修改】使用 GridLayout 实现 2 行 2 列布局
+        // 【修改】使用 GridLayout 实现 2 行 2 列布局
         JPanel operationPanel = new JPanel(new GridLayout(2, 2, 10, 10));
         operationPanel.add(addGuestsOption);
         operationPanel.add(mergeOption);
@@ -7688,7 +7653,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
         shareOption.addActionListener(e -> {
             if (shareOption.isSelected()) {
-                // 🔧【关键修复】显式启用 2人桌和 4人桌
+                // 【关键修复】显式启用 2人桌和 4人桌
                 // 防止因为 groupedOption 的取消逻辑未及时生效，导致按钮依然变灰
                 twoSeatOption.setEnabled(true);
                 fourSeatOption.setEnabled(true);
@@ -8078,7 +8043,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 }
                 exportDishSalesToExcel(dishTable);
 
-            } else if (selectedIndex == 2) { // 🔧 新增：取消预约统计
+            } else if (selectedIndex == 2) { //  新增：取消预约统计
                 JTable forfeitedTable = getForfeitedTableFromPanel(forfeitedPanel);
                 if (forfeitedTable == null) {
                     JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
@@ -8140,7 +8105,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                     JOptionPane.showMessageDialog(reportDialog, "打印失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
                 }
 
-            } else if (selectedIndex == 2) { // 🔧 新增：取消预约统计
+            } else if (selectedIndex == 2) { //  新增：取消预约统计
                 JTable forfeitedTable = getForfeitedTableFromPanel(forfeitedPanel);
                 if (forfeitedTable == null) {
                     JOptionPane.showMessageDialog(reportDialog, "表格未初始化", "错误", JOptionPane.ERROR_MESSAGE);
@@ -8960,7 +8925,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 // 只计算显示范围内的数据
                 for (int i = 0; i < itemsToDisplay; i++) {
                     Map<String, Object> item = reportData.get(i);
-                    // 🔧 修复：使用 Number 转换而不是直接强制转换
+                    //  修复：使用 Number 转换而不是直接强制转换
                     totalRevenue += ((Number) item.get("total_revenue")).doubleValue();
                     totalQuantity += ((Number) item.get("total_quantity")).intValue();
                 }
@@ -8971,7 +8936,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
                 // 仅显示有意义的切片 - 按销售额排序
                 List<Map<String, Object>> sortedData = new ArrayList<>(reportData.subList(0, itemsToDisplay));
-                // 🔧 修复：排序时也使用 Number 转换
+                //  修复：排序时也使用 Number 转换
                 sortedData.sort((a, b) -> Double.compare(
                         ((Number) b.get("total_revenue")).doubleValue(),
                         ((Number) a.get("total_revenue")).doubleValue()
@@ -8992,7 +8957,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                         itemName = itemName.substring(0, 12) + "...";
                     }
 
-                    // 🔧 修复：使用 Number 转换
+                    //  修复：使用 Number 转换
                     double revenue = ((Number) item.get("total_revenue")).doubleValue();
                     int quantity = ((Number) item.get("total_quantity")).intValue();
 
@@ -9803,7 +9768,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
         );
 
         // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】创建图表后立即设置坐标轴范围
+        // 【核心修改】创建图表后立即设置坐标轴范围
         // ═══════════════════════════════════════════════════════════
         setChartAxisRanges(revenueChart, customersChart);
 
@@ -9847,7 +9812,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
     }
 
     /**
-     * 🔧 新增辅助方法：为双图表设置合理的坐标轴范围
+     *  为双图表设置合理的坐标轴范围
      * 避免数据量少时图表显示异常，提升视觉体验
      *
      * @param revenueChart   营业额图表
@@ -9881,7 +9846,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
     }
 
     /**
-     * 🔧 辅助方法：从数据集获取最大值
+     *  辅助方法：从数据集获取最大值
      *
      * @param dataset 分类数据集
      * @return 最大值，空数据集返回0
@@ -10419,7 +10384,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 headerFont.setBold(true);
                 headerFont.setColor(IndexedColors.WHITE.getIndex());
                 headerStyle.setFont(headerFont);
-                headerStyle.setBorderBottom(BorderStyle.THIN);
+                headerStyle.setBorderBottom(BorderStyle.THIN);// 设置表头单元格的下边框样式为细线，确保表头与数据行之间有清晰的分隔线
                 headerStyle.setBorderTop(BorderStyle.THIN);
                 headerStyle.setBorderLeft(BorderStyle.THIN);
                 headerStyle.setBorderRight(BorderStyle.THIN);
@@ -10468,7 +10433,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                             try {
                                 String cleanValue = cellValue.replaceAll("[^0-9.]", "");
                                 if (!cleanValue.isEmpty()) {
-                                    cell.setCellValue(Double.parseDouble(cleanValue));
+                                    cell.setCellValue(Double.parseDouble(cleanValue));// 将清理并解析后的数值设置为单元格值，确保金额列以数字格式存储而非文本
                                     cell.setCellStyle(currencyStyle);
                                 } else {
                                     cell.setCellValue(cellValue);
@@ -10484,6 +10449,7 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
                 // 自动调整列宽
                 for (int i = 0; i < model.getColumnCount(); i++) {
+                    // 自动调整列宽：基于内容宽度乘以 1.5 倍系数，最大不超过 6000 像素，确保数据完整显示且美观
                     sheet.setColumnWidth(i, Math.min((int) (sheet.getColumnWidth(i) * 1.5), 6000));
                 }
 
@@ -10623,13 +10589,14 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
                 List<Map<String, Object>> data = controller.getForfeitedDepositsReport(startStr, endStr);
 
                 // 清空旧数据
-                tableModel.setRowCount(0);
+                tableModel.setRowCount(0);// 清空表格模型中的所有历史数据，确保新查询结果不会与旧数据混合显示
 
                 double totalAmount = 0.0;
                 int totalCount = 0;
 
                 if (data != null) {
                     for (Map<String, Object> row : data) {
+                        //按表格列顺序组装行数据，从 Map 中提取对应字段值
                         Object[] rowData = {
                                 row.get("记录ID"),
                                 row.get("预约号"),

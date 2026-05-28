@@ -65,6 +65,24 @@ public class HomePanel extends JPanel {
     private JLabel deliveryFeeLabel;     // 配送费
 
 
+    /**
+     * 构造方法：初始化主面板组件及依赖服务
+     *
+     * 功能说明：
+     * 1. 保存外部传入的 GUI 框架、服务层、控制层及菜品服务引用
+     * 2. 调用 initializeUI 构建界面布局与组件
+     * 3. 调用 refreshOrderTypeDisplays 初始化各订单类型列表显示
+     *
+     * @param frame 主窗口引用，用于界面导航与数据交互
+     * @param service 餐厅业务服务层，提供餐桌/订单等数据访问
+     * @param controller 业务控制器，处理订单确认/撤销等核心逻辑
+     * @param menuItemService 菜品服务层，提供菜品信息查询
+     *
+     * 注意事项：
+     * - 所有依赖对象由外部注入，调用方需确保非空
+     * - 界面初始化在构造方法中完成，确保对象创建后即可显示
+     * - 刷新操作在构造末尾执行，保证初始数据与界面同步
+     */
     public HomePanel(OrderSystemGUI frame,
                      RestaurantService service,
                      RestaurantController controller,
@@ -78,6 +96,24 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 设置当前操作的餐桌号并同步更新界面
+     *
+     * 功能说明：
+     * 1. 校验餐桌号参数：空值时设为"未选择"，有效值时去除首尾空格
+     * 2. 更新成员变量 currentTableNumber 存储当前餐桌标识
+     * 3. 同步更新界面标签文本及输入框内容（非"未选择"状态时）
+     * 4. 刷新临时订单和正式订单显示区域，确保数据与当前餐桌一致
+     * 5. 调用 revalidate/repaint 强制重绘界面，响应布局变化
+     *
+     * @param tableNumber 餐桌显示编号（如 "7" 或 "7a"），空值表示未选择餐桌
+     *
+     * 注意事项：
+     * - 餐桌号为空或仅含空白字符时，自动重置为"未选择"状态
+     * - 标签前缀通过 getLabelPrefix 动态获取，确保与订单类型匹配
+     * - 刷新操作可能触发数据查询，调用方需确保线程安全
+     * - 本方法可被外部调用，用于程序化切换当前操作餐桌
+     */
     public void setCurrentTableNumber(String tableNumber) {
         if (tableNumber == null || tableNumber.trim().isEmpty()) {
             this.currentTableNumber = "未选择";
@@ -170,6 +206,24 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 初始化主界面布局
+     *
+     * 功能说明：
+     * 配置主窗口为水平分割布局（左侧 70% 菜单与订单区 | 右侧 30% 订单列表区），并设置动态分割比例保持机制。
+     *
+     * 执行流程：
+     * 1. 设置主布局为 BorderLayout，添加内边距
+     * 2. 创建左侧面板（菜单按钮 + 订单显示 + 操作栏）并设置最小/首选尺寸
+     * 3. 创建右侧面板（堂食/外卖/预约订单列表）
+     * 4. 使用 JSplitPane 水平分割左右面板，初始比例 70/30
+     * 5. 添加组件监听器，窗口缩放时通过 SwingUtilities.invokeLater 动态维持分割比例
+     *
+     * 注意事项：
+     * - 分割比例使用 resizeWeight=0.70 确保左侧优先获得空间
+     * - 三重保障机制（初始设置 + 延迟执行 + 监听回调）确保比例稳定，避免布局错乱
+     * - 所有界面更新操作在 EDT 线程执行，保证 Swing 组件线程安全
+     */
     private void initializeUI() {
         // ===== 主布局：水平分割（左侧70% | 右侧30%）=====
         setLayout(new BorderLayout(10, 10));
@@ -224,6 +278,33 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 创建左侧主面板
+     *
+     * 功能说明：
+     * 构建左侧 70% 区域的内容，包含菜品分类按钮、订单状态标签、临时/正式订单显示区及操作按钮栏。
+     *
+     * 面板结构（从上到下）：
+     * 1. 顶部：4 个彩色分类按钮（特色食物/饮料/小炒/套餐），点击切换对应菜品面板
+     * 2. 中部：
+     *    - 标签栏：显示餐桌号/订单号、菜品总价、配送费、订单总计、订单状态、组合桌信息
+     *    - 订单显示区：左右分栏展示临时订单（待确认）和正式订单（已下单）
+     * 3. 底部：两行操作按钮
+     *    - 第一行：订单类型下拉框、自动生号复选框、标识符输入框、确认按钮
+     *    - 第二行：确认下单/确认上桌/撤销菜品/取消重单/撤销外卖/配送/标记准备等功能按钮
+     *
+     * 核心交互逻辑（订单类型切换监听器）：
+     * - 堂食模式：显示"餐桌号"输入，启用"确认餐桌""确认上桌"，隐藏外卖专属按钮
+     * - 预约模式：显示"预约号"输入，启用"确认预约号""标记准备"，隐藏"确认上桌"和外卖按钮
+     * - 外卖/配送模式：显示"订单号"输入及前缀，启用"自动生号""配送"按钮，隐藏堂食专属按钮
+     * - 动态更新标签前缀、按钮文本、可见性及输入框默认值，确保界面与业务状态同步
+     *
+     * 注意事项：
+     * - 订单类型切换时自动清空临时订单并刷新显示，避免数据混淆
+     * - 自动生号逻辑仅在非勾选状态下生成日期前缀，勾选后调用专用方法生成完整订单号
+     * - 组合桌标签、配送费标签等默认隐藏，仅在对应业务场景下动态显示
+     * - 所有按钮事件绑定在面板创建时完成，确保交互响应及时
+     */
     private JPanel createLeftPanel() {
         JPanel panel = new JPanel(new BorderLayout(0, 10));
 
@@ -329,7 +410,7 @@ public class HomePanel extends JPanel {
         });
         orderTypeCombo.setSelectedItem(OrderType.DINE_IN);
 
-        // ========== 🔧 订单类型变化监听器（核心修改）==========
+        // ==========  订单类型变化监听器（核心修改）==========
         orderTypeCombo.addActionListener(e -> {
             OrderType selectedType = (OrderType) orderTypeCombo.getSelectedItem();
             boolean isDineIn = (selectedType == OrderType.DINE_IN);
@@ -338,12 +419,12 @@ public class HomePanel extends JPanel {
             boolean isReservation = (selectedType == OrderType.RESERVATION);  // 🔧 新增
 
             // 更新标签和按钮文本
-            // 🔧 修改：预约模式也显示"预约号："
+            //  修改：预约模式也显示"预约号："
             fieldLabel.setText(isDineIn ? "餐桌号：" : (isReservation ? "预约号：" : "订单号："));
             tableNumberField.setEditable(true);
             confirmTableBtn.setEnabled(true);
 
-            // 🔧 修改：预约模式按钮显示"确认预约号"
+            //  修改：预约模式按钮显示"确认预约号"
             if (isDineIn) {
                 confirmTableBtn.setText("确认餐桌");
             } else if (isReservation) {
@@ -353,7 +434,7 @@ public class HomePanel extends JPanel {
             }
 
             // 控制复选框可见性
-            // 🔧 修改：只有外卖才显示"自动生号"，预约模式不显示
+            //  修改：只有外卖才显示"自动生号"，预约模式不显示
             boolean isTakeout = (selectedType == OrderType.PICKUP || selectedType == OrderType.DELIVERY);
             generateOrderNumberCheck.setVisible(isTakeout);
 
@@ -369,7 +450,7 @@ public class HomePanel extends JPanel {
             currentTableNumber = "";
             frame.setCurrentTableNumber("");
 
-            // 🔧 修改：只有外卖模式才显示订单号前缀，预约模式不需要
+            //  修改：只有外卖模式才显示订单号前缀，预约模式不需要
             if (isTakeout && !generateOrderNumberCheck.isSelected()) {
                 String prefix = isPickup ? "P" : "D";
                 String dateStr = java.time.LocalDate.now().format(
@@ -381,7 +462,7 @@ public class HomePanel extends JPanel {
             }
 
             // 更新顶部标签
-            // 🔧 修改：预约模式显示"预约号：待确认"
+            //  修改：预约模式显示"预约号：待确认"
             if (isDineIn) {
                 tableNumberLabel.setText("餐桌号：未选择");
             } else if (isReservation) {
@@ -404,7 +485,7 @@ public class HomePanel extends JPanel {
                     confirmServedBtn.setToolTipText("标记菜品已送达餐桌");
                     confirmServedBtn.setVisible(true);
                 } else if (isReservation) {
-                    // 🔧 预约模式：隐藏"确认上桌"按钮（客人还没来）
+                    //  预约模式：隐藏"确认上桌"按钮（客人还没来）
                     confirmServedBtn.setVisible(false);
                 } else {
                     // 外卖模式：显示"制作完成"
@@ -424,7 +505,7 @@ public class HomePanel extends JPanel {
 
             // 在 orderTypeCombo.addActionListener 的末尾添加：
             if (prepareOrderItemBtn != null) {
-                // 🔧 只有预约订单才显示"标记准备"按钮
+                //  只有预约订单才显示"标记准备"按钮
                 prepareOrderItemBtn.setVisible(!isDelivery && !isPickup);
             }
 
@@ -455,7 +536,7 @@ public class HomePanel extends JPanel {
             if (e.getStateChange() == ItemEvent.SELECTED) {
                 generateAndDisplayOrderNumber();
             } else {
-                // 🔧 修改：取消自动生号时，显示订单号前缀而不是清空
+                //  修改：取消自动生号时，显示订单号前缀而不是清空
                 currentTakeoutOrderNumber = null;
 
                 OrderType type = (OrderType) orderTypeCombo.getSelectedItem();
@@ -469,7 +550,7 @@ public class HomePanel extends JPanel {
                     tableNumberLabel.setText("配送订单：待下单");
                 }
 
-                // 🔧 生成带日期的前缀（格式：P-20260308- 或 D-20260308-）
+                //  生成带日期的前缀（格式：P-20260308- 或 D-20260308-）
                 if (!prefix.isEmpty()) {
                     String dateStr = java.time.LocalDate.now().format(
                             java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")
@@ -515,7 +596,7 @@ public class HomePanel extends JPanel {
         deliveryBtn.setFocusPainted(false);
         deliveryBtn.setToolTipText("点击更新订单状态");  // 悬停提示
 
-        // 🔧 新增：标记准备按钮（预约订单专用）
+        //  新增：标记准备按钮（预约订单专用）
         prepareOrderItemBtn = new JButton("🍳 标记准备");
         prepareOrderItemBtn.setBackground(new Color(255, 165, 0));  // 橙色
         prepareOrderItemBtn.setForeground(Color.WHITE);
@@ -527,17 +608,16 @@ public class HomePanel extends JPanel {
         buttonRowPanel.add(confirmServedBtn);
         buttonRowPanel.add(cancelOrderItemBtn);
         buttonRowPanel.add(cancelReorderBtn);
-        buttonRowPanel.add(cancelTakeoutBtn);  //  添加新按钮
+        buttonRowPanel.add(cancelTakeoutBtn);  
         buttonRowPanel.add(deliveryBtn);
-        buttonRowPanel.add(prepareOrderItemBtn);  // 🔧 添加新按钮
-
+        buttonRowPanel.add(prepareOrderItemBtn);  
         bottomPanel.add(topRowPanel);
         bottomPanel.add(Box.createRigidArea(new Dimension(0, 5)));
         bottomPanel.add(buttonRowPanel);
 
         panel.add(bottomPanel, BorderLayout.SOUTH);
 
-        // ========== 🔧 绑定按钮事件 ==========
+        // ==========  绑定按钮事件 ==========
 
         // 确认餐桌/订单号
         confirmTableBtn.addActionListener(new ActionListener() {
@@ -576,7 +656,7 @@ public class HomePanel extends JPanel {
         // 在事件绑定区域添加：
         prepareOrderItemBtn.addActionListener(e -> showPrepareOrderItemDialog());
 
-        // ========== 🔧 事件绑定结束 ==========
+        // ==========  事件绑定结束 ==========
 
         // 初始化编辑器
         tempOrderEditor.setContentType("text/html");
@@ -656,7 +736,7 @@ public class HomePanel extends JPanel {
      * 創建右側面板（3 個訂單列表：堂食、外賣合併、預約）
      */
     private JPanel createRightPanel() {
-        // 🔧 改為 3 行 1 列
+        //  改為 3 行 1 列
         JPanel panel = new JPanel(new GridLayout(3, 1, 10, 10));
         panel.setBorder(new EmptyBorder(10, 10, 10, 10));
 
@@ -664,11 +744,11 @@ public class HomePanel extends JPanel {
         JPanel dineInPanel = createOrderTypePanel("🍽️ 堂食訂單", dineInScrollPane, new Color(255, 200, 200));
         panel.add(dineInPanel);
 
-        // 2. 🔧 外賣訂單面板 (合併自取 + 配送)
+        // 2.  外賣訂單面板 (合併自取 + 配送)
         JPanel takeoutPanel = createOrderTypePanel(" 外賣訂單 (自取 + 配送)", takeoutScrollPane, new Color(200, 255, 255));
         panel.add(takeoutPanel);
 
-        // 3. 🔧 預約訂單面板 (新增 - 暫時顯示佔位符)
+        // 3. 預約訂單面板 (新增 - 暫時顯示佔位符)
         JPanel reservationPanel = createOrderTypePanel(" 預約訂單", reservationScrollPane, new Color(230, 230, 255));
         panel.add(reservationPanel);
 
@@ -677,7 +757,20 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 创建订单类型面板（支持滚动）
+     * 创建订单类型面板容器
+     *
+     * 功能说明：
+     * 为不同订单类型（堂食/外卖/预约）创建带标题边框的滚动面板，统一配置滚动策略和内部编辑器样式。
+     *
+     * @param title 面板标题文本
+     * @param scrollPane 待包装的滚动面板组件
+     * @param bgColor 面板背景颜色
+     * @return 配置完成的 JPanel 容器，可直接添加到主界面
+     *
+     * 注意事项：
+     * - 滚动条策略设为"需要时显示"，避免占用布局空间
+     * - 内部 JEditorPane 自动配置为只读 HTML 模式，支持富文本渲染
+     * - 边框使用复合样式：外层标题边框 + 内层空白边距，提升视觉层次
      */
     private JPanel createOrderTypePanel(String title, JScrollPane scrollPane, Color bgColor) {
         JPanel panel = new JPanel(new BorderLayout());
@@ -708,13 +801,29 @@ public class HomePanel extends JPanel {
             editor.setContentType("text/html");
             editor.setEditable(false);
             editor.setPreferredSize(null);  // 保持自适应
-            editor.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+            editor.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);// 启用显示属性继承：确保 JEditorPane 正确应用字体、颜色等系统显示设置
+
         }
 
         panel.add(scrollPane, BorderLayout.CENTER);
         return panel;
     }
 
+    /**
+     * 创建方形功能按钮
+     *
+     * 功能说明：
+     * 生成固定尺寸（150x150）的功能入口按钮，统一字体、背景色和焦点样式。
+     *
+     * @param text 按钮显示文本
+     * @param bgColor 按钮背景颜色
+     * @return 配置完成的 JButton 实例
+     *
+     * 注意事项：
+     * - 按钮尺寸固定，确保网格布局整齐
+     * - 禁用焦点绘制，避免点击后出现虚线框影响美观
+     * - 字体使用微软雅黑普通 14 号，保证跨平台显示一致
+     */
     private JButton createSquareButton(String text, Color bgColor) {
         JButton btn = new JButton(text);
         btn.setBackground(bgColor);
@@ -724,12 +833,43 @@ public class HomePanel extends JPanel {
         return btn;
     }
 
+    /**
+     * 更新标识符标签并刷新订单显示
+     *
+     * 功能说明：
+     * 根据传入的标识符（餐桌号/订单号/预约号）更新顶部标签文本，并同步刷新临时订单和正式订单区域。
+     *
+     * @param identifier 当前选中的标识符字符串
+     *
+     * 执行流程：
+     * 1. 调用 buildTableNumberLabelText 构建带前缀的标签文本
+     * 2. 更新 tableNumberLabel 组件显示
+     * 3. 依次刷新临时订单和正式订单显示区域，确保数据同步
+     *
+     * 注意事项：
+     * - 标识符为空或"未选择"时，标签显示默认提示文本
+     * - 刷新操作可能涉及数据查询，调用方需确保线程安全
+     */
     public void updateIdentifierLabel(String identifier) {
         tableNumberLabel.setText(buildTableNumberLabelText(identifier));
         refreshTemporaryOrderDisplay();
         refreshFormalOrderDisplay();
     }
 
+    /**
+     * 构建餐桌号标签的显示文本
+     *
+     * 功能说明：
+     * 根据当前订单类型和标识符状态，生成带前缀的标签文本（如"餐桌号：7"或"订单号：待下单"）。
+     *
+     * @param identifier 用户输入的标识符字符串
+     * @return 完整的标签显示文本，包含动态前缀和标识符内容
+     *
+     * 业务规则：
+     * - 标识符为空/未选择时：堂食模式显示"未选择"，其他模式显示"待下单"
+     * - 标识符有效时：自动去除首尾空格后拼接前缀
+     * - 前缀通过 getLabelPrefix 方法动态获取，确保与订单类型一致
+     */
     private String buildTableNumberLabelText(String identifier) {
         String prefix = getLabelPrefix();
         if (identifier == null || identifier.isEmpty() || "未选择".equals(identifier)) {
@@ -743,9 +883,23 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 设置当前订单类型（由 OrderSystemGUI 调用）
+     * 设置当前订单类型
      *
-     * @param orderType 订单类型枚举
+     * 功能说明：
+     * 当订单类型变更时，同步更新界面标签、按钮文本及标识符前缀，确保界面与业务状态一致。
+     *
+     * 执行流程：
+     * 1. 校验订单类型是否实际变更，避免重复刷新
+     * 2. 更新当前订单类型成员变量
+     * 3. 调用 updateLabelsAndButtons 刷新界面控件文本（如标题、按钮提示等）
+     * 4. 保留当前标识符（餐桌号/订单号/预约号），调用 updateIdentifierLabel 更新标签前缀
+     *
+     * @param orderType 新的订单类型枚举值（如 DINE_IN、PICKUP、DELIVERY、RESERVATION）
+     *
+     * 注意事项：
+     * - 仅当订单类型实际变化时才执行刷新逻辑，提升性能
+     * - 标识符前缀更新依赖当前订单类型，需确保 currentOrderType 已正确赋值
+     * - 本方法由 OrderSystemGUI 外部调用，调用方需保证线程安全
      */
     public void setCurrentOrderType(OrderType orderType) {
         if (this.currentOrderType != orderType) {
@@ -767,11 +921,34 @@ public class HomePanel extends JPanel {
     //7.2 Spring 後端數據 → Swing 實時渲染機制
     //技術說明：前端不直接持有業務邏輯，而是通過 OrderSystemGUI 作為代理層，調用注入的 Spring @Service 獲取數據。獲取後，通過 EDT (Event Dispatch Thread) 安全機制將數據轉為 HTML 字符串並綁定至 JEditorPane。
     //這是 Swing 與 Spring 融合的關鍵實踐。後端數據通過 Service 層統一提供，前端通過 SwingUtilities.invokeLater 確保所有 UI 更新嚴格在 EDT 執行，避免 ConcurrentModificationException 或界面卡死。HTML 渲染取代了複雜的 JTable 自定義渲染器，大幅降低開發成本並提升排版靈活性。
+    /**
+     * 刷新临时订单显示区域
+     *
+     * 功能说明：
+     * 获取当前餐桌/订单的临时点餐数据，渲染为带样式的 HTML 表格展示，支持聚餐桌批量点餐的分配餐桌显示。
+     *
+     * 执行流程：
+     * 1. 获取临时订单数据：调用 frame.getTemporaryOrderForTable 获取当前标识符的临时订单
+     * 2. 空数据处理：订单为空时显示"暂无临时订单"提示
+     * 3. 表格渲染：
+     *    - 按菜品编号排序后逐行生成表格内容
+     *    - 解析批量点餐 Key 格式（如 A1[BATCH:13,14,15]），提取菜品编号和分配餐桌列表
+     *    - 聚餐桌 + 堂食模式：显示"分配餐桌"列，桌号过多时自动截断显示（前 2 个 +...+ 最后 1 个）
+     *    - 批量点餐菜品：数量列添加"一键点餐"标签标识
+     * 4. 金额计算：累加各菜品小计得到订单总金额
+     * 5. 界面更新：通过 SwingUtilities.invokeLater 在 EDT 线程安全更新组件，并强制刷新滚动面板以支持横向滚动
+     *
+     * 注意事项：
+     * - 表格使用 min-width:600px + white-space:nowrap 确保内容不换行，超长时显示横向滚动条
+     * - 分配餐桌列仅在堂食模式且当前餐桌为聚餐桌时显示，其他场景自动隐藏
+     * - 批量点餐的桌号显示做截断处理，避免单行内容过长影响布局
+     * - 所有样式通过内联 CSS 定义，确保组件独立渲染，不依赖外部样式表
+     */
     public void refreshTemporaryOrderDisplay() {
         Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
         StringBuilder html = new StringBuilder();
 
-        // 🔧 设置整体样式：强制不换行，支持横向滚动
+        //  设置整体样式：强制不换行，支持横向滚动
         html.append("<html><head><style>" +
                 "body { font-family: 'Microsoft YaHei', sans-serif; margin: 0; padding: 10px; } " +
                 "table { border-collapse: collapse; width: 100%; table-layout: auto; min-width: 600px; } " + // min-width 触发滚动条
@@ -794,7 +971,7 @@ public class HomePanel extends JPanel {
             html.append("<th style='width: 25%;'>菜品名称</th>");
             html.append("<th style='width: 10%;' class='center-align'>数量</th>");
 
-            // 🔧【核心修改】只有聚餐桌 + 堂食才显示"分配餐桌"列
+            // 只有聚餐桌 + 堂食才显示"分配餐桌"列
             boolean isGroupedTable = isGroupedTable(currentTableNumber);
             boolean showAssignedTable = (currentOrderType == OrderType.DINE_IN && isGroupedTable);
 
@@ -806,7 +983,7 @@ public class HomePanel extends JPanel {
             html.append("<th style='width: 15%;' class='right-align'>小计<br>(元)</th>");
             html.append("</tr></thead><tbody>");
 
-            double[] totalAmount = {0.0};
+            double[] totalAmount = {0.0};// 使用长度为 1 的数组存储总金额，便于在 lambda 表达式中修改累加结果
 
             tempOrder.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
@@ -814,7 +991,7 @@ public class HomePanel extends JPanel {
                         String itemKey = entry.getKey();
                         int qty = entry.getValue();
 
-                        // 🔧【核心】解析特殊 Key 格式：A1[BATCH:13,14,15]
+                        // 解析特殊 Key 格式：A1[BATCH:13,14,15]
                         String displayItemId = itemKey;
                         String assignedTables = "";
                         boolean isBatchOrder = false;
@@ -842,18 +1019,18 @@ public class HomePanel extends JPanel {
                         html.append("<td>").append(displayItemId).append("</td>");
                         html.append("<td>").append(itemName).append("</td>");
 
-                        // 🔧 数量列：显示"一键点餐"标签
+                        //  数量列：显示"一键点餐"标签
                         html.append("<td class='center-align'>").append(qty);
                         if (isBatchOrder) {
                             html.append("<span class='batch-tag'> (一键点餐)</span>");
                         }
                         html.append("</td>");
 
-                        // 🔧 分配餐桌列（仅聚餐桌 + 堂食显示）
+                        //  分配餐桌列（仅聚餐桌 + 堂食显示）
                         if (showAssignedTable) {
                             html.append("<td>");
                             if (isBatchOrder && !assignedTables.isEmpty()) {
-                                // 🔧【核心逻辑】处理桌号显示：超过3个只显示 前2个 + ... + 最后1个
+                                // 核心逻辑】处理桌号显示：超过3个只显示 前2个 + ... + 最后1个
                                 String[] tableIds = assignedTables.split(",");
                                 String displayTableText = assignedTables; // 默认显示全部
 
@@ -892,14 +1069,22 @@ public class HomePanel extends JPanel {
             tempOrderEditor.setText(html.toString());
             tempOrderEditor.setCaretPosition(0); // 滚动到顶部
 
-            // 🔧 强制刷新 JScrollPane 以显示横向滚动条
+            //  强制刷新 JScrollPane 以显示横向滚动条
             tempScrollPane.revalidate();
             tempScrollPane.repaint();
         });
     }
 
     /**
-     * 🔧 辅助方法：判断是否为聚餐桌
+     * 判断指定餐桌是否为聚餐桌类型
+     *
+     * @param tableDisplayId 餐桌显示编号（如 "13" 或 "13a"）
+     * @return true=该餐桌为聚餐桌（GROUPED 类型），false=普通餐桌或查询失败
+     *
+     * 注意事项：
+     * - 参数为空或服务层未初始化时直接返回 false，避免空指针异常
+     * - 仅当餐桌存在且 table_type 字段为 GROUPED 时返回 true
+     * - 调用方需根据返回值决定是否启用聚餐桌专属业务逻辑
      */
     private boolean isGroupedTable(String tableDisplayId) {
         if (tableDisplayId == null || service == null) return false;
@@ -908,6 +1093,37 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 刷新正式订单显示区域
+     *
+     * 功能说明：
+     * 根据当前订单类型和标识符（餐桌号/预约号/订单号），加载正式订单明细并渲染为 HTML 表格展示，同时更新总价、状态等标签信息。
+     *
+     * 执行流程：
+     * 1. 基础校验：标识符为空或无效时显示提示并清空显示区域
+     * 2. 按订单类型加载数据：
+     *    - 堂食模式：通过餐桌号查询订单明细，显示订单整体状态
+     *    - 预约模式：通过预约号查询明细，动态计算并显示准备进度状态
+     *    - 外卖/配送模式：通过订单号查询明细，显示外卖订单专属状态
+     * 3. 空数据处理：根据订单类型显示差异化友好提示
+     * 4. 生成 HTML 内容：
+     *    - 堂食订单：调用 frame.generateFormalOrderHtml，支持聚餐桌分配餐桌显示
+     *    - 预约订单：调用 generateReservationOrderHtml，专注准备状态展示
+     *    - 外卖订单：调用 generateTakeoutOrderHtml，专注制作进度展示
+     * 5. 线程安全更新：通过 SwingUtilities.invokeLater 在 EDT 线程更新界面
+     * 6. 金额计算与标签更新：计算菜品总价、配送费（仅配送模式）、订单总计，并同步更新对应标签
+     * 7. 组合桌标签处理：堂食或预约订单且为聚餐桌时，调用 updateGroupTableDisplay 显示关联桌号
+     *
+     * 注意事项：
+     * - 仅堂食和预约订单支持聚餐桌逻辑，外卖订单自动隐藏组合桌标签
+     * - 预约订单不显示配送费，外卖自取模式显示菜品总价但不显示配送费
+     * - 所有 HTML 样式内联编写，确保组件独立渲染，避免外部 CSS 依赖
+     * - 金额计算使用 double 类型，展示时保留两位小数
+     *
+     * 异常处理：
+     * - 数据加载异常由下层方法捕获，本方法专注于显示逻辑
+     * - 空指针或格式异常时通过空数据分支处理，避免界面崩溃
+     */
     public void refreshFormalOrderDisplay() {
         // ===== 基础验证 =====
         if (currentTableNumber == null ||
@@ -919,7 +1135,7 @@ public class HomePanel extends JPanel {
             );
             totalPriceLabel.setText("总价格：0.00 元");
             statusLabel.setText("订单情况：");
-            // 🔧 清空并隐藏标签
+            //  清空并隐藏标签
             if (itemsTotalLabel != null) {
                 itemsTotalLabel.setText("菜品：0.00 元");
                 itemsTotalLabel.setVisible(false);
@@ -942,18 +1158,18 @@ public class HomePanel extends JPanel {
             // 堂食模式：通过餐桌号查询
             items = frame.loadFormalOrderItems(currentTableNumber);
             statusLabel.setText(controller.getOrderStatusDisplay(currentTableNumber));
-            // 🔧 堂食模式：隐藏菜品/配送费标签（总价已包含在总金额中）
+            //  堂食模式：隐藏菜品/配送费标签（总价已包含在总金额中）
             if (itemsTotalLabel != null) itemsTotalLabel.setVisible(false);
             if (deliveryFeeLabel != null) deliveryFeeLabel.setVisible(false);
         } else if (currentOrderType == OrderType.RESERVATION) {
-            System.out.println("🔍 加载预约订单: " + currentTableNumber);
+            System.out.println(" 加载预约订单: " + currentTableNumber);
             items = frame.loadFormalOrderItemsByReservationId(currentTableNumber);
 
-            // 🔧【修复】根据菜品实际状态动态显示
+            // 【修复】根据菜品实际状态动态显示
             String orderStatusText = calculateReservationOrderStatus(items);
             statusLabel.setText("订单情况：" + orderStatusText);
 
-            // 🔧 预约订单显示菜品总价
+            //  预约订单显示菜品总价
             if (itemsTotalLabel != null) {
                 itemsTotalLabel.setVisible(true);
             }
@@ -961,13 +1177,13 @@ public class HomePanel extends JPanel {
                 deliveryFeeLabel.setVisible(false);  // 预约订单无配送费
             }
         } else {
-            // 🔧 外卖/配送模式：通过订单号查询
-            System.out.println("🔍 加载外卖订单: " + currentTableNumber);
+            //  外卖/配送模式：通过订单号查询
+            System.out.println(" 加载外卖订单: " + currentTableNumber);
             items = frame.loadFormalOrderItemsByOrderNumber(currentTableNumber);
             // 显示外卖订单状态
             String orderStatusText = frame.getOrderStatusDisplayByOrderNumber(currentTableNumber);
             statusLabel.setText(orderStatusText);
-            // 🔧【关键修复】自取+配送都显示菜品总价，只有配送显示配送费
+            // 【关键修复】自取+配送都显示菜品总价，只有配送显示配送费
             boolean isTakeout = (currentOrderType == OrderType.PICKUP || currentOrderType == OrderType.DELIVERY);
             if (itemsTotalLabel != null) {
                 itemsTotalLabel.setVisible(isTakeout);
@@ -979,7 +1195,7 @@ public class HomePanel extends JPanel {
 
         // ===== 空数据处理 =====
         if (items == null || items.isEmpty()) {
-            // 🔧 更友好的空状态提示
+            //  更友好的空状态提示
             String emptyMsg;
             if (currentOrderType == OrderType.DINE_IN) {
                 emptyMsg = "📭 该餐桌暂无订单明细";
@@ -994,7 +1210,7 @@ public class HomePanel extends JPanel {
                             "<p>" + emptyMsg + "</p></body></html>"
             );
             totalPriceLabel.setText("总价格：0.00 元");
-            // 🔧 清空标签
+            //  清空标签
             if (itemsTotalLabel != null) itemsTotalLabel.setText("菜品：0.00 元");
             if (deliveryFeeLabel != null) deliveryFeeLabel.setText("配送费：0.00 元");
             System.out.println(" 订单明细为空: " + currentTableNumber);
@@ -1005,35 +1221,35 @@ public class HomePanel extends JPanel {
         String htmlContent;
 
         if (currentOrderType == OrderType.DINE_IN) {
-            // 🔧【核心修改】堂食：判断是否为聚餐桌 + 传入当前餐桌号
+            // 【核心修改】堂食：判断是否为聚餐桌 + 传入当前餐桌号
             boolean isGrouped = isGroupedTable(currentTableNumber);
             htmlContent = frame.generateFormalOrderHtml(
                     currentTableNumber,
                     true,// 是否顯示總額
-                    isGrouped,           // 🔧 是否聚餐桌
-                    currentTableNumber   // 🔧 当前餐桌显示ID（用于显示分配餐桌）
+                    isGrouped,           //  是否聚餐桌
+                    currentTableNumber   //  当前餐桌显示ID（用于显示分配餐桌）
             );
         }
-        // 🔧【新增】预约订单：使用专用方法（只显示准备状态）
+        // 【新增】预约订单：使用专用方法（只显示准备状态）
         else if (currentOrderType == OrderType.RESERVATION) {
             htmlContent = generateReservationOrderHtml(items, false);
         } else {
-            // 🔧 外卖/自取：使用已查询的 items 数据，自己生成 HTML
+            //  外卖/自取：使用已查询的 items 数据，自己生成 HTML
             htmlContent = generateTakeoutOrderHtml(items, false);
         }
 
-        // 🔧 关键：确保在 EDT 上更新 UI
+        //  关键：确保在 EDT 上更新 UI
         SwingUtilities.invokeLater(() -> {
             orderedItemsEditor.setText(htmlContent);
             orderedItemsEditor.setCaretPosition(0);  // 滚动到顶部
         });
 
-        // 🔧 计算菜品总金额（不含配送费）
+        //  计算菜品总金额（不含配送费）
         double itemsTotal = items.stream()
                 .mapToDouble(i -> i.getQuantity() * i.getPriceAtOrder())
                 .sum();
 
-        // 🔧 获取配送费（仅配送模式）
+        //  获取配送费（仅配送模式）
         double deliveryFee = 0.0;
         if (currentOrderType == OrderType.DELIVERY) {
             Double fee = frame.getDeliveryFeeByOrderNumber(currentTableNumber);
@@ -1042,10 +1258,10 @@ public class HomePanel extends JPanel {
             }
         }
 
-        // 🔧 计算最终总金额
+        // 计算最终总金额
         double total = itemsTotal + deliveryFee;
 
-        // 🔧 更新标签显示
+        //  更新标签显示
         if (itemsTotalLabel != null) {
             itemsTotalLabel.setText(String.format("菜品：%.2f 元", itemsTotal));
         }
@@ -1054,7 +1270,7 @@ public class HomePanel extends JPanel {
         }
         totalPriceLabel.setText(String.format("总价格：%.2f 元", total));
 
-        // 🔧【新增】检查并更新组合桌标签（堂食或预约订单 + 聚餐桌）
+        // 【新增】检查并更新组合桌标签（堂食或预约订单 + 聚餐桌）
         if ((currentOrderType == OrderType.DINE_IN || currentOrderType == OrderType.RESERVATION)) {
             // 检查餐桌类型是否为 GROUPED（聚餐桌）
             Tables table = service.getTableById(currentTableNumber);
@@ -1079,7 +1295,23 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 🔧 计算预约订单的实际状态
+     * 计算预约订单的整体准备状态
+     *
+     * 功能说明：
+     * 遍历订单菜品列表，统计各准备状态的菜品数量，根据分布情况返回对应的状态描述文本。
+     *
+     * 状态判定规则：
+     * 1. 全部菜品为 PREPARED → 返回"预点餐已全部准备"
+     * 2. 存在 PREPARING 或 PREPARED 菜品 → 返回"预点餐准备中 (已准备数/总数)"
+     * 3. 全部菜品为 UNSERVED → 返回"预点餐未准备"
+     *
+     * @param items 预约订单的菜品明细列表
+     * @return 描述订单整体准备状态的中文文本
+     *
+     * 注意事项：
+     * - 列表为空或 null 时返回"暂无菜品"
+     * - 仅统计 PREPARED/PREPARING/UNSERVED 三种标准状态，其他状态忽略
+     * - 状态文本格式固定，便于界面统一展示
      */
     private String calculateReservationOrderStatus(List<OrderItem> items) {
         if (items == null || items.isEmpty()) {
@@ -1117,8 +1349,30 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 新增：生成预约订单HTML（只显示准备状态，不显示上桌状态）
-     * 预约订单状态：UNSERVED(未准备) / PREPARING(准备中) / PREPARED(已准备)
+     * 生成预约订单的 HTML 表格展示
+     *
+     * 功能说明：
+     * 将预约订单的菜品列表按准备状态分组，渲染为带样式的 HTML 表格，支持显示订单总计。
+     *
+     * 执行流程：
+     * 1. 空数据校验：列表为空时返回"暂无预点餐菜品"提示
+     * 2. 按状态分组：将菜品按 UNSERVED（未准备）/ PREPARING（准备中）/ PREPARED（已准备）分组
+     * 3. 固定顺序渲染：按未准备→准备中→已准备的顺序逐组生成表格行
+     * 4. 样式美化：
+     *    - 状态列使用彩色背景+白字，快速区分准备进度
+     *    - 数量列显示"已准备/总数量"格式，准备中状态时浅橙色背景高亮
+     *    - 小计列使用红色加粗，突出金额信息
+     * 5. 可选显示总计：使用绿色背景卡片样式，突出订单总金额
+     *
+     * @param items 预约订单的菜品明细列表
+     * @param includeTotal 是否在表格下方显示订单总计
+     * @return 完整的 HTML 字符串，可直接设置到 JEditorPane 等组件显示
+     *
+     * 注意事项：
+     * - 表格使用固定布局（table-layout:fixed），确保列宽稳定
+     * - 状态文本和颜色通过 switch 表达式统一管理，便于后续调整样式
+     * - 数量列仅显示准备进度，不显示进度条样式（与外卖订单区分）
+     * - 所有样式内联编写，避免外部 CSS 依赖，确保组件独立渲染
      */
     private String generateReservationOrderHtml(List<OrderItem> items, boolean includeTotal) {
         if (items == null || items.isEmpty()) {
@@ -1138,10 +1392,10 @@ public class HomePanel extends JPanel {
         // 表头
         html.append("<tr style='background-color:#f5f5f5;'>")
                 .append("<th style='width:50px; text-align:center;'>序号</th>")
-                .append("<th style='width:100px; text-align:center;'>准备状态</th>")  // 🔧 改为"准备状态"
+                .append("<th style='width:100px; text-align:center;'>准备状态</th>")  //  改为"准备状态"
                 .append("<th style='width:80px; text-align:left;'>编号</th>")
                 .append("<th style='width:200px; text-align:left;'>菜品</th>")
-                .append("<th style='width:90px; text-align:center;'>数量/总数量</th>")  // 🔧 预约订单只显示数量，不显示进度
+                .append("<th style='width:90px; text-align:center;'>数量/总数量</th>")  //  预约订单只显示数量，不显示进度
                 .append("<th style='width:90px; text-align:right;'>单价</th>")
                 .append("<th style='width:100px; text-align:right;'>小计</th>")
                 .append("</tr>");
@@ -1154,7 +1408,7 @@ public class HomePanel extends JPanel {
             List<OrderItem> group = grouped.get(status);
             if (group == null || group.isEmpty()) continue;
 
-            // 🔧 预约订单状态文本
+            //  预约订单状态文本
             String statusText = switch (status) {
                 case "UNSERVED" -> "⚪ 未准备";
                 case "PREPARING" -> "🟡 准备中";
@@ -1225,7 +1479,32 @@ public class HomePanel extends JPanel {
         return html.toString();
     }
 
-
+    /**
+     * 生成外卖订单的 HTML 表格展示
+     *
+     * 功能说明：
+     * 将外卖订单的菜品列表按制作状态分组，渲染为带样式的 HTML 表格，支持显示订单总计。
+     *
+     * 执行流程：
+     * 1. 空数据校验：列表为空时返回"暂无订单"提示
+     * 2. 按状态分组：将菜品按 UNSERVED（制作中）/ PARTIALLY_SERVED（部分完成）/ SERVED（已完成）分组
+     * 3. 固定顺序渲染：按制作中→部分完成→已完成的顺序逐组生成表格行
+     * 4. 样式美化：
+     *    - 状态列使用彩色背景+白字圆角标签，快速区分进度
+     *    - 数量列显示"已上/总数"格式，并用渐变背景+左边框颜色标识完成度
+     *    - 小计列使用红色加粗+浅红背景，突出金额信息
+     * 5. 可选显示总计：使用卡片式渐变背景+绿色左边框，突出订单总金额
+     *
+     * @param items 外卖订单的菜品明细列表
+     * @param includeTotal 是否在表格下方显示订单总计
+     * @return 完整的 HTML 字符串，可直接设置到 JEditorPane 等组件显示
+     *
+     * 注意事项：
+     * - 表格宽度固定为 680px，适配侧边栏布局，字体统一为 12px 提升可读性
+     * - 状态文本和颜色通过 switch 表达式统一管理，便于后续调整样式
+     * - 数量进度颜色动态计算：100% 完成用绿色，部分完成用橙色，未开始用红色
+     * - 所有样式内联编写，避免外部 CSS 依赖，确保组件独立渲染
+     */
     private String generateTakeoutOrderHtml(List<OrderItem> items, boolean includeTotal) {
         if (items == null || items.isEmpty()) {
             return "<html><body style='font-family: Microsoft YaHei; padding:8px; color:#999; text-align:center;'>" +
@@ -1237,7 +1516,7 @@ public class HomePanel extends JPanel {
                 .collect(Collectors.groupingBy(OrderItem::getStatus));
 
         StringBuilder html = new StringBuilder();
-        // 🔧 字體調大到 12px，閱讀更舒適
+        //  字體調大到 12px，閱讀更舒適
         html.append("<html><body style='font-family: Microsoft YaHei; padding:8px; font-size: 12px; color:#333;'>");
 
         // 總寬微調至 680px（適應更大字體 + 美化空間）
@@ -1245,7 +1524,7 @@ public class HomePanel extends JPanel {
                 .append("style='width: 680px; border-collapse: collapse; ")
                 .append("white-space: nowrap; table-layout: auto; font-size: 12px;'>");
 
-        // 🔧 表頭 - 漸變背景 + 加粗 + 顏色
+        //  表頭 - 漸變背景 + 加粗 + 顏色
         html.append("<tr style='background: linear-gradient(to bottom, #f8f9fa, #e9ecef); font-size: 12px;'>")
                 .append("<th style='width: 45px; text-align:center; padding: 6px; color:#495057; border-bottom: 2px solid #dee2e6;'>序号</th>")
                 .append("<th style='width: 90px; text-align:center; padding: 6px; color:#495057; border-bottom: 2px solid #dee2e6;'>制作状态</th>")
@@ -1264,7 +1543,7 @@ public class HomePanel extends JPanel {
             List<OrderItem> group = grouped.get(status);
             if (group == null || group.isEmpty()) continue;
 
-            // 🔧 状态文本 + 顏色
+            //  状态文本 + 顏色
             String statusText = switch (status) {
                 case "UNSERVED" -> "🔴 制作中";
                 case "PARTIALLY_SERVED" -> "🟠 部分完成";
@@ -1283,7 +1562,7 @@ public class HomePanel extends JPanel {
                 double subtotal = item.getQuantity() * item.getPriceAtOrder();
                 totalAmount += subtotal;
 
-                // 🔧 数量进度百分比（用于美化）
+                //  数量进度百分比（用于美化）
                 int served = item.getServedQuantity();
                 int total = item.getQuantity();
                 double progress = total > 0 ? (double) served / total : 0;
@@ -1291,30 +1570,30 @@ public class HomePanel extends JPanel {
 
                 html.append("<tr style='border-bottom: 1px solid #f1f1f1; background-color: #fff;'>");
 
-                // 🔹 序号 - 灰色圓角背景
+                //  序号 - 灰色圓角背景
                 html.append(String.format(
                         "<td style='text-align:center; padding: 6px; font-family:monospace; font-size: 12px; " +
                                 "background-color: #f8f9fa; border-radius: 3px;'>%d</td>",
                         itemNumber++));
 
-                // 🔹 状态 - 彩色背景 + 白字 + 圓角
+                //  状态 - 彩色背景 + 白字 + 圓角
                 html.append(String.format(
                         "<td style='background-color:%s; color:white; font-weight:bold; text-align:center; " +
                                 "padding: 6px; font-size: 12px; border-radius: 4px;'>%s</td>",
                         statusColor, statusText));
 
-                // 🔹 编号 - 等寬字體 + 淺灰背景
+                //  编号 - 等寬字體 + 淺灰背景
                 html.append(String.format(
                         "<td style='white-space:nowrap; padding: 6px; font-size: 12px; font-family:monospace; " +
                                 "background-color: #fafafa; color:#6c757d;'>%s</td>",
                         item.getItemCode()));
 
-                // 🔹 菜名 - 主內容區
+                //  菜名 - 主內容區
                 html.append(String.format(
                         "<td style='white-space:nowrap; padding: 6px; font-size: 12px; font-weight:500;'>%s</td>",
                         item.getItemName()));
 
-                // 🔹🔥 数量列 - 美化：進度條樣式 + 顏色編碼
+                //  数量列 - 美化：進度條樣式 + 顏色編碼
                 String quantityText = String.format("%d/%d", served, total);
                 html.append(String.format(
                         "<td style='text-align:center; padding: 6px; font-family:monospace; font-size: 12px; " +
@@ -1322,12 +1601,12 @@ public class HomePanel extends JPanel {
                                 "border-left: 3px solid %s;'>%s</td>",
                         progressColor, progressColor, progressColor, quantityText));
 
-                // 🔹 单价 - 右對齊 + 灰色
+                //  单价 - 右對齊 + 灰色
                 html.append(String.format(
                         "<td style='text-align:right; padding: 6px; font-family:monospace; font-size: 12px; color:#6c757d;'>¥%.0f</td>",
                         item.getPriceAtOrder()));
 
-                // 🔹🔥 小计列 - 重點美化：紅色加粗 + 淺紅背景 + 貨幣符號
+                //  小计列 - 重點美化：紅色加粗 + 淺紅背景 + 貨幣符號
                 html.append(String.format(
                         "<td style='text-align:right; padding: 6px; font-family:monospace; font-size: 13px; " +
                                 "font-weight:bold; color:#c62828; background-color: #ffebee; border-left: 2px solid #ffcdd2;'>¥%.0f</td>",
@@ -1339,7 +1618,7 @@ public class HomePanel extends JPanel {
 
         html.append("</table>");
 
-        // 🔹🔥 总计 - 卡片式美化
+        //  总计 - 卡片式美化
         if (includeTotal && totalAmount > 0) {
             html.append(String.format(
                     "<div style='margin-top:12px; padding:10px 15px; " +
@@ -1360,13 +1639,33 @@ public class HomePanel extends JPanel {
      */
     public void refreshOrderTypeDisplays() {
         refreshDineInOrders();
-        refreshTakeoutOrders();      // 🔧 替換原本的兩個方法
-        refreshReservationOrders();  // 🔧 新增（暫時佔位符）
+        refreshTakeoutOrders();
+        refreshReservationOrders();
     }
 
 
     /**
-     * 刷新堂食订单显示
+     * 刷新堂食订单列表显示
+     *
+     * 功能说明：
+     * 加载当前堂食订单数据，按餐桌状态分组并渲染为 HTML 表格展示。
+     *
+     * 执行流程：
+     * 1. 调用 frame.loadDineInOrders 获取堂食订单列表
+     * 2. 按餐桌状态分组：预定中（RESERVED）/ 占用中（OCCUPIED）
+     * 3. 为每组生成带样式的标题栏和表格，显示订单号、餐桌号、状态、时间
+     * 4. 占用中订单的状态文字根据制作进度动态着色（制作中红色/制作完成绿色）
+     * 5. 空数据时显示友好提示，结果更新至 dineInOrderEditor 组件
+     *
+     * 界面特性：
+     * - 预定中组使用蓝色系背景，占用中组使用绿色系背景，快速区分状态
+     * - 表格列宽自适应，状态列加粗并着色，提升可读性
+     * - 时间列使用等宽显示，确保对齐整齐
+     *
+     * 注意事项：
+     * - 订单状态颜色通过 getStatusColor 方法统一获取，保证样式一致
+     * - 所有 HTML 样式内联编写，避免外部 CSS 依赖
+     * - 组件更新直接在当前线程执行，调用方需确保线程安全
      */
     private void refreshDineInOrders() {
         List<Map<String, Object>> orders = frame.loadDineInOrders();
@@ -1376,7 +1675,7 @@ public class HomePanel extends JPanel {
         if (orders == null || orders.isEmpty()) {
             html.append("<p style='color: #999; text-align: center;'>暂无堂食订单</p>");
         } else {
-            // 🔧 按餐桌状态分组：RESERVED(预定中) / OCCUPIED(占用中)
+            //  按餐桌状态分组：RESERVED(预定中) / OCCUPIED(占用中)
             Map<String, List<Map<String, Object>>> grouped = orders.stream()
                     .collect(Collectors.groupingBy(o ->
                             (String) o.getOrDefault("table_status", "UNKNOWN")
@@ -1439,7 +1738,7 @@ public class HomePanel extends JPanel {
                 html.append("</table>");
             }
 
-            // 🔧 如果两组都为空（理论上不会发生）
+            //  如果两组都为空（理论上不会发生）
             if (reservedOrders.isEmpty() && occupiedOrders.isEmpty()) {
                 html.append("<p style='color: #999; text-align: center;'>暂无堂食订单</p>");
             }
@@ -1450,8 +1749,8 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 🔧 刷新外賣訂單顯示（合併自取 + 配送）
-     * ⚠️ 自取訂單表格部分完全按照原 refreshPickupOrders() 代碼，一點不變
+     *  刷新外賣訂單顯示（合併自取 + 配送）
+     *  自取訂單表格部分完全按照原 refreshPickupOrders() 代碼，一點不變
      */
     private void refreshTakeoutOrders() {
         List<Map<String, Object>> pickupOrders = frame.loadPickupOrders();
@@ -1460,17 +1759,16 @@ public class HomePanel extends JPanel {
         StringBuilder html = new StringBuilder();
         html.append("<html><body style='font-family: Microsoft YaHei; padding: 5px; font-size: 11px;'>");
 
-        // ═══════════════════════════════════════════════════════════
+         
         // 【區域 1】自取訂單（標題用新格式，表格完全按照原 refreshPickupOrders）
-        // ═══════════════════════════════════════════════════════════
-        // 🔧 標題欄位：使用和配送訂單一樣的格式
+        //  標題欄位：使用和配送訂單一樣的格式
         html.append("<div style='background-color: #e8f5e9; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #4caf50; width: 300px; box-sizing: border-box;'>");
         html.append("<b style='color: #2e7d32; font-size: 12px;'>🟢 自取訂單 (").append(pickupOrders.size()).append(")</b></div>");
 
         if (pickupOrders == null || pickupOrders.isEmpty()) {
             html.append("<p style='color: #999; text-align: center;'>暂无自取订单</p>");
         } else {
-            // 🔑 關鍵：表格部分完全按照原 refreshPickupOrders() 代碼，一點不變
+            //  關鍵：表格部分完全按照原 refreshPickupOrders() 代碼，一點不變
             html.append("<table border='1' cellpadding='3' cellspacing='0' " +
                     "style='width: 300px; border-collapse: collapse; font-size: 11px; margin-bottom: 10px;'>");
             html.append("<tr style='background-color: #ccffcc;'>");
@@ -1506,17 +1804,16 @@ public class HomePanel extends JPanel {
         // 分隔線
         html.append("<hr style='border: 0; border-top: 1px dashed #ccc; margin: 15px 0; width: 550px;'>");
 
-        // ═══════════════════════════════════════════════════════════
+     
         // 【區域 2】配送訂單（保持原有 width: 350px 固定寬度樣式）
-        // ═══════════════════════════════════════════════════════════
-        // 🔧 標題欄位：原有格式
+        //  標題欄位：原有格式
         html.append("<div style='background-color: #e3f2fd; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #2196f3;width:350px; box-sizing: border-box;'>");
         html.append("<b style='color: #1565c0; font-size: 12px;'>🚚 配送訂單 (").append(deliveryOrders.size()).append(")</b></div>");
 
         if (deliveryOrders == null || deliveryOrders.isEmpty()) {
             html.append("<p style='color: #999; text-align: center;'>📭 暫無配送訂單</p>");
         } else {
-            // 🔑 關鍵：保持 width: 350px 固定寬度 + 像素列寬
+            //  關鍵：保持 width: 350px 固定寬度 + 像素列寬
             html.append("<table border='1' cellpadding='3' cellspacing='0' " +
                     "style='width: 350px; border-collapse: collapse; font-size: 11px; margin-bottom: 10px;'>");
 
@@ -1562,12 +1859,17 @@ public class HomePanel extends JPanel {
         html.append("</body></html>");
         takeoutOrderEditor.setText(html.toString());
 
-        // 🔧 關鍵：強制刷新滾動策略，確保水平滾動條生效
+        //  關鍵：強制刷新滾動策略，確保水平滾動條生效
         takeoutScrollPane.revalidate();
         takeoutScrollPane.repaint();
     }
 
-
+    /**
+     * 根据制作状态返回对应的颜色代码
+     *
+     * @param status 制作状态字符串（如 "制作中"、"制作完成"）
+     * @return 十六进制颜色代码：制作中返回红色(#ff6b6b)，制作完成返回绿色(#4caf50)，未知状态返回灰色(#999)
+     */
     private String getStatusColor(String status) {
         if (status == null) return "#999";
         return switch (status) {
@@ -1622,25 +1924,56 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 刷新预约订单列表显示
+     *
+     * 功能说明：
+     * 从服务器获取预点餐模式的预约记录，按时间紧急程度分组并渲染为 HTML 表格展示。
+     *
+     * 执行流程：
+     * 1. 调用 controller.getPreOrderReservationsForMonitor 获取预约记录列表
+     * 2. 按预约时间状态分组：
+     *    - 已过期：预约时间早于当前时间，红色高亮显示
+     *    - 1.5 小时内：即将到店的紧急预约，橙色高亮显示
+     *    - 未来预约：普通待确认预约，蓝色正常显示
+     * 3. 为每组生成带样式的标题栏和表格，显示预约号、时间、客人信息及状态
+     * 4. 空数据时显示友好提示，异常时显示错误信息
+     * 5. 通过 SwingUtilities.invokeLater 在 EDT 线程安全更新界面
+     *
+     * 界面特性：
+     * - 固定宽度表格（300-400px），适配侧边栏布局
+     * - 时间列使用等宽字体，确保对齐可读
+     * - 客人信息分行显示姓名和电话，节省横向空间
+     * - 不同状态组使用不同背景色和边框色，快速区分紧急程度
+     *
+     * 注意事项：
+     * - 预约时间支持 Timestamp 和 LocalDateTime 两种类型，自动兼容转换
+     * - 表格宽度根据内容调整：紧急组 400px（容纳更多信息），其他组 300px
+     * - 所有 HTML 样式内联编写，避免外部 CSS 依赖
+     *
+     * 异常处理：
+     * - 数据查询或渲染异常时捕获并显示错误提示，避免界面崩溃
+     * - 空指针或格式异常时记录堆栈日志，便于排查问题
+     */
     private void refreshReservationOrders() {
         StringBuilder html = new StringBuilder();
         html.append("<html><body style='font-family: Microsoft YaHei; padding: 0; margin: 0; font-size: 11px;'>");
 
         try {
-            // 🔧 获取数量模式的预约记录
+            //  获取数量模式的预约记录
             List<Map<String, Object>> reservations = controller.getPreOrderReservationsForMonitor();
 
             if (reservations == null || reservations.isEmpty()) {
-                // 🔧 标题栏 - 使用您指定的格式
+                //  标题栏 - 使用您指定的格式
                 html.append("<div style='background-color: #e8f5e9; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #4caf50; width: 300px; box-sizing: border-box;'>");
                 html.append("<b style='color: #2e7d32; font-size: 12px;'> 預約訂單 (0)</b></div>");
                 html.append("<p style='color: #999; text-align: center; padding: 5px; margin: 0;'> 暂无数量模式预约</p>");
             } else {
-                // 🔧 主标题栏 - 使用您指定的格式
+                //  主标题栏 - 使用您指定的格式
                 html.append("<div style='background-color: #e8f5e9; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #4caf50; width: 300px; box-sizing: border-box;'>");
                 html.append("<b style='color: #2e7d32; font-size: 12px;'> 預約訂單 (").append(reservations.size()).append(")</b></div>");
 
-                // 🔧 按预约时间状态分组
+                //  按预约时间状态分组
                 Map<String, List<Map<String, Object>>> grouped = reservations.stream()
                         .collect(Collectors.groupingBy(o -> {
                             Object timeObj = o.get("reservation_time");
@@ -1700,7 +2033,7 @@ public class HomePanel extends JPanel {
                     html.append("</table>");
                 }
 
-                // ── 第二组：🟡 1.5小时内的预约（紧急）─
+                // ── 第二组： 1.5小时内的预约（紧急）─
                 List<Map<String, Object>> urgentList = grouped.getOrDefault("URGENT", Collections.emptyList());
                 if (!urgentList.isEmpty()) {
                     // 🔧 分组标题 - 统一使用您指定的格式
@@ -1737,10 +2070,10 @@ public class HomePanel extends JPanel {
                     html.append("</table>");
                 }
 
-                // ── 第三组：⚪ 未来时间的预约（普通）─
+                // ── 第三组：未来时间的预约（普通）─
                 List<Map<String, Object>> futureList = grouped.getOrDefault("FUTURE", Collections.emptyList());
                 if (!futureList.isEmpty()) {
-                    // 🔧 分组标题 - 统一使用您指定的格式
+                    //  分组标题 - 统一使用您指定的格式
                     html.append("<div style='background-color: #e3f2fd; padding: 8px; margin-bottom: 10px; border-radius: 4px; border-left: 4px solid #2196f3; width: 300px; box-sizing: border-box;'>");
                     html.append("<b style='color: #1565c0; font-size: 12px;'>⚪ 未來預約 (").append(futureList.size()).append(")</b></div>");
                     html.append("<table border='1' cellpadding='3' cellspacing='0' " +
@@ -1773,7 +2106,7 @@ public class HomePanel extends JPanel {
                     html.append("</table>");
                 }
 
-                // 🔧 如果三组都为空（理论上不会发生）
+                //  如果三组都为空（理论上不会发生）
                 if (expiredList.isEmpty() && urgentList.isEmpty() && futureList.isEmpty()) {
                     html.append("<p style='color: #999; text-align: center; padding: 5px; margin: 0;'>✨ 暂无数量模式预约</p>");
                 }
@@ -1793,7 +2126,26 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 统一处理确认按钮点击事件
+     * 处理餐桌/预约号/订单号确认请求
+     *
+     * 功能说明：
+     * 根据当前订单类型，将用户输入的标识符分发至对应的验证与处理逻辑。
+     *
+     * 执行流程：
+     * 1. 空值校验：输入为空时提示用户并终止操作
+     * 2. 订单类型分发：
+     *    - 堂食模式：调用 handleDineInTableConfirm 验证餐桌号及状态
+     *    - 预约模式：先调用 validateReservationExists 验证预约号存在性，通过后执行 handleReservationConfirmed 设置状态
+     *    - 外卖/配送模式：调用 handleTakeoutOrderConfirm 验证订单号格式及有效性
+     * 3. 统一后置处理：确认成功后调用 updateGroupTableDisplay 更新组合桌显示
+     *
+     * 参数说明：
+     * @param inputStr 用户输入的标识符字符串（餐桌号/预约号/订单号）
+     *
+     * 注意事项：
+     * - 各分支处理逻辑相互独立，失败时均通过 showErrorDialog 提示用户
+     * - 预约模式采用"先验证后确认"的两步流程，确保数据准确性
+     * - 组合桌显示更新在所有分支成功后统一执行，避免重复代码
      */
     private void handleConfirmTable(String inputStr) {
         if (inputStr.isEmpty()) {
@@ -1803,13 +2155,13 @@ public class HomePanel extends JPanel {
             return;
         }
 
-        // 🔧【核心修复】根据订单类型分发处理逻辑
+        // 【核心修复】根据订单类型分发处理逻辑
         if (currentOrderType == OrderType.DINE_IN) {
             // 堂食：验证餐桌
             handleDineInTableConfirm(inputStr);
 
         } else if (currentOrderType == OrderType.RESERVATION) {
-            // 🔧 预约：只验证预约号是否存在（不调用外卖验证）
+            //  预约：只验证预约号是否存在（不调用外卖验证）
             if (!validateReservationExists(inputStr)) {
                 return; // 验证失败，直接返回
             }
@@ -1820,12 +2172,12 @@ public class HomePanel extends JPanel {
             // 外卖/配送：验证订单号
             handleTakeoutOrderConfirm(inputStr);
         }
-        // 🔧【新增】确认成功后，检查并更新组合桌显示
+        // 确认成功后，检查并更新组合桌显示
         updateGroupTableDisplay(inputStr);
     }
 
     /**
-     * 【新增】更新组合桌标签显示
+     * 更新组合桌标签显示
      *
      * @param tableDisplayId 餐桌显示编号
      */
@@ -1869,8 +2221,28 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     *  新增：处理预约号验证通过后的逻辑
-     * （复用之前外卖确认成功的逻辑，但去掉格式校验）
+     * 处理预约号确认成功后的逻辑
+     *
+     * 功能说明：
+     * 将验证通过的预约号设置为当前操作对象，并刷新相关界面显示。
+     *
+     * 执行流程：
+     * 1. 更新全局状态：设置 currentTableNumber 为预约号
+     * 2. 同步 Frame 层状态：调用 frame.setCurrentTableNumber 确保数据一致
+     * 3. 更新界面标签：顶部显示"预约号：[预约号]"
+     * 4. 用户反馈：弹窗提示确认成功
+     * 5. 刷新订单显示：重新加载临时订单和正式订单区域
+     *
+     * 参数说明：
+     * @param reservationId 已验证有效的预约号字符串
+     *
+     * 注意事项：
+     * - 本方法仅在预约号通过 validateReservationExists 校验后调用
+     * - 预约订单的客户信息已在预约时收集，此处无需重复收集
+     * - 所有界面更新操作均在当前线程执行，无需额外线程调度
+     *
+     * 异常处理：
+     * - 捕获并记录系统异常，弹窗提示用户，避免界面卡死
      */
     private void handleReservationConfirmed(String reservationId) {
         try {
@@ -1898,7 +2270,22 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 验证预约号是否存在（仅检查存在性）
+     * 验证预约号是否存在
+     *
+     * 功能说明：
+     * 通过 Controller 查询预约详情，确认用户输入的预约号是否有效。
+     *
+     * 执行流程：
+     * 1. 调用 controller.getReservationDetail 查询预约记录
+     * 2. 预约号为空或不存在时，弹窗提示可能原因并返回 false
+     * 3. 预约记录存在时，记录日志并返回 true
+     *
+     * @param reservationId 待验证的预约号字符串
+     * @return true=预约号有效，false=预约号无效或查询异常
+     *
+     * 异常处理：
+     * - 系统异常时弹窗显示错误信息，记录堆栈日志，并返回 false
+     * - 调用方需根据返回值决定是否继续执行后续业务逻辑
      */
     private boolean validateReservationExists(String reservationId) {
         try {
@@ -1929,7 +2316,28 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 处理外卖订单号确认（修复版 - 设置 currentTakeoutOrderNumber）
+     * 处理外卖订单确认操作
+     *
+     * 功能说明：
+     * 验证用户输入的订单号并设置为当前操作订单，支持自取（P-）和配送（D-）两种模式。
+     *
+     * 执行流程：
+     * 1. 订单号格式校验：支持纯数字或前缀-日期-序号格式（如 "123" 或 "D-20260101-001"）
+     * 2. 前缀匹配校验：自取订单须以 "P-" 开头，配送订单须以 "D-" 开头
+     * 3. 订单存在性校验：手动输入时查询活跃订单，自动生号时跳过校验
+     * 4. 订单状态校验：仅 "已下单"（ORDERED）状态的订单允许操作
+     * 5. 设置全局订单号并刷新临时订单与正式订单显示
+     *
+     * 参数说明：
+     * @param orderNumberStr 用户输入的订单号字符串
+     *
+     * 注意事项：
+     * - 自动生号模式下创建的订单可能尚未持久化，跳过存在性校验
+     * - 手动输入订单号时保留显示在输入框，方便用户核对
+     * - 订单号前缀错误、订单不存在或状态异常时均弹窗提示并终止操作
+     *
+     * 异常处理：
+     * - 格式校验失败或系统异常时显示友好错误提示，并记录异常堆栈
      */
     private void handleTakeoutOrderConfirm(String orderNumberStr) {
         try {
@@ -1956,7 +2364,7 @@ public class HomePanel extends JPanel {
                 }
             }
 
-            // 🔧【关键新增】3. 验证订单是否存在（仅手动输入时需要）
+            // 3. 验证订单是否存在（仅手动输入时需要）
             // 注意：自动生号生成的订单号可能还未创建，所以跳过验证
             boolean isAutoGenerated = generateOrderNumberCheck != null && generateOrderNumberCheck.isSelected();
             if (!isAutoGenerated) {
@@ -1973,7 +2381,7 @@ public class HomePanel extends JPanel {
                                     "• 该订单已结账或被删除\n" +
                                     "• 请勾选【自动生号】创建新订单",
                             "订单验证失败");
-                    return;  // 🔑 订单不存在，直接返回，不执行后续逻辑
+                    return;  //  订单不存在，直接返回，不执行后续逻辑
                 }
 
                 // 🔧 可选：额外验证订单状态（确保是活跃订单）
@@ -1992,7 +2400,7 @@ public class HomePanel extends JPanel {
             currentTakeoutOrderNumber = orderNumberStr;
             frame.setCurrentTableNumber(orderNumberStr);
 
-            // 🔧 建议：手动输入时保留订单号在输入框，方便用户核对
+            //  建议：手动输入时保留订单号在输入框，方便用户核对
             if (!isAutoGenerated) {
                 tableNumberField.setText(orderNumberStr);
             } else {
@@ -2015,7 +2423,34 @@ public class HomePanel extends JPanel {
         }
     }
 
-
+    /**
+     * 处理堂食餐桌确认操作
+     *
+     * 功能说明：
+     * 验证用户输入的餐桌号并设置为当前操作餐桌，仅堂食模式生效。
+     *
+     * 执行流程：
+     * 1. 订单类型校验：非堂食模式时提示用户直接点餐，无需确认餐桌
+     * 2. 餐桌号解析：支持纯数字（如"7"）或数字+字母后缀（如"7a"）格式
+     * 3. 餐桌存在性验证：查询数据库确认餐桌记录有效
+     * 4. 餐桌状态校验：
+     *    - RESERVED 状态：必须关联预点餐记录（pre_order=true）才允许点餐
+     *    - 其他状态：仅 OCCUPIED 或 RESERVED 允许操作，其余状态弹窗拒绝
+     * 5. 合并桌主桌规则校验：合并桌必须通过编号较小的餐桌操作
+     * 6. 设置当前餐桌并刷新临时订单显示，显示成功提示
+     *
+     * 参数说明：
+     * @param tableNumStr 用户输入的餐桌显示编号字符串
+     *
+     * 注意事项：
+     * - 餐桌号格式错误、不存在或状态不允许时均弹窗提示并终止操作
+     * - 合并桌操作权限校验通过 checkAndWarnIfNotMainOrderTable 方法复用
+     * - 所有界面更新由 frame 层协调，确保数据一致性
+     *
+     * 异常处理：
+     * - 数字解析失败时提示格式错误
+     * - 系统异常时记录堆栈并显示通用错误信息
+     */
     private void handleDineInTableConfirm(String tableNumStr) {
         if (currentOrderType != OrderType.DINE_IN) {
             // 外卖/配送模式：提示用户无需确认餐桌
@@ -2053,10 +2488,7 @@ public class HomePanel extends JPanel {
                 String displayId = targetTable.getDisplayId();
                 Tables.TableStatus status = targetTable.getStatus();
 
-                // ═══════════════════════════════════════════════════════════
-                // 🔧【核心修改】允许 OCCUPIED 或 (RESERVED + pre_order=true) 点餐
-                // ═══════════════════════════════════════════════════════════
-
+                // 【核心修改】允许 OCCUPIED 或 (RESERVED + pre_order=true) 点餐
                 // 1️ 先处理 RESERVED 状态：必须 pre_order=true 才能点餐
                 if (status == Tables.TableStatus.RESERVED) {
                     // 通过 reserved_table_ids 查询包含该餐桌的预定记录
@@ -2127,16 +2559,34 @@ public class HomePanel extends JPanel {
         JOptionPane.showMessageDialog(frame, message, title, JOptionPane.ERROR_MESSAGE);
     }
 
-
+    /**
+     * 检查并警告是否为可操作的主餐桌
+     *
+     * 功能说明：
+     * 验证指定餐桌是否允许执行点餐/上菜/结账等操作，针对不同餐桌类型应用不同规则：
+     * - 合并桌（MERGED）：必须通过编号较小的餐桌操作，否则弹窗警告并拒绝操作
+     * - 聚餐桌（GROUPED）：允许每张桌子独立操作，直接放行
+     * - 普通餐桌（MAIN/SUBTABLE）：直接允许操作
+     *
+     * @param displayId 餐桌显示编号（如 "7" 或 "7a"）
+     * @return true=允许操作，false=操作被拒绝（合并桌非主桌或餐桌不存在）
+     *
+     * 业务规则：
+     * - 合并餐桌的操作权限归属于编号较小的餐桌，防止数据冲突
+     * - 聚餐桌支持单桌独立点餐和结账，无需强制通过主桌操作
+     * - 餐桌不存在时返回 false，调用方需处理空值情况
+     *
+     * 交互行为：
+     * - 当用户尝试通过非主桌操作合并桌时，弹出警告提示并指引切换至正确餐桌
+     * - 其他场景无弹窗干扰，静默返回校验结果
+     */
     private boolean checkAndWarnIfNotMainOrderTable(String displayId) {
         Tables targetTable = service.getTableById(displayId);
         if (targetTable == null) {
             return false;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 【情况1】合并桌（MERGED）- 保留原有逻辑（必须通过主桌操作）
-        // ═══════════════════════════════════════════════════════════
+        // 合并桌（MERGED）- 保留原有逻辑（必须通过主桌操作）
         if (targetTable.getTableType() == Tables.TableType.MERGED) {
             String partnerDisplayId = targetTable.getMergedWith();
             if (partnerDisplayId == null || partnerDisplayId.isEmpty()) {
@@ -2163,9 +2613,8 @@ public class HomePanel extends JPanel {
             return true;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 【情况2】聚餐桌（GROUPED）- 🔧 修改：允许单独操作，不再限制
-        // ═══════════════════════════════════════════════════════════
+
+        // 【情况2】聚餐桌（GROUPED）-  修改：允许单独操作，不再限制
         if (targetTable.getTableType() == Tables.TableType.GROUPED) {
             // 🔧 聚餐桌允许每张桌子独立点餐/结账，直接返回 true
             // 如需提示用户当前是聚餐桌，可添加可选提示（非强制）：
@@ -2173,28 +2622,57 @@ public class HomePanel extends JPanel {
         String groupWith = targetTable.getGroupWith();
         if (groupWith != null && !groupWith.isEmpty()) {
             JOptionPane.showMessageDialog(frame,
-                    "💡 提示：当前为聚餐桌 #" + displayId + "，可单独点餐。\n" +
+                    " 提示：当前为聚餐桌 #" + displayId + "，可单独点餐。\n" +
                     "关联餐桌：" + groupWith,
                     "聚餐桌提示",
                     JOptionPane.INFORMATION_MESSAGE);
         }
         */
-            return true;  // ✅ 关键：直接允许操作
+            return true;  //  关键：直接允许操作
         }
-
-        // ═══════════════════════════════════════════════════════════
         // 【情况3】普通餐桌（MAIN/SUBTABLE）- 直接允许
-        // ═══════════════════════════════════════════════════════════
         return true;
     }
 
     /**
-     * 处理确认下单（完整版：支持合并订单 + 三模式 + 金额分离 + 结账后重单）
+     * 处理确认订单请求
+     *
+     * 功能说明：
+     * 将临时订单转换为正式订单，支持堂食/外卖/配送/预约四种订单类型，并处理聚餐桌、结账后重单、订单追加等复杂场景。
+     *
+     * 核心业务流程：
+     * 1. 验证临时订单是否存在，空订单则提示用户先点菜
+     * 2. 识别订单类型，判断是否为结账后重新点单（堂食专属），需二次确认
+     * 3. 外卖/配送订单检查是否已存在：
+     *    - 新订单：弹窗收集客户姓名、电话、配送地址及配送费
+     *    - 已存在订单：复用已有客户信息，支持追加菜品
+     * 4. 配送订单状态校验：仅"未配送"状态允许追加菜品
+     * 5. 聚餐桌特殊处理：
+     *    - 堂食聚餐桌：解析关联桌号列表，调用专用方法提交订单
+     *    - 预约聚餐桌：通过预约号关联，无需传入桌号列表
+     * 6. 普通订单处理：遍历临时订单，校验菜品有效性及数量范围，构建订单明细列表
+     * 7. 金额计算：菜品总价 + 配送费（仅配送模式），四舍五入保留两位小数
+     * 8. 用户最终确认：显示订单摘要，配送订单支持追加配送费复选框
+     * 9. 调用 Controller 执行下单，成功后清空临时订单并刷新界面显示
+     *
+     * 参数说明：
+     * @param e 动作事件对象，由按钮点击触发（本方法未直接使用）
+     *
+     * 注意事项：
+     * - 堂食订单必须选择有效餐桌，且餐桌状态为占用中或已预约
+     * - 合并餐桌必须通过编号较小的主桌操作
+     * - 聚餐桌一键点餐使用特殊 Key 格式：A1[BATCH:13,14,15]
+     * - 外卖订单电话为必填项，配送地址和配送费仅在配送模式必填
+     * - 结账后重单会清空原订单明细，需谨慎操作
+     * - 所有界面更新通过 SwingUtilities.invokeLater 确保线程安全
+     *
+     * 异常处理：
+     * - 菜品不存在或已售罄时弹窗提示并终止操作
+     * - 数量格式错误或超出范围时提示用户重新输入
+     * - Controller 调用异常由下层捕获，本方法不重复处理
      */
     private void handleConfirmOrder(ActionEvent e) {
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤1】获取并验证临时订单
-        // ═══════════════════════════════════════════════════════════
+        // 步骤1 获取并验证临时订单
         Map<String, Integer> tempOrder = frame.getTemporaryOrderForTable(currentTableNumber);
         if (tempOrder == null || tempOrder.isEmpty()) {
             JOptionPane.showMessageDialog(this, "没有临时订单可以确认，请先点菜",
@@ -2202,22 +2680,19 @@ public class HomePanel extends JPanel {
             return;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤2】获取当前订单类型
-        // ═══════════════════════════════════════════════════════════
+        // 步骤2 获取当前订单类型
         OrderType orderType = frame.getCurrentOrderType();
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增步骤2.3】判断是否为「结账后重新点单」
-        // ═══════════════════════════════════════════════════════════
-        final boolean isReorderAfterCheckout;  // 🔧 声明为final供lambda使用
+
+        // 步骤2.3 判断是否为「结账后重新点单」
+        final boolean isReorderAfterCheckout;  //  声明为final供lambda使用
 
         if (orderType == OrderType.DINE_IN && currentTableNumber != null &&
                 !currentTableNumber.isEmpty() && !"未选择".equals(currentTableNumber)) {
             // 堂食模式：检查餐桌是否已结账
             Tables table = service.getTableById(currentTableNumber);
             if (table != null && table.getOrderStatus() == Tables.OrderStatus.CHECKED_OUT) {
-                // 🔧 弹出二次确认对话框
+                //  弹出二次确认对话框
                 int confirm = JOptionPane.showConfirmDialog(
                         this,
                         "餐桌 " + currentTableNumber + " 的订单已结账，是否要再次点单？\n" +
@@ -2239,11 +2714,10 @@ public class HomePanel extends JPanel {
             isReorderAfterCheckout = false;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增步骤2.5】检查外卖订单是否已存在（决定是否弹窗）
-        // ═══════════════════════════════════════════════════════════
-        final boolean orderExists;
-        final com.restaurant.entity.Order existingOrder;
+
+        // 步骤2.5 检查外卖订单是否已存在（决定是否弹窗）
+        final boolean orderExists;//标记外卖订单是否已存在数据库，用于判断新建或追加逻辑
+        final com.restaurant.entity.Order existingOrder;//缓存已查询到的订单对象，避免重复数据库查询
 
         if (orderType != OrderType.DINE_IN && orderType != OrderType.RESERVATION &&
                 currentTableNumber != null && !currentTableNumber.isEmpty() && !"待下单".equals(currentTableNumber)) {
@@ -2257,9 +2731,8 @@ public class HomePanel extends JPanel {
             existingOrder = null;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增步骤 2.6】配送订单状态验证（只有未配送才能追加菜品）
-        // ═══════════════════════════════════════════════════════════
+
+        // 步骤 2.6 配送订单状态验证（只有未配送才能追加菜品）
         if (orderType == OrderType.DELIVERY && orderExists && existingOrder != null) {
             Order.DeliveryStatus deliveryStatus = existingOrder.getDeliveryStatus();
             if (deliveryStatus != Order.DeliveryStatus.NOT_DELIVERED) {
@@ -2276,15 +2749,14 @@ public class HomePanel extends JPanel {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【步骤3】收集客户信息（仅外卖模式 + 新订单）
-        // ═══════════════════════════════════════════════════════════
-        String customerName = null;
+        String customerName = null;// 局部变量必须显式初始化才能使用，=null 表示"暂时无值"，避免编译报错且意图更清晰
         String customerPhone = null;
         String deliveryAddress = null;
         Double deliveryFee = 0.0;
 
-        // 🔧【核心修复】预约订单不需要收集客户信息（已在预约时收集）
+        // 【核心修复】预约订单不需要收集客户信息（已在预约时收集）
         if (orderType == OrderType.RESERVATION) {
             // 预约订单：直接从预约记录中获取客户信息（可选，用于订单关联）
             if (currentTableNumber != null && !currentTableNumber.isEmpty()) {
@@ -2297,10 +2769,10 @@ public class HomePanel extends JPanel {
             }
             deliveryFee = 0.0;  // 预约订单无配送费
         }
-        // 🔧 外卖订单（自取/配送）才需要弹窗收集客户信息
+        //  外卖订单（自取/配送）才需要弹窗收集客户信息
         else if (orderType != OrderType.DINE_IN) {
             if (!orderExists) {
-                // 🔹 新外卖订单：弹窗收集客户信息
+                //  新外卖订单：弹窗收集客户信息
                 int rowCount = (orderType == OrderType.DELIVERY) ? 4 : 3;
                 JPanel infoPanel = new JPanel(new GridLayout(rowCount, 2, 8, 8));
                 infoPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
@@ -2362,7 +2834,7 @@ public class HomePanel extends JPanel {
                     deliveryFee = 0.0;
                 }
             }
-            // 🔧 订单已存在时，从数据库读取客户信息（不弹窗）
+            //  订单已存在时，从数据库读取客户信息（不弹窗）
             else if (existingOrder != null) {
                 customerPhone = existingOrder.getCustomerPhone();
                 customerName = existingOrder.getCustomerName();
@@ -2370,10 +2842,10 @@ public class HomePanel extends JPanel {
                     deliveryAddress = existingOrder.getDeliveryAddress();
                     deliveryFee = 0.0;  // 追加时先设为0，后续计算
                 }
-                System.out.println("📋 使用已有订单信息：电话=" + customerPhone);
+                System.out.println(" 使用已有订单信息：电话=" + customerPhone);
             }
         } else {
-            // 🔹 堂食模式验证
+            //  堂食模式验证
             if (currentTableNumber == null || currentTableNumber.isEmpty() || "未选择".equals(currentTableNumber)) {
                 JOptionPane.showMessageDialog(this, "堂食订单请先选择餐桌", "提示", JOptionPane.WARNING_MESSAGE);
                 return;
@@ -2393,12 +2865,12 @@ public class HomePanel extends JPanel {
             deliveryFee = 0.0;
         }
 
-        boolean isDineInGroupedTable = false;
-        List<String> dineInGroupedTableIds = new ArrayList<>();
+        boolean isDineInGroupedTable = false;//
+        List<String> dineInGroupedTableIds = new ArrayList<>();//
 
         if (orderType == OrderType.DINE_IN && currentTableNumber != null) {
             Tables table = service.getTableById(currentTableNumber);
-            // 🔧【核心】仅聚餐桌启用特殊逻辑
+            // 【核心】仅聚餐桌启用特殊逻辑
             if (table != null && table.getTableType() == Tables.TableType.GROUPED) {
                 isDineInGroupedTable = true;
                 // 解析聚餐桌的所有关联桌号（格式："13,14,15"）
@@ -2408,14 +2880,13 @@ public class HomePanel extends JPanel {
                         dineInGroupedTableIds.add(id.trim());
                     }
                 }
-                System.out.println("🔧 检测到堂食聚餐桌: " + currentTableNumber +
+                System.out.println(" 检测到堂食聚餐桌: " + currentTableNumber +
                         "，关联桌号: " + dineInGroupedTableIds);
             }
         }
 
-// ═══════════════════════════════════════════════════════════
-// 🔧【新增步骤 3.9】预约聚餐桌点餐特殊处理（仅预约类型=GROUP）
-// ═══════════════════════════════════════════════════════════
+
+        // 步骤 3.9预约聚餐桌点餐特殊处理（仅预约类型=GROUP）
         boolean isReservationGrouped = false;
 
         if (orderType == OrderType.RESERVATION && currentTableNumber != null) {
@@ -2423,14 +2894,13 @@ public class HomePanel extends JPanel {
             TableReservation reservation = controller.getReservationDetail(currentTableNumber);
             if (reservation != null && "GROUP".equals(reservation.getGroupType())) {
                 isReservationGrouped = true;
-                System.out.println("🔧 检测到预约聚餐桌: reservationId=" + currentTableNumber +
+                System.out.println(" 检测到预约聚餐桌: reservationId=" + currentTableNumber +
                         ", groupType=GROUP");
             }
         }
 
-// ═══════════════════════════════════════════════════════════
-// 🔧【分支1】堂食聚餐桌：需要传入 groupedTableIds
-// ═══════════════════════════════════════════════════════════
+
+        //堂食聚餐桌：需要传入 groupedTableIds
         if (isDineInGroupedTable && !dineInGroupedTableIds.isEmpty()) {
             List<OrderItem> processedItems = new ArrayList<>();
             double itemsTotal = 0.0;
@@ -2443,8 +2913,8 @@ public class HomePanel extends JPanel {
 
                 if (itemKey.contains("[BATCH:")) {
                     int batchStart = itemKey.indexOf("[BATCH:");
-                    pureItemCode = itemKey.substring(0, batchStart);
-                    assignedTableIds = itemKey.substring(batchStart + 7, itemKey.length() - 1);
+                    pureItemCode = itemKey.substring(0, batchStart);//从批量点餐Key中提取纯菜品编号，去除 [BATCH:xxx] 后缀
+                    assignedTableIds = itemKey.substring(batchStart + 7, itemKey.length() - 1);//解析聚餐桌批量点餐的目标桌号列表
 
                     MenuItem menuItem = menuItemService.getMenuItemByCode(pureItemCode);
                     if (menuItem == null || !menuItem.isActive()) {
@@ -2501,15 +2971,19 @@ public class HomePanel extends JPanel {
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
                 refreshDineInOrders();
-                JOptionPane.showMessageDialog(this, "✅ 堂食聚餐桌订单已提交！", "成功",
+
+                if (service != null) {
+                    service.refreshTableCache();
+                }
+
+                JOptionPane.showMessageDialog(this, " 堂食聚餐桌订单已提交！", "成功",
                         JOptionPane.INFORMATION_MESSAGE);
             });
             return;  //  提前返回
         }
 
-// ═══════════════════════════════════════════════════════════
-// 🔧【分支2】预约聚餐桌：无需传入 groupedTableIds
-// ═══════════════════════════════════════════════════════════
+
+        // 【分支2】预约聚餐桌：无需传入 groupedTableIds
         if (isReservationGrouped) {
             List<OrderItem> processedItems = new ArrayList<>();
             double itemsTotal = 0.0;
@@ -2518,7 +2992,7 @@ public class HomePanel extends JPanel {
                 String itemKey = entry.getKey().trim().toUpperCase();
                 int qty = entry.getValue();
                 String pureItemCode;
-                String assignedTableIds = null;
+                String assignedTableIds = null;// 因爲上面已經是null了
 
                 if (itemKey.contains("[BATCH:")) {
                     int batchStart = itemKey.indexOf("[BATCH:");
@@ -2556,7 +3030,7 @@ public class HomePanel extends JPanel {
                     orderItem.setItemName(menuItem.getName());
                     orderItem.setQuantity(qty);
                     orderItem.setPriceAtOrder(menuItem.getPrice());
-                    // 🔧 预约订单用 reservation_id 作为 assignedTableDisplayId
+                    //  预约订单用 reservation_id 作为 assignedTableDisplayId
                     orderItem.setAssignedTableDisplayId(currentTableNumber);
                     orderItem.setStatus("UNSERVED");
                     orderItem.setServedQuantity(0);
@@ -2567,11 +3041,11 @@ public class HomePanel extends JPanel {
 
             itemsTotal = Math.round(itemsTotal * 100.0) / 100.0;
 
-            // 🔧 调用新方法（无需传入 groupedTableIds）
+            //  调用新方法（无需传入 groupedTableIds）
             frame.addOrderItemsForReservationGroupedTable(
                     currentTableNumber,      // reservationId
                     processedItems           // 菜品列表
-                    // ⭐ 不需要传入 groupedTableIds
+                    //  不需要传入 groupedTableIds
             );
 
             SwingUtilities.invokeLater(() -> {
@@ -2580,11 +3054,11 @@ public class HomePanel extends JPanel {
                 frame.setCurrentTableNumber(currentTableNumber);
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
-                refreshReservationOrders();  // 🔧 预约订单刷新预约列表
-                JOptionPane.showMessageDialog(this, "✅ 预约聚餐桌订单已提交！", "成功",
+                refreshReservationOrders();  //  预约订单刷新预约列表
+                JOptionPane.showMessageDialog(this, " 预约聚餐桌订单已提交！", "成功",
                         JOptionPane.INFORMATION_MESSAGE);
             });
-            return;  // 🔑 提前返回
+            return;  //  提前返回
         }
         List<OrderItem> orderItems = new ArrayList<>();
         double itemsTotal = 0.0;
@@ -2609,14 +3083,12 @@ public class HomePanel extends JPanel {
         }
         itemsTotal = Math.round(itemsTotal * 100.0) / 100.0;
 
-        // 🔧 计算最终总金额：仅配送模式加配送费
+        //  计算最终总金额：仅配送模式加配送费
         double finalTotalAmount = itemsTotal +
                 (orderType == OrderType.DELIVERY ? deliveryFee : 0.0);
         finalTotalAmount = Math.round(finalTotalAmount * 100.0) / 100.0;
 
-        // ═══════════════════════════════════════════════════════════
         // 【步骤5】用户最终确认（嵌入追加配送费复选框）
-        // ═══════════════════════════════════════════════════════════
         JPanel confirmPanel = new JPanel(new BorderLayout(10, 10));
         confirmPanel.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
 
@@ -2626,7 +3098,7 @@ public class HomePanel extends JPanel {
             msg.append("共 ").append(orderItems.size()).append(" 项，总计 ¥")
                     .append(String.format("%.2f", finalTotalAmount));
         } else if (orderType == OrderType.RESERVATION) {
-            // 🔧 预约订单确认信息
+            //  预约订单确认信息
             msg.append("确认预约订单？\n");
             msg.append("预约号: ").append(currentTableNumber).append("\n");
             if (customerName != null) msg.append("客人: ").append(customerName).append("\n");
@@ -2653,7 +3125,7 @@ public class HomePanel extends JPanel {
 
         confirmPanel.add(new JLabel("<html>" + msg.toString().replaceAll("\n", "<br>") + "</html>"), BorderLayout.CENTER);
 
-        // 🔧 仅配送模式+已存在订单：显示"追加配送费"复选框
+        //  仅配送模式+已存在订单：显示"追加配送费"复选框
         JCheckBox addFeeCheckBox = null;
         if (orderExists && orderType == OrderType.DELIVERY) {
             addFeeCheckBox = new JCheckBox("追加配送费（默认不追加，勾选后输入金额）");
@@ -2674,7 +3146,7 @@ public class HomePanel extends JPanel {
             return;
         }
 
-        // 🔧 如果勾选了追加配送费，弹出输入框
+        //  如果勾选了追加配送费，弹出输入框
         if (addFeeCheckBox != null && addFeeCheckBox.isSelected()) {
             Double originalFee = (existingOrder != null && existingOrder.getDeliveryFee() != null)
                     ? existingOrder.getDeliveryFee() : 0.0;
@@ -2695,12 +3167,12 @@ public class HomePanel extends JPanel {
                                 "追加金额不能为负数", "输入错误", JOptionPane.ERROR_MESSAGE);
                         return;
                     }
-                    // 🔧【关键修复】计算最终配送费 = 原配送费 + 追加金额
+                    // 【关键修复】计算最终配送费 = 原配送费 + 追加金额
                     deliveryFee = Math.round((originalFee + additionalFee) * 100.0) / 100.0;
                     // 重新计算总金额
                     finalTotalAmount = itemsTotal + deliveryFee;
                     finalTotalAmount = Math.round(finalTotalAmount * 100.0) / 100.0;
-                    System.out.println("💰 配送费计算：原=" + originalFee +
+                    System.out.println(" 配送费计算：原=" + originalFee +
                             ", 追加=" + additionalFee + ", 最终=" + deliveryFee);
                 } catch (NumberFormatException ex) {
                     JOptionPane.showMessageDialog(this,
@@ -2710,9 +3182,8 @@ public class HomePanel extends JPanel {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
+       
         // 【步骤6】调用 Controller 处理下单（异步，传入 isReorderAfterCheckout）
-        // ═══════════════════════════════════════════════════════════
         final String finalTableNumber = currentTableNumber;
         final List<OrderItem> finalOrderItems = new ArrayList<>(orderItems);
         final OrderType finalOrderType = orderType;
@@ -2726,12 +3197,12 @@ public class HomePanel extends JPanel {
         final Double finalOriginalFee = orderExists && existingOrder != null && existingOrder.getDeliveryFee() != null
                 ? existingOrder.getDeliveryFee() : 0.0;
 
-        // 🔧【关键】调用 Controller 时传入 isReorderAfterCheckout 参数
+        // 【关键】调用 Controller 时传入 isReorderAfterCheckout 参数
         controller.handleConfirmOrder(
                 finalTableNumber, finalOrderItems, finalOrderType,
                 finalCustomerName, finalCustomerPhone, finalDeliveryAddress,
                 finalDeliveryFee,
-                isReorderAfterCheckout,  // 🔧 新增参数：结账后重单标志
+                isReorderAfterCheckout,  //  新增参数：结账后重单标志
                 () -> SwingUtilities.invokeLater(() -> {
                     // 1. 清空临时订单
                     frame.clearTemporaryOrder(finalTableNumber);
@@ -2740,7 +3211,7 @@ public class HomePanel extends JPanel {
                     frame.setCurrentOrderType(finalOrderType);
                     frame.setCurrentTableNumber(finalTableNumber);
 
-                    // 🔧【关键修复】如果是追加菜品+配送订单+有配送费变更，更新数据库中的配送费
+                    // 【关键修复】如果是追加菜品+配送订单+有配送费变更，更新数据库中的配送费
                     if (orderExists && finalOrderType == OrderType.DELIVERY && finalExistingOrderId != null) {
                         try {
                             Double finalFee = finalDeliveryFee != null ? finalDeliveryFee : 0.0;
@@ -2763,7 +3234,7 @@ public class HomePanel extends JPanel {
                     switch (finalOrderType) {
                         case DINE_IN -> refreshDineInOrders();
                         case PICKUP, DELIVERY -> refreshTakeoutOrders();
-                        case RESERVATION -> refreshReservationOrders();  // 🔧 新增：刷新预约订单列表
+                        case RESERVATION -> refreshReservationOrders();  //  新增：刷新预约订单列表
                     }
 
                     // 5. 成功提示
@@ -2777,7 +3248,7 @@ public class HomePanel extends JPanel {
                                     "\n总计: ¥" + String.format("%.2f", finalFinalTotalAmount);
                         }
                     } else if (finalOrderType == OrderType.RESERVATION) {
-                        // 🔧【修复】使用 finalCustomerName/finalCustomerPhone 替代 customerName/customerPhone
+                        // 【修复】使用 finalCustomerName/finalCustomerPhone 替代 customerName/customerPhone
                         successMsg = "✅ 预约订单已提交！\n" +
                                 "预约号: " + finalTableNumber + "\n" +
                                 (finalCustomerName != null ? "客人: " + finalCustomerName + "\n" : "") +
@@ -2798,7 +3269,39 @@ public class HomePanel extends JPanel {
         );
     }
 
-
+    /**
+     * 显示确认上菜对话框
+     *
+     * 功能说明：
+     * 提供三种上菜操作模式供用户选择：
+     * 1. 手动指定菜品：输入菜品编号和数量（支持多个，逗号分隔），逐项执行上菜
+     * 2. 一键全部确认：将当前餐桌所有未上桌菜品批量标记为已上桌
+     * 3. 聚餐桌同类菜品上菜：针对聚餐桌场景，选择同一菜品的多条记录批量上菜
+     *
+     * 界面特性：
+     * - 自动预填当前餐桌号并设为只读
+     * - 聚餐桌检测：非聚餐桌时禁用"同类菜品上菜"选项
+     * - 动态切换输入区域：根据选中模式显示/隐藏菜品编号、数量、关联桌号等输入项
+     * - 操作提示：聚餐桌模式下显示上菜顺序建议（先共享菜品，后单桌菜品）
+     *
+     * 业务流程：
+     * 1. 验证餐桌号有效性及主桌规则
+     * 2. 根据用户选择的模式执行对应上菜逻辑
+     * 3. 手动模式：解析输入参数，逐项调用 markItemsAsServed 执行上菜
+     * 4. 一键模式：调用 markAllItemsAsServed 批量处理
+     * 5. 聚餐桌同类模式：调用 handleGroupedTableSameItemsServing 精确选择记录上菜
+     * 6. 操作成功后刷新临时订单、正式订单及堂食订单列表显示
+     *
+     * 参数说明：
+     * @param tableNumber 目标餐桌显示编号，若为空则使用当前选中餐桌
+     *
+     * 注意事项：
+     * - 仅占用中（OCCUPIED）的餐桌可执行上菜操作
+     * - 合并餐桌必须通过编号较小的主桌操作
+     * - 聚餐桌同类菜品上菜时，自动查询并显示关联桌号列表
+     * - 上菜数量未填写时默认为 1，建议数量大于 1 的菜品优先输入
+     * - 操作结果通过弹窗提示，失败项不影响其他记录继续执行
+     */
     private void showConfirmServedDialog(String tableNumber) {
         // 創建對話框
         JFrame dialog = new JFrame("確認上桌");
@@ -2863,7 +3366,7 @@ public class HomePanel extends JPanel {
         final String targetTableNumber = (tableNumber != null && !tableNumber.isEmpty() && !"未选择".equals(tableNumber))
                 ? tableNumber
                 : currentTableNumber;
-// 🔧【新增】检查是否为聚餐桌，如果不是则禁用"聚餐桌同类菜品上菜"选项
+// 检查是否为聚餐桌，如果不是则禁用"聚餐桌同类菜品上菜"选项
         Tables table = service.getTableById(targetTableNumber);
         boolean isGroupedTable = (table != null && table.getTableType() == Tables.TableType.GROUPED);
         if (!isGroupedTable) {
@@ -2877,7 +3380,7 @@ public class HomePanel extends JPanel {
         if (!"未选择".equals(targetTableNumber)) {
             tableNumberField.setText(targetTableNumber);
             tableNumberField.setEditable(false);
-            // 🔧【關鍵修復】只在初始化時設置文本，不查詢數據庫
+            // 【關鍵修復】只在初始化時設置文本，不查詢數據庫
             // 聚餐桌號只在切換到"聚餐桌同类菜品上菜"時才查詢顯示
             groupedTablesDisplayLabel.setText("");
             groupedTablesDisplayLabel.setForeground(Color.GRAY);
@@ -2885,7 +3388,7 @@ public class HomePanel extends JPanel {
 
         mainPanel.add(inputPanel, BorderLayout.CENTER);
 
-        // 🔧【核心新增】操作提示面板 (位于输入框和按钮之间)
+        // 操作提示面板 (位于输入框和按钮之间)
         JPanel hintPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         hintPanel.setBackground(new Color(245, 248, 255));
         hintPanel.setOpaque(false);
@@ -2918,15 +3421,15 @@ public class HomePanel extends JPanel {
 
         dialog.add(mainPanel, BorderLayout.CENTER);
 
-        // 🔧【關鍵修復】初始化可見性：默認"手動指定菜品"，不顯示聚餐桌號
+        // 【關鍵修復】初始化可見性：默認"手動指定菜品"，不顯示聚餐桌號
         itemIdLabel.setVisible(true);
         itemIdField.setVisible(true);
         quantityLabel.setVisible(true);
         quantityField.setVisible(true);
-        groupedTablesLabel.setVisible(false);  // 🔧 初始隱藏
-        groupedTablesDisplayLabel.setVisible(false);  // 🔧 初始隱藏
+        groupedTablesLabel.setVisible(false);  //  初始隱藏
+        groupedTablesDisplayLabel.setVisible(false);  // 初始隱藏
 
-        // 🔧 初始提示可见性：如果默认是手动且是聚餐桌，则显示提示
+        //  初始提示可见性：如果默认是手动且是聚餐桌，则显示提示
         if (manualOption.isSelected() && isGroupedTable) {
             hintPanel.setVisible(true);
         } else {
@@ -2959,10 +3462,10 @@ public class HomePanel extends JPanel {
                 dialog.setSize(700, 280);
 
             } else if (sameItemsOption.isSelected()) {
-                // 🔧 聚餐桌同類菜品上菜：
+                //  聚餐桌同類菜品上菜：
                 // - 顯示菜品編號輸入框
                 // - 隱藏數量輸入框
-                // - 🔧 查詢並顯示關聯桌號
+                // -  查詢並顯示關聯桌號
                 itemIdLabel.setVisible(true);
                 itemIdField.setVisible(true);
                 quantityLabel.setVisible(false);
@@ -2971,7 +3474,7 @@ public class HomePanel extends JPanel {
                 groupedTablesDisplayLabel.setVisible(true);
                 hintPanel.setVisible(false);
 
-                // 🔧【關鍵】只有切換到這個選項時才查詢聚餐桌號 （targetTableNumber：lambda 表达式中使用的变量应为 final 或有效 final）
+                // 【關鍵】只有切換到這個選項時才查詢聚餐桌號 （targetTableNumber：lambda 表达式中使用的变量应为 final 或有效 final）
                 if (!targetTableNumber.isEmpty() && !"未选择".equals(targetTableNumber)) {
                     Tables currentTable = service.getTableById(targetTableNumber);//作用域中已定义变量 'table'
                     if (currentTable != null && currentTable.getTableType() == Tables.TableType.GROUPED &&
@@ -3029,7 +3532,8 @@ public class HomePanel extends JPanel {
 
                 String[] itemIds = itemId.split(",");
                 String[] quantityStrs = quantityStr.split(",");
-                int[] quantities = new int[itemIds.length];
+                // 记住：只要是用 [] 指定长度创建数组（而非直接赋值 {...}），就必须写 new！
+                int[] quantities = new int[itemIds.length];// 创建数量数组，长度与菜品编号数组一致，用于存储各菜品的上桌数量
                 boolean allValid = true;
 
                 for (int i = 0; i < itemIds.length; i++) {
@@ -3107,7 +3611,7 @@ public class HomePanel extends JPanel {
      */
     private void handleGroupedTableSameItemsServing(JFrame dialog, String tableNumber, String itemCode) {
         try {
-            // 🔧【新增】验证餐桌状态必须为 OCCUPIED
+            // 【新增】验证餐桌状态必须为 OCCUPIED
             Tables table = service.getTableById(tableNumber);
             if (table == null) {
                 JOptionPane.showMessageDialog(dialog, "未找到餐桌：" + tableNumber, "错误", JOptionPane.ERROR_MESSAGE);
@@ -3148,29 +3652,29 @@ public class HomePanel extends JPanel {
                 return;
             }
 
-            // 3. 🔧【核心修改】按菜品编号分组，检查是否有多个记录
+            // 3. 【核心修改】按菜品编号分组，检查是否有多个记录
             Map<String, List<OrderItem>> itemsByCode = new LinkedHashMap<>();
             for (OrderItem item : selectableItems) {
                 String code = item.getItemCode().toUpperCase();
                 itemsByCode.computeIfAbsent(code, k -> new ArrayList<>()).add(item);
             }
 
-            // 4. 🔧【核心逻辑】遍历每个菜品
+            // 4. 【核心逻辑】遍历每个菜品
             for (Map.Entry<String, List<OrderItem>> entry : itemsByCode.entrySet()) {
                 List<OrderItem> sameCodeItems = entry.getValue();
                 String currentCode = entry.getKey();
 
-                // 🔧【新增】检查 quantity_distribution 并提示不均匀分配
+                // 检查 quantity_distribution 并提示不均匀分配
                 checkAndNotifyUnevenDistribution(dialog, sameCodeItems, currentCode);
 
-                // 🔧 如果只有一个记录，直接上菜（不弹窗）
+                //  如果只有一个记录，直接上菜（不弹窗）
                 if (sameCodeItems.size() == 1) {
                     OrderItem singleItem = sameCodeItems.get(0);
                     serveSingleItem(dialog, tableNumber, singleItem);
                     continue;
                 }
 
-                // 🔧 如果有多个记录，弹窗让用户选择
+                //  如果有多个记录，弹窗让用户选择
                 showSelectionDialogForMultipleItems(dialog, tableNumber, sameCodeItems);
             }
 
@@ -3187,7 +3691,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧【新增】检查 quantity_distribution 并提示不均匀分配
+     * 检查 quantity_distribution 并提示不均匀分配
      *
      * @param dialog   对话框
      * @param items    同菜品的订单项列表
@@ -3195,7 +3699,7 @@ public class HomePanel extends JPanel {
      */
     private void checkAndNotifyUnevenDistribution(JFrame dialog, List<OrderItem> items, String itemCode) {
         for (OrderItem item : items) {
-            String distributionStr = item.getQuantityDistribution();
+            String distributionStr = item.getQuantityDistribution();// 获取当前记录的菜品数量分配字符串（JSON格式）
 
             // 如果 distribution 为 null 或空，跳过检查
             if (distributionStr == null || distributionStr.isEmpty()) {
@@ -3203,20 +3707,20 @@ public class HomePanel extends JPanel {
             }
 
             // 解析 JSON 字符串
-            Map<String, Integer> distribution = parseQuantityDistribution(distributionStr);
-            if (distribution == null || distribution.isEmpty()) {
+            Map<String, Integer> distribution = parseQuantityDistribution(distributionStr);// 调用解析方法，将JSON字符串转换为桌号-数量映射
+            if (distribution == null || distribution.isEmpty()) {// 判断解析结果是否为空，解析失败或无数据时跳过
                 continue;
             }
 
             // 检查所有桌号的数量是否一致
             Integer firstQty = null;
             boolean allSame = true;
-            for (Integer qty : distribution.values()) {
-                if (firstQty == null) {
-                    firstQty = qty;
-                } else if (!firstQty.equals(qty)) {
-                    allSame = false;
-                    break;
+            for (Integer qty : distribution.values()) {// 遍历分配映射中的所有数量值
+                if (firstQty == null) {// 如果是第一个数量值
+                    firstQty = qty;// 将其赋值给firstQty作为基准值
+                } else if (!firstQty.equals(qty)) {// 如果当前数量与基准值不相等
+                    allSame = false;// 标记为数量不一致
+                    break;// 发现不一致立即退出循环，无需继续比较
                 }
             }
 
@@ -3301,7 +3805,21 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 辅助方法：直接上菜单个记录（不弹窗）
+     * 直接上菜单个菜品记录
+     *
+     * 功能说明：
+     * 1. 获取菜品的分配餐桌列表，为空时使用当前餐桌号作为兜底
+     * 2. 调用 Controller 执行上菜操作，上桌数量固定为菜品总数量
+     * 3. 记录操作日志，异常时弹出错误提示并打印堆栈
+     *
+     * @param dialog 父窗口，用于显示错误对话框
+     * @param tableNumber 当前操作的餐桌显示编号
+     * @param item 待上菜的订单明细对象
+     *
+     * 注意事项：
+     * - 本方法适用于单条记录的直接上菜，不经过用户二次确认
+     * - 上桌数量强制等于菜品总数量，不支持分批上桌
+     * - 异常处理仅提示用户，不影响主流程继续执行
      */
     private void serveSingleItem(JFrame dialog, String tableNumber, OrderItem item) {
         try {
@@ -3315,10 +3833,10 @@ public class HomePanel extends JPanel {
             controller.handleMarkSpecificOrderItemAsServed(
                     tableNumber,
                     item.getOrderItemId(),
-                    item.getQuantity()  // 🔧 上桌数量 = 总数量
+                    item.getQuantity()  //  上桌数量 = 总数量
             );
 
-            System.out.println("✅ 直接上菜: " + item.getItemName() +
+            System.out.println(" 直接上菜: " + item.getItemName() +
                     " | 桌号: " + assignedTables +
                     " | 数量: " + item.getQuantity());
 
@@ -3331,7 +3849,35 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 辅助方法：显示选择对话框（多个记录时）
+     * 显示多菜品记录选择对话框（聚餐桌同类菜品上菜专用）
+     *
+     * 功能说明：
+     * 1. 展示同一菜品在聚餐桌中的多条订单记录供用户选择
+     * 2. 列表按状态排序：部分上桌的记录优先显示并默认勾选
+     * 3. 支持多选需要上菜的记录，执行批量上菜操作
+     * 4. 上菜前校验：若选中部分上桌记录，提示确认是否继续完成剩余上桌
+     * 5. 逐条执行上菜并统计成功数量，显示操作结果
+     *
+     * 界面特性：
+     * - 表格列：选择/菜品/总数/已上/状态/分配餐桌/记录ID
+     * - 部分上桌行使用黄色背景高亮，提示优先完成
+     * - 数字列居中对齐，文本列左对齐，提升可读性
+     * - 底部提示栏动态显示操作指引
+     *
+     * @param dialog 父窗口，用于模态对话框定位
+     * @param tableNumber 餐桌显示编号（如 "13"）
+     * @param items 待选择的订单记录列表（同一菜品的多条记录）
+     *
+     * 交互流程：
+     * 1. 用户勾选需要上菜的记录（部分上桌项默认已勾选）
+     * 2. 点击确认，若包含部分上桌记录则二次确认
+     * 3. 系统逐条调用 Controller 执行上菜，记录成功数量
+     * 4. 显示执行结果并刷新订单显示界面
+     *
+     * 注意事项：
+     * - 未选择任何记录时弹出提示，阻止空操作
+     * - 单条上菜失败不影响其他记录，继续执行剩余项
+     * - 上菜数量固定为菜品总数量，不支持分批上桌
      */
     private void showSelectionDialogForMultipleItems(JFrame dialog, String tableNumber, List<OrderItem> items) {
         // 排序：优先显示部分上桌的
@@ -3570,7 +4116,7 @@ public class HomePanel extends JPanel {
                 if (targetItem == null) continue;
 
                 try {
-                    // 🔧 上桌数量 = 总数量
+                    //  上桌数量 = 总数量
                     controller.handleMarkSpecificOrderItemAsServed(
                             tableNumber,
                             orderItemId,
@@ -3585,7 +4131,7 @@ public class HomePanel extends JPanel {
             }
 
             if (successCount > 0) {
-                String msg = String.format("✅ 成功上菜 %d 条记录！", successCount);
+                String msg = String.format(" 成功上菜 %d 条记录！", successCount);
                 if (selectedOrderItemIds.size() > successCount) {
                     msg += String.format("（共选择 %d 条，%d 条失败）",
                             selectedOrderItemIds.size(), selectedOrderItemIds.size() - successCount);
@@ -3601,12 +4147,54 @@ public class HomePanel extends JPanel {
     }
 
 
+    /**
+     * 判断是否为单桌分配模式
+     *
+     * @param assignedTableDisplayId 分配的餐桌显示ID（如 "7" 或 "7,8,9"）
+     * @return true=单桌分配（无逗号分隔），false=多桌分配（含逗号分隔）
+     */
     private boolean isSingleTableAssignment(String assignedTableDisplayId) {
         return assignedTableDisplayId == null ||
                 assignedTableDisplayId.isEmpty() ||
                 !assignedTableDisplayId.contains(",");
     }
 
+    /**
+     * 標記菜品為已上桌
+     *
+     * 功能說明：
+     * 將指定餐桌的菜品標記為已上桌狀態，並同步更新訂單明細中的上桌數量和狀態。
+     *
+     * 執行流程：
+     * 1. 基礎參數驗證：檢查餐桌號和菜品編號是否有效
+     * 2. 餐桌狀態校驗：確認餐桌處於「占用中」狀態，且為可操作的主桌
+     * 3. 菜品存在性驗證：確認菜品存在且處於可售狀態
+     * 4. 聚餐桌特殊校驗（僅針對聚餐桌）：
+     *    - 檢查 assigned_table_display_id 判斷是否為單桌分配菜品
+     *    - 狀態為「準備中」的菜品禁止上桌
+     *    - 狀態為「已準備」且為單桌分配時，校驗上桌數量必須等於已準備數量
+     * 5. 調用 Controller 執行業務邏輯，並刷新界面顯示
+     *
+     * 參數說明：
+     * @param parentComponent 父組件，用於顯示對話框
+     * @param tableNumber 餐桌顯示編號（如 "7" 或 "7a"）
+     * @param itemCode 菜品編號（如 "A1"）
+     * @param quantity 本次上桌的數量
+     *
+     * 返回值說明：
+     * @return true 表示操作成功，false 表示操作失敗（參數錯誤/狀態不符/系統異常）
+     *
+     * 異常處理：
+     * - 參數無效或餐桌/菜品不存在時，彈出錯誤提示並返回 false
+     * - 餐桌狀態不允許上菜時，彈出警告提示並返回 false
+     * - 聚餐桌數量校驗失敗時，彈出詳細提示說明正確數量
+     * - 系統異常時記錄日誌並彈出錯誤信息
+     *
+     * 注意事項：
+     * - 普通餐桌跳過 assigned_table_display_id 校驗，直接執行上桌操作
+     * - 聚餐桌的「準備中」狀態菜品需等待廚房準備完成後才能上桌
+     * - 單桌分配的「已準備」菜品必須一次性上桌，不允許分批操作
+     */
     private boolean markItemsAsServed(Component parentComponent, String tableNumber, String itemCode, int quantity) {
         // ===== 1-4. 基礎驗證（保持不變）=====
         if (tableNumber == null || tableNumber.trim().isEmpty()) {
@@ -3643,7 +4231,7 @@ public class HomePanel extends JPanel {
         }
         int itemId = menuItem.getItemId();
 
-        // ===== 5. 🔧【核心修改】聚餐桌 assigned_table_display_id 檢查 + 數量匹配校驗 =====
+        // ===== 5. 【核心修改】聚餐桌 assigned_table_display_id 檢查 + 數量匹配校驗 =====
         try {
             Tables checkTable = service.getTableById(tableNumber);
             boolean isGroupedTable = (checkTable != null &&
@@ -3664,10 +4252,10 @@ public class HomePanel extends JPanel {
                     String status = targetItem.getStatus();
                     int preparedQuantity = targetItem.getPreparedQuantity();
 
-                    // 🔧【核心修复】使用新方法判断是否为单桌分配 主要用來讓準備好的菜品才能全部上菜
+                    // 使用新方法判断是否为单桌分配 主要用來讓準備好的菜品才能全部上菜
                     boolean isSingleTable = isSingleTableAssignment(assignedTableId);
 
-                    // 🔧 PREPARING 狀態禁止上桌
+                    //  PREPARING 狀態禁止上桌
                     if ("PREPARING".equals(status)) {
                         JOptionPane.showMessageDialog(parentComponent,
                                 "聚餐桌中【準備中】的菜品不能上桌！",
@@ -3675,7 +4263,7 @@ public class HomePanel extends JPanel {
                         return false;
                     }
 
-                    // 🔧 PREPARED + 單桌 → 校驗上桌數量必須等於已準備數量
+                    //  PREPARED + 單桌 → 校驗上桌數量必須等於已準備數量
                     if ("PREPARED".equals(status) && isSingleTable) {
                         if (quantity != preparedQuantity) {
                             String errorMsg = String.format(
@@ -3683,7 +4271,7 @@ public class HomePanel extends JPanel {
                                             "菜品：<b>%s</b> (%s)<br>" +
                                             "已準備數量（可上桌）：<b>%d 份</b><br>" +
                                             "您輸入的數量：%d 份<br><br>" +
-                                            "<font color='#4caf50'>✅ 請一次性上桌 %d 份</font></html>",
+                                            "<font color='#4caf50'> 請一次性上桌 %d 份</font></html>",
                                     targetItem.getItemName(), itemCode,
                                     preparedQuantity, quantity, preparedQuantity
                             );
@@ -3724,11 +4312,30 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 一键标记所有菜品为已上桌（支持预约入座弹窗确认）
+     * 一键标记餐桌所有菜品为已上桌
      *
-     * @param parentComponent 父组件
-     * @param tableNumber     餐桌编号（String）
-     * @return 操作是否成功
+     * 功能说明：
+     * 1. 基础验证：检查餐桌号有效性、合并餐桌主桌规则、餐桌占用状态
+     * 2. 场景识别：通过 current_reservation_id 判断是否为预约入座转化的订单
+     * 3. 普通堂食逻辑：直接批量标记所有未上桌菜品，无弹窗干扰
+     * 4. 预约入座逻辑：对状态为 PREPARING/UNSERVED 的菜品逐一向用户确认是否已准备好
+     * 5. 重复菜品检测：聚餐桌场景下，若同一菜品存在多条未完全上桌记录，阻止操作并提示使用精确上菜功能
+     * 6. 业务异常处理：捕获"聚餐桌跳过桌号""分配数量不均匀"等业务规则异常，显示友好提示并中止操作
+     * 7. 结果反馈：根据执行结果显示成功/部分跳过/失败提示，成功后自动刷新订单显示界面
+     *
+     * 参数说明：
+     * @param parentComponent 父组件，用于显示对话框
+     * @param tableNumber 餐桌显示编号（如 "7" 或 "7a"）
+     *
+     * 返回值：
+     * @return true 操作成功完成；false 操作被取消、验证失败或发生异常
+     *
+     * 业务规则：
+     * - 仅占用中（OCCUPIED）的餐桌可执行上菜操作
+     * - 合并餐桌必须通过编号较小的主桌操作
+     * - 预约入座订单的未准备菜品需用户二次确认
+     * - 聚餐桌一键上菜需按桌号顺序执行，禁止跳过中间桌号
+     * - 菜品在各桌分配数量必须均匀，否则无法一键上桌
      */
     private boolean markAllItemsAsServed(Component parentComponent, String tableNumber) {
         // 1. UI 验证：餐桌号
@@ -3772,7 +4379,7 @@ public class HomePanel extends JPanel {
         // ═══════════════════════════════════════════════════════════
         if (!isReservationSeated) {
             try {
-                // 🔥 直接调用 Controller 原有方法，不弹窗、不干预
+                //  直接调用 Controller 原有方法，不弹窗、不干预
                 controller.handleMarkAllItemsAsServed(tableNumber);
 
                 // 成功后刷新 UI
@@ -3799,7 +4406,7 @@ public class HomePanel extends JPanel {
         // ═══════════════════════════════════════════════════════════
         // 【预约入座】对 PREPARING/UNSERVED 菜品弹窗确认,错误标志：记录是否发生业务异常
         // ═══════════════════════════════════════════════════════════
-        boolean hasBusinessError = false;  // 🔧 新增标志
+        boolean hasBusinessError = false;  //  新增标志
 
         try {
             List<OrderItem> orderItems = frame.loadFormalOrderItems(tableNumber);
@@ -3809,7 +4416,7 @@ public class HomePanel extends JPanel {
             }
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【新增】检查是否有重复菜品（同一菜品有多个未完全上桌记录）
+            // 检查是否有重复菜品（同一菜品有多个未完全上桌记录）
             // ═══════════════════════════════════════════════════════════
             Map<String, List<OrderItem>> itemsByCode = new LinkedHashMap<>();
             for (OrderItem item : orderItems) {
@@ -3847,7 +4454,7 @@ public class HomePanel extends JPanel {
                         msg.toString(),
                         "聚餐桌重复菜品提示",
                         JOptionPane.WARNING_MESSAGE);
-                return false;  // 🔑 阻止操作
+                return false;  //  阻止操作
             }
 
             int markedCount = 0;
@@ -3857,7 +4464,7 @@ public class HomePanel extends JPanel {
             for (OrderItem item : orderItems) {
                 String status = item.getStatus();
                 if ("SERVED".equals(status)) {
-                    System.out.println("⏭️ 跳过已上桌菜品: " + item.getItemCode());
+                    System.out.println(" 跳过已上桌菜品: " + item.getItemCode());
                     continue;
                 }
 
@@ -3894,20 +4501,20 @@ public class HomePanel extends JPanel {
                     } catch (Exception e) {
                         String errorMsg = e.getMessage();
 
-                        // 🔧【核心修复】判断是否为"聚餐桌跳过桌号"业务异常
+                        // 【核心修复】判断是否为"聚餐桌跳过桌号"业务异常
                         if (errorMsg != null && errorMsg.contains("聚餐桌一键上桌不能跳过桌号")) {
-                            // 🔧 解析错误信息中的关键数据
+                            //  解析错误信息中的关键数据
                             String currentTable = extractValue(errorMsg, "当前桌号：");
                             String servedTables = extractValue(errorMsg, "已上桌桌号：");
 
-                            // 🔧 显示格式化业务提示弹窗
+                            //  显示格式化业务提示弹窗
                             showGroupedTableServingError(parentComponent, currentTable, servedTables);
 
-                            // 🔧【关键】设置错误标志，中断后续操作
+                            // 【关键】设置错误标志，中断后续操作
                             hasBusinessError = true;
-                            break;  // 🔑 立即退出循环，不再处理后续菜品
+                            break;  //  立即退出循环，不再处理后续菜品
 
-                        }// 2. 🔧【新增】处理“Distribution 不均匀”的错误
+                        }// 2. 处理“Distribution 不均匀”的错误
                         else if (errorMsg != null && errorMsg.contains("分配数量不均匀")) {
                             // 直接弹窗提示，并跳过这道菜（不中断整个循环，或者中断由你决定）
                             JOptionPane.showMessageDialog(parentComponent,
@@ -3932,11 +4539,12 @@ public class HomePanel extends JPanel {
             }
 
             // ═══════════════════════════════════════════════════════════
-            // 🔧【核心修复】只有没有业务错误时，才显示成功提示
+            // 【核心修复】只有没有业务错误时，才显示成功提示
             // ═══════════════════════════════════════════════════════════
             if (!hasBusinessError) {
                 // 结果提示
                 if (skippedCount > 0) {
+                    // 截断过长提示：超过80字符时显示前80位+省略号，避免界面溢出
                     String skipMsg = skippedItems.length() > 80 ?
                             skippedItems.substring(0, 80) + "..." : skippedItems.toString();
                     JOptionPane.showMessageDialog(parentComponent,
@@ -3959,8 +4567,8 @@ public class HomePanel extends JPanel {
                 });
                 return true;
             } else {
-                // 🔧 发生业务错误，不刷新UI，返回false
-                System.out.println("⚠️ 因业务规则错误，操作已中止");
+                //  发生业务错误，不刷新UI，返回false
+                System.out.println(" 因业务规则错误，操作已中止");
                 return false;
             }
 
@@ -3974,7 +4582,7 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 从错误消息中提取指定字段的值
+     *  从错误消息中提取指定字段的值
      *
      * @param message 完整错误消息
      * @param key     字段键名（如 "当前桌号："）
@@ -3991,7 +4599,22 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 🔧 显示聚餐桌上桌顺序错误弹窗（美化版）
+     * 显示聚餐桌菜品上桌顺序错误的提示对话框
+     *
+     * <p>功能说明：
+     * <ul>
+     *   <li>解析并展示已上桌的桌号列表</li>
+     *   <li>高亮显示当前操作的桌号</li>
+     *   <li>提供上桌顺序规则的友好提示（必须相邻，可顺序或回退，不可跳过）</li>
+     *   <li>使用模态对话框阻止用户继续操作，直到确认</li>
+     * </ul>
+     *
+     * <p>业务规则：聚餐桌共享菜品的上桌操作必须遵循相邻桌号原则，
+     * 即当前桌号必须与任意已上桌桌号的数值差为1，防止漏上或错上。
+     *
+     * @param parent 父组件，用于确定对话框的模态归属和居中位置
+     * @param currentTable 当前尝试上桌的餐桌显示编号（如 "16"）
+     * @param servedTables 已上桌的餐桌编号字符串，格式为逗号分隔（如 "15,17"）
      */
     private void showGroupedTableServingError(Component parent, String currentTable, String servedTables) {
         // 解析已上桌桌号列表
@@ -4024,9 +4647,9 @@ public class HomePanel extends JPanel {
         htmlMsg.append("💡 <b>操作提示：</b><br>");
         htmlMsg.append("聚餐桌菜品必须按桌号顺序上桌，<br>");
         htmlMsg.append("当前桌号必须与【已上桌桌号】相邻（差值=1）<br><br>");
-        htmlMsg.append("✅ 正确示例：15 → 16 → 17（顺序）<br>");
-        htmlMsg.append("✅ 正确示例：17 → 16 → 15（回退）<br>");
-        htmlMsg.append("❌ 错误示例：15 → 17（跳过16）</p>");
+        htmlMsg.append(" 正确示例：15 → 16 → 17（顺序）<br>");
+        htmlMsg.append(" 正确示例：17 → 16 → 15（回退）<br>");
+        htmlMsg.append(" 错误示例：15 → 17（跳过16）</p>");
         htmlMsg.append("</body></html>");
 
         JOptionPane.showMessageDialog(
@@ -4038,7 +4661,10 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 辅助方法：获取状态显示文本（带表情符号）
+     * 将订单状态码转换为中文显示文本
+     *
+     * @param status 订单状态字符串（如 "PREPARING", "SERVED" 等）
+     * @return 对应的中文状态描述，若状态为 null 则返回默认提示
      */
     private String getStatusText(String status) {
         if (status == null) return "⚪ 未知";
@@ -4053,7 +4679,30 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 顯示外賣訂單「製作完成」確認對話框
+     * 显示外卖订单确认制作完成对话框
+     *
+     * 功能说明：
+     * 1. 提供两种操作模式：
+     *    - 手动指定菜品：用户输入菜品编号和数量（支持多个，用逗号分隔）
+     *    - 一键全部确认：将订单中所有未完成的菜品标记为制作完成
+     * 2. 自动预填当前外卖订单号，支持手动修改
+     * 3. 验证订单号有效性，确保操作的是活跃订单
+     * 4. 手动模式下支持批量处理多个菜品，数量未填写时默认为1
+     * 5. 操作成功后自动刷新临时订单、正式订单及外卖订单列表显示
+     *
+     * 参数说明：
+     * @param orderNumber 目标订单号，若为空则使用当前外卖订单号或餐桌号
+     *
+     * 交互流程：
+     * 1. 用户选择操作模式（手动/一键）
+     * 2. 手动模式：输入菜品编号和数量，系统逐项验证并执行标记
+     * 3. 一键模式：直接标记订单所有菜品为制作完成
+     * 4. 操作结果通过弹窗提示，并刷新相关界面
+     *
+     * 注意事项：
+     * - 仅对状态为未制作或部分制作的菜品执行标记
+     * - 已制作完成的菜品会被自动跳过
+     * - 操作前建议确认订单状态，避免重复操作
      */
     private void showConfirmTakeoutReadyDialog(String orderNumber) {
         JFrame dialog = new JFrame("確認製作完成");
@@ -4211,7 +4860,21 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 部分標記外賣菜品為製作完成（View 層 - UI 驗證 + 事件轉發）
+     * 標記外賣訂單菜品為製作完成
+     *
+     * <p>功能說明：
+     * <ul>
+     *   <li>驗證訂單號和菜品編號的有效性</li>
+     *   <li>將菜品編號轉換為菜品 ID（通過 View 層查詢）</li>
+     *   <li>調用 Controller 執行標記製作完成的業務邏輯</li>
+     *   <li>操作成功後刷新臨時訂單和正式訂單顯示</li>
+     * </ul>
+     *
+     * @param parentComponent 父組件，用於顯示對話框
+     * @param orderNumber 外賣訂單號
+     * @param itemCode 菜品編號（如 "A1"）
+     * @param quantity 標記完成的數量
+     * @return true=操作成功，false=操作失敗
      */
     private boolean markTakeoutItemsAsReady(Component parentComponent, String orderNumber, String itemCode, int quantity) {
         if (orderNumber == null || orderNumber.trim().isEmpty()) {
@@ -4241,7 +4904,19 @@ public class HomePanel extends JPanel {
     }
 
     /**
-     * 一鍵標記外賣訂單所有菜品為製作完成
+     * 标记外卖订单所有菜品为制作完成
+     *
+     * <p>功能说明：
+     * <ul>
+     *   <li>验证订单号参数有效性</li>
+     *   <li>调用 Controller 执行批量标记操作</li>
+     *   <li>操作成功后刷新临时订单和正式订单显示</li>
+     *   <li>向用户显示操作结果提示</li>
+     * </ul>
+     *
+     * @param parentComponent 父组件，用于显示对话框
+     * @param orderNumber 外卖订单号
+     * @return true=操作成功，false=操作失败
      */
     private boolean markAllTakeoutItemsAsReady(Component parentComponent, String orderNumber) {
         if (orderNumber == null || orderNumber.trim().isEmpty()) {
@@ -4265,13 +4940,20 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 🔧 询问撤销已上桌还是未上桌部分
+     * 显示撤销范围选择对话框
+     *
+     * @param parent 父组件，用于定位对话框
+     * @param itemCode 菜品编号
+     * @param itemName 菜品名称
+     * @param totalQty 菜品总数量
+     * @param servedQty 已上桌数量
+     * @return "SERVED"表示撤销已上桌部分，"UNSERVED"表示撤销未上桌部分，用户取消则返回null
      */
     private String askCancelPartDialog(Component parent, String itemCode, String itemName,
                                        int totalQty, int servedQty) {
 
-//        // 🔧【Debug 1】方法入口：記錄調用參數
-//        System.out.println("🔍 [DEBUG] askCancelPartDialog 被調用: " +
+//        // 【Debug 1】方法入口：記錄調用參數
+//        System.out.println(" [DEBUG] askCancelPartDialog 被調用: " +
 //                "itemCode=" + itemCode +
 //                ", itemName=" + itemName +
 //                ", totalQty=" + totalQty +
@@ -4290,19 +4972,19 @@ public class HomePanel extends JPanel {
                 null, options, options[0]
         );
 
-        // 🔧【Debug 2】用戶選擇後：記錄 choice 值
-//        System.out.println("🔍 [DEBUG] 用戶選擇: choice=" + choice);
+        // 【Debug 2】用戶選擇後：記錄 choice 值
+//        System.out.println(" [DEBUG] 用戶選擇: choice=" + choice);
 
         if (choice < 0) {
-            // 🔧【Debug 3a】用戶取消
-//            System.out.println("🔍 [DEBUG] 用戶取消選擇，返回 null");
+            // 【Debug 3a】用戶取消
+//            System.out.println(" [DEBUG] 用戶取消選擇，返回 null");
             return null;
         }
 
         String result = choice == 0 ? "SERVED" : "UNSERVED";
 
-        // 🔧【Debug 3b】記錄最終返回值
-//        System.out.println("🔍 [DEBUG] 返回結果: " + result +
+        // 【Debug 3b】記錄最終返回值
+//        System.out.println(" [DEBUG] 返回結果: " + result +
 //                " (choice=" + choice + ")");
 
         return result;
@@ -4310,11 +4992,34 @@ public class HomePanel extends JPanel {
 
 
     /**
-     * 統一撤銷菜品對話框（僅堂食需要撤銷原因，外賣不需要）
-     * 🔧 修复：菜品编号比较时统一转大写，确保已上桌菜品能正确触发撤销原因弹窗
-     * 🔧【新增】支持部分上桌菜品选择撤销"已上桌部分"或"未上桌部分"
+     * 统一撤销菜品对话框
+     *
+     * 功能说明：
+     * - 支持堂食订单和外卖订单的菜品撤销操作
+     * - 堂食订单：撤销已上桌菜品时需填写原因，未上桌菜品无需原因
+     * - 外卖订单：撤销菜品无需填写原因
+     * - 支持批量撤销：菜品编号和数量可用逗号分隔输入多个
+     * - 支持聚餐桌特殊模式：
+     *   • 单桌菜品：仅撤销当前餐桌分配的菜品
+     *   • 共同菜品：撤销多桌共享的菜品，智能更新数量分布
+     *   • 删除所有：从所有关联餐桌物理删除该菜品记录
+     * - 支持部分上桌菜品选择撤销"已上桌部分"或"未上桌部分"
+     *
+     * 操作流程：
+     * 1. 输入标识符（餐桌号/订单号/预约号）
+     * 2. 输入菜品编号（支持多个，逗号分隔）
+     * 3. 输入撤销数量（支持多个，逗号分隔，默认为 1）
+     * 4. 聚餐桌场景：选择菜品类型（单桌/共同/删除所有）
+     * 5. 部分上桌菜品：弹窗确认撤销哪部分
+     * 6. 已上桌菜品：填写撤销原因（堂食必填）
+     * 7. 执行撤销并刷新界面
+     *
+     * 注意事项：
+     * - 菜品编号比较时统一转大写，确保匹配准确
+     * - 聚餐桌共同菜品撤销时，会自动更新 quantity_distribution 分布记录
+     * - 撤销原因仅在堂食订单且菜品已上桌时强制要求
+     * - 外卖订单撤销无需原因，流程更简化
      */
-
     private void showCancelOrderItemDialog() {
         // 1. 根據訂單類型獲取標識符 + 標籤文本
         String identifier;
@@ -4349,7 +5054,7 @@ public class HomePanel extends JPanel {
         JLabel quantityLabel = new JLabel("<html>撤銷數量（用逗號\",\"分隔；未填默認為 1）:</html>");
         JTextField quantityField = new JTextField("1");
 
-        // 🔧【新增】菜品类型单选按钮面板（初始隐藏，确认时动态判断）
+        // 菜品类型单选按钮面板（初始隐藏，确认时动态判断）
         JPanel radioPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         radioPanel.setBackground(new Color(245, 248, 255));
 
@@ -4382,7 +5087,7 @@ public class HomePanel extends JPanel {
         inputPanel.add(quantityLabel);
         inputPanel.add(quantityField);
 
-        // 🔧 菜品类型行（默认隐藏，聚餐桌时显示）
+        //  菜品类型行（默认隐藏，聚餐桌时显示）
         JLabel dishTypeLabel = new JLabel("菜品类型:");
         dishTypeLabel.setVisible(false);  //  默认隐藏
         radioPanel.setVisible(false);      //  默认隐藏
@@ -4410,9 +5115,8 @@ public class HomePanel extends JPanel {
         // ===== 取消按鈕 =====
         cancelBtn.addActionListener(evt -> dialog.dispose());
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增】判断是否为聚餐桌，如果是则显示菜品类型选择
-        // ═══════════════════════════════════════════════════════════
+
+        // 判断是否为聚餐桌，如果是则显示菜品类型选择
         if (currentOrderType == OrderType.DINE_IN) {
             Tables table = service.getTableById(identifier);  // 使用 identifier 而不是 inputId
             if (table != null && table.getTableType() == Tables.TableType.GROUPED) {
@@ -4427,13 +5131,9 @@ public class HomePanel extends JPanel {
         }
 
         // ===== 確認按鈕 =====
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】確認按鈕事件處理器（整合聚餐桌專用邏輯 + 部分上桌选择撤销部分）
-        // ═══════════════════════════════════════════════════════════
+        //確認按鈕事件處理器（整合聚餐桌專用邏輯 + 部分上桌选择撤销部分）
         confirmBtn.addActionListener(evt -> {
-            // ═══════════════════════════════════════════════════════════
             // 【阶段 1】基础输入验证（保持不变）
-            // ═══════════════════════════════════════════════════════════
             String inputId = idField.getText().trim();
             if (inputId.isEmpty()) {
                 JOptionPane.showMessageDialog(dialog, idLabel + "不能为空！", "错误", JOptionPane.ERROR_MESSAGE);
@@ -4492,10 +5192,8 @@ public class HomePanel extends JPanel {
             }
             if (!allValid) return;
 
-            // ═══════════════════════════════════════════════════════════
-            // 【阶段 2】🔧 融合方案：分类型处理撤销原因收集
-            // ═══════════════════════════════════════════════════════════
 
+            // 【阶段 2】 融合方案：分类型处理撤销原因收集
             // 全局变量：记录每个菜品的撤销部分 + 全局撤销原因
             Map<String, String> cancelPartMap = new HashMap<>();
             String globalCancellationReason = null;
@@ -4565,9 +5263,8 @@ public class HomePanel extends JPanel {
                 // （在遍历菜品执行时处理）
             }
 
-            // ═══════════════════════════════════════════════════════════
-            // 【阶段 3】🔧 遍历菜品执行撤销
-            // ═══════════════════════════════════════════════════════════
+
+            // 阶段 3 遍历菜品执行撤销
             boolean anySuccess = false;
 
             for (int i = 0; i < itemIds.length; i++) {
@@ -4599,18 +5296,18 @@ public class HomePanel extends JPanel {
                                 continue;
                             }
 
-                            // 🔹 使用提前收集的 cancelPart 和 reason
+                            //  使用提前收集的 cancelPart 和 reason
                             String cancelPart = cancelPartMap.getOrDefault(code, "UNSERVED");
                             String finalReason = globalCancellationReason;
 
-                            // 🔹 兜底：如果提前没问原因但实际需要，此时再问
+                            //  兜底：如果提前没问原因但实际需要，此时再问
                             if (("SERVED".equals(cancelPart) || "PARTIALLY_SERVED".equals(cancelPart)) &&
                                     (finalReason == null || finalReason.isEmpty())) {
                                 finalReason = JOptionPane.showInputDialog(dialog,
                                         "<html><b>⚠️ 菜品已上桌</b><br><br>" +
                                                 "菜品：<b>" + targetItem.getItemName() + "</b> (" + code + ")<br>" +
                                                 "当前状态：<font color='#4caf50'>" +
-                                                ("SERVED".equals(targetItem.getStatus()) ? "✅ 已全部上桌" : "🟠 部分上桌") +
+                                                ("SERVED".equals(targetItem.getStatus()) ? " 已全部上桌" : "🟠 部分上桌") +
                                                 "</font><br><br>" +
                                                 "<font color='#d32f2f'>请输入撤销原因（必填）：</font></html>",
                                         "需要撤销原因",
@@ -4628,7 +5325,7 @@ public class HomePanel extends JPanel {
                                 anySuccess = true;
                                 isGroupedTableCancel = true;
 
-                                System.out.println("🗑️ 聚餐桌单桌菜品撤销成功: " +
+                                System.out.println(" 聚餐桌单桌菜品撤销成功: " +
                                         "code=" + code +
                                         ", table=" + inputId +
                                         ", orderItemId=" + targetItem.getOrderItemId() +
@@ -4681,7 +5378,7 @@ public class HomePanel extends JPanel {
                                     continue;  // 用户取消选择
                                 }
 
-                                // 🔧 取第一个选中的项目（或者根据需要处理多个）
+                                //  取第一个选中的项目（或者根据需要处理多个）
                                 targetItem = selectedItems.get(0);
 
                                 // 如果需要处理多个选中的项目，可以遍历 selectedItems
@@ -4721,7 +5418,7 @@ public class HomePanel extends JPanel {
                             // 4️ 执行撤销（根据模式调用不同方法）
                             try {
                                 if (sharedDishRadio.isSelected()) {
-                                    // 🔧 共同菜品撤销：智能更新 quantity/served_quantity/status/distribution
+                                    //  共同菜品撤销：智能更新 quantity/served_quantity/status/distribution
                                     int currentQty = targetItem.getQuantity();
                                     int currentServedQty = targetItem.getServedQuantity();
                                     int cancelQty = quantities[i];
@@ -4820,7 +5517,7 @@ public class HomePanel extends JPanel {
                                 anySuccess = true;
                                 isGroupedTableCancel = true;
 
-                                System.out.println("🗑️ 聚餐桌菜品撤销成功: " +
+                                System.out.println("🗑 聚餐桌菜品撤销成功: " +
                                         "code=" + code +
                                         ", table=" + inputId +
                                         ", orderItemId=" + targetItem.getOrderItemId() +
@@ -4845,9 +5542,9 @@ public class HomePanel extends JPanel {
                 }
             }
 
-            // ═══════════════════════════════════════════════════════════
-            // 【阶段 4】结果反馈 + 刷新界面
-            // ═══════════════════════════════════════════════════════════
+
+            // 阶段 4 结果反馈 + 刷新界面
+
             if (anySuccess) {
                 refreshTemporaryOrderDisplay();
                 refreshFormalOrderDisplay();
@@ -4867,17 +5564,26 @@ public class HomePanel extends JPanel {
         dialog.setVisible(true);
     }
 
-
-
     /**
-     * 🔧 显示聚餐桌撤销选择对话框（多个相同菜品记录时）
+     * 显示聚餐桌菜品撤销选择对话框
      *
-     * @param parent      父窗口
-     * @param tableNumber 餐桌号
-     * @param itemCode    菜品编号
-     * @param cancelQty   撤销数量
-     * @param items       相同菜品的记录列表
-     * @return 用户选择的要撤销的记录列表，取消则返回 null
+     * 功能说明：
+     * - 展示同一菜品在聚餐桌中的多条订单记录
+     * - 支持用户多选需要撤销的具体记录
+     * - 返回用户选中的 OrderItem 列表
+     *
+     * 核心逻辑：
+     * 1. 表格默认不勾选任何记录，避免误操作
+     * 2. 状态列使用颜色区分：已上桌(绿色)、部分上桌(黄色)、未上桌(白色)
+     * 3. 确认前校验至少选择一条记录
+     * 4. 通过 rowToItemMap 建立行号与 OrderItem 的映射关系
+     *
+     * @param parent     父窗口，用于模态对话框定位
+     * @param tableNumber 餐桌显示编号（如 "13,14,15"）
+     * @param itemCode   菜品编号（如 "A1"）
+     * @param cancelQty  每记录撤销数量（份/记录）
+     * @param items      待选择的订单记录列表
+     * @return 用户选中的 OrderItem 列表；用户取消或无选择时返回 null
      */
     private List<OrderItem> showGroupedTableCancelSelectionDialog(
             JFrame parent, String tableNumber, String itemCode, int cancelQty, List<OrderItem> items) {
@@ -4905,35 +5611,39 @@ public class HomePanel extends JPanel {
 
         // 表格
         String[] columnNames = {"选择", "菜品", "总数", "已上", "状态", "分配餐桌", "实际上菜", "记录 ID"};
-        DefaultTableModel tableModel = new DefaultTableModel(columnNames, 0) {
-            @Override
+        DefaultTableModel tableModel = new DefaultTableModel(columnNames, 0) {// 创建表格数据模型，初始行数为0
+            @Override// 重写getColumnClass方法，指定每列的数据类型
             public Class<?> getColumnClass(int columnIndex) {
+                // 第一列使用 Boolean 类型，自动渲染为复选框
                 return columnIndex == 0 ? Boolean.class : String.class;
             }
 
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return column == 0;
+            @Override// 重写isCellEditable方法，控制单元格是否可编辑
+            public boolean isCellEditable(int row, int column) { // 根据行列索引判断单元格是否可编辑
+                // 仅第一列（选择列）可编辑
+                return column == 0;// 仅当列为0（选择列）时返回true，允许编辑
             }
         };
-
-        Map<Integer, OrderItem> rowToItemMap = new HashMap<>();
-        int rowIndex = 0;
+        // 建立行号与 OrderItem 的映射，便于后续获取选中项
+        Map<Integer, OrderItem> rowToItemMap = new HashMap<>();// 创建HashMap存储行号到订单项的映射关系
+        int rowIndex = 0; // 初始化行索引计数器为0
         for (OrderItem item : items) {
             String statusText = getStatusText(item.getStatus());
+            // 获取分配的餐桌列表，为空时显示"-"占位符
             String assignedTables = item.getAssignedTableDisplayId() != null ?
                     item.getAssignedTableDisplayId() : "-";
+            // 获取实际上菜的餐桌列表，为空时显示"-"占位符
             String servedTables = item.getServedTableDisplayId() != null ?
                     item.getServedTableDisplayId() : "-";
-
+            // 关键点：默认不勾选，由用户手动选择
             Object[] row = {
                     // 改为 false，默认不勾选
                     false, item.getItemName(), item.getQuantity(),
                     item.getServedQuantity(), statusText,
                     assignedTables, servedTables, "#" + item.getOrderItemId()
             };
-            tableModel.addRow(row);
-            rowToItemMap.put(rowIndex++, item);
+            tableModel.addRow(row); // 将行数据添加到表格模型
+            rowToItemMap.put(rowIndex++, item);// 将当前行号映射到对应的订单项，并递增行号
         }
 
         JTable itemTable = new JTable(tableModel);
@@ -4942,7 +5652,7 @@ public class HomePanel extends JPanel {
         itemTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
         // 列宽设置
-        itemTable.getColumnModel().getColumn(0).setPreferredWidth(60);
+        itemTable.getColumnModel().getColumn(0).setPreferredWidth(60); // 设置选择列宽度为60像素
         itemTable.getColumnModel().getColumn(1).setPreferredWidth(150);
         itemTable.getColumnModel().getColumn(2).setPreferredWidth(60);
         itemTable.getColumnModel().getColumn(3).setPreferredWidth(60);
@@ -4951,14 +5661,17 @@ public class HomePanel extends JPanel {
         itemTable.getColumnModel().getColumn(6).setPreferredWidth(150);
         itemTable.getColumnModel().getColumn(7).setPreferredWidth(80);
 
-        // 单元格渲染器（状态颜色）
+        // 自定义单元格渲染器：根据订单状态设置背景色，提升可读性
         itemTable.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
-            @Override
+            @Override// 重写渲染方法，自定义单元格显示效果
             public Component getTableCellRendererComponent(JTable table, Object value,
                                                            boolean isSelected, boolean hasFocus, int row, int column) {
+                // 调用父类方法获取基础渲染组件
+                // 传递所有参数给父类
                 Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-                OrderItem item = rowToItemMap.get(row);
+                OrderItem item = rowToItemMap.get(row);// 根据行号从映射中获取对应的订单项对象
 
+                // 未选中时应用状态颜色，选中时保持默认选中色
                 if (!isSelected) {
                     String status = item.getStatus();
                     if ("SERVED".equals(status)) {
@@ -4969,6 +5682,7 @@ public class HomePanel extends JPanel {
                         c.setBackground(Color.WHITE);
                     }
                 }
+                // 数字列和状态列居中，文本列左对齐
                 setHorizontalAlignment(column == 0 || column == 2 || column == 3 || column == 4 || column == 7 ?
                         SwingConstants.CENTER : SwingConstants.LEFT);
                 return c;
@@ -4988,19 +5702,21 @@ public class HomePanel extends JPanel {
         cancelBtn.setBackground(new Color(158, 158, 158));
         cancelBtn.setForeground(Color.WHITE);
 
-        final List<OrderItem>[] selectedItems = new List[1];
+        // 用于传递返回结果的数组引用（解决匿名内部类访问局部变量的限制）
+        final List<OrderItem>[] selectedItems = new List[1];    // 用于传递返回结果的数组引用
 
         cancelBtn.addActionListener(e -> {
             selectedItems[0] = null;
             selectionDialog.dispose();
         });
 
+        // 确认按钮：收集选中的记录并返回
         confirmBtn.addActionListener(e -> {
-            List<OrderItem> result = new ArrayList<>();
+            List<OrderItem> result = new ArrayList<>();// 创建结果列表存储选中的订单项
             for (int i = 0; i < tableModel.getRowCount(); i++) {
-                Boolean selected = (Boolean) tableModel.getValueAt(i, 0);
-                if (Boolean.TRUE.equals(selected)) {
-                    result.add(rowToItemMap.get(i));
+                Boolean selected = (Boolean) tableModel.getValueAt(i, 0);// 获取第0列（选择列）的布尔值
+                if (Boolean.TRUE.equals(selected)) {// 如果该行为选中状态
+                    result.add(rowToItemMap.get(i));// 从映射中获取对应订单项并添加到结果列表
                 }
             }
             if (result.isEmpty()) {
@@ -5008,7 +5724,7 @@ public class HomePanel extends JPanel {
                         JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            selectedItems[0] = result;
+            selectedItems[0] = result;// 将结果列表存储到数组中用于返回
             selectionDialog.dispose();
         });
 
@@ -5018,15 +5734,30 @@ public class HomePanel extends JPanel {
         selectionDialog.add(buttonPanel, BorderLayout.SOUTH);
         selectionDialog.setVisible(true);
 
-        return selectedItems[0];
+        return selectedItems[0];    // 返回用户选中的记录列表
     }
 
     /**
-     * 撤銷菜品核心邏輯（根據類型調用不同 Controller 方法）
-     * 🔧【新增】支持传入 cancelPart 参数（部分上桌时选择撤销哪部分）
+     * 撤销菜品核心逻辑（支持堂食/外卖/预约三种订单类型）
      *
-     * @param cancellationReason 撤銷原因（堂食可能需要，外賣=null）
-     * @param cancelPart         撤销部分："SERVED"=已上桌, "UNSERVED"=未上桌, null=默认逻辑
+     * <p><b>核心功能</b>：根据订单类型调用不同的 Controller 方法执行菜品撤销
+     * <br><b>新增特性</b>：支持部分上桌菜品的选择性撤销（已上桌/未上桌）
+     *
+     * @param parent              父组件（用于弹窗定位）
+     * @param identifier          订单标识（堂食=餐桌号 / 外卖=订单号 / 预约=预约号）
+     * @param itemCode            菜品编号（如 "A1"）
+     * @param quantity            撤销数量
+     * @param cancellationReason  撤销原因（堂食必填，外卖可选）
+     * @param cancelPart          撤销部分："SERVED"=已上桌 / "UNSERVED"=未上桌 / null=默认
+     * @return true=撤销成功，false=撤销失败
+     *
+     * <p><b>业务规则重点</b>：
+     * <ul>
+     *   <li>聚餐桌预约订单：撤销数量必须是桌子数量的倍数（保证每桌平均）</li>
+     *   <li>聚餐桌预约订单：撤销后剩余数量也必须能被桌子数量整除</li>
+     *   <li>堂食订单：必须填写撤销原因（审计要求）</li>
+     *   <li>外卖订单：原因可选，通过订单号+itemId 精确撤销</li>
+     * </ul>
      */
     private boolean cancelOrderItemLogic(Component parent, String identifier, String itemCode,
                                          int quantity, String cancellationReason, String cancelPart) {
@@ -5040,7 +5771,7 @@ public class HomePanel extends JPanel {
 
         try {
             // ═══════════════════════════════════════════════════════════
-            // 🔧【新增】检查是否为聚餐桌预约订单，验证撤销数量（保持原有逻辑）
+            // 检查是否为聚餐桌预约订单，验证撤销数量（保持原有逻辑）
             // ═══════════════════════════════════════════════════════════
             if (currentOrderType == OrderType.RESERVATION && identifier.startsWith("R")) {
                 // 1. 查询预约详情
@@ -5107,11 +5838,11 @@ public class HomePanel extends JPanel {
 
             if (currentOrderType == OrderType.DINE_IN) {
                 // 堂食：通过餐桌号撤销（需要原因）
-                // 🔧 传入 cancelPart 参数
+                //  传入 cancelPart 参数
                 controller.handleCancelOrderItem(identifier, itemCode, quantity,
                         cancellationReason != null ? cancellationReason : "用户撤销", cancelPart);
             }
-            // 🔧【修复】预约订单：通过 reservation_id 撤销
+            // 预约订单：通过 reservation_id 撤销
             else if (currentOrderType == OrderType.RESERVATION) {
                 // 1. 查找预点餐订单
                 Order preOrder = frame.findPreOrderByReservationId(identifier);
@@ -5121,13 +5852,13 @@ public class HomePanel extends JPanel {
                             "错误", JOptionPane.ERROR_MESSAGE);
                     return false;
                 }
-                // 🔧【关键修复】通过 frame 调用预约订单撤销方法
+                // 通过 frame 调用预约订单撤销方法
                 frame.cancelReservationOrderItem(
                         identifier,  // reservation_id
                         itemId,
                         quantity,
                         cancellationReason != null ? cancellationReason : "用户撤销",
-                        cancelPart                               // 🔧 新增：是否为部分撤销
+                        cancelPart                               // 是否为部分撤销
                 );
                 System.out.println("预约订单菜品撤销成功: reservationId=" + identifier +
                         ", orderId=" + preOrder.getOrderId());
@@ -5200,7 +5931,10 @@ public class HomePanel extends JPanel {
         }
     }
 
-
+    /**
+     * 处理配送订单状态更新
+     * 流程：获取订单号 → 验证订单 → 选择新状态 → 校验状态顺序 → 确认更新
+     */
     private void handleDeliveryOrder() {
         // ===== 步骤1: 获取订单号（输入框 > 全局变量 > 弹窗输入）=====
         String orderNumber = getInitialOrderNumber();
@@ -5249,6 +5983,7 @@ public class HomePanel extends JPanel {
 
         if (selected < 0) return;  // 用户取消
 
+        //根据用户选择的索引映射到对应的枚举状态
         Order.DeliveryStatus newStatus = switch (selected) {
             case 0 -> Order.DeliveryStatus.NOT_DELIVERED;
             case 1 -> Order.DeliveryStatus.DELIVERING;
@@ -5317,7 +6052,10 @@ public class HomePanel extends JPanel {
         }
     }
 
-    // ===== 辅助方法1: 获取初始订单号 =====
+    /**
+     * 获取初始订单号：优先读取输入框，其次使用缓存的外卖订单号
+     * @return 订单号字符串，无有效值时返回 null
+     */
     private String getInitialOrderNumber() {
         if (tableNumberField != null) {
             String input = tableNumberField.getText().trim();
@@ -5331,13 +6069,22 @@ public class HomePanel extends JPanel {
         return null;
     }
 
-    // ===== 辅助方法2: 验证订单号格式是否完整 =====
+    /**
+     * 验证外卖订单号格式：必须符合 "D-YYYYMMDD-N" 规范
+     * @param orderNumber 待验证的订单号
+     * @return true=格式有效，false=格式无效
+     */
     private boolean isValidOrderNumber(String orderNumber) {
         if (orderNumber == null || orderNumber.isEmpty()) return false;
         return orderNumber.matches("^D-\\d{8}-\\d+$");  // D-20260313-1
     }
 
-    // ===== 辅助方法3: 弹出输入框（预填默认前缀）=====
+    /**
+     * 弹出对话框输入配送订单号（带默认前缀）
+     *
+     * @return 用户输入的订单号，取消或无效输入返回 null
+     * @note 默认格式：D-yyyyMMdd-xxx，光标自动定位到前缀后
+     */
     private String promptForOrderNumberWithDefaultPrefix() {
         String defaultPrefix = "D-" + java.time.LocalDate.now().format(
                 java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")) + "-";
@@ -5365,7 +6112,20 @@ public class HomePanel extends JPanel {
         return null;
     }
 
-
+    /**
+     * 显示"取消重新点餐"对话框
+     *
+     * <p>功能流程：
+     * <ol>
+     *   <li>输入餐桌号并验证（存在性/占用状态/主桌校验）</li>
+     *   <li>调用 Controller 执行取消重新点餐</li>
+     *   <li>成功：刷新临时订单/正式订单/堂食订单列表</li>
+     *   <li>失败：显示具体错误信息</li>
+     * </ol>
+     *
+     * @note 模态对话框，阻塞用户操作直至完成
+     * @see RestaurantController#handleCancelReorder(String)
+     */
     private void handleCancelReorder() {
         JDialog dialog = new JDialog(frame, "取消重新点餐", true);
         dialog.setLayout(new BorderLayout(15, 15));
@@ -5434,9 +6194,6 @@ public class HomePanel extends JPanel {
                 refreshFormalOrderDisplay();
                 refreshDineInOrders();
 
-//                frame.refreshAllPanels();
-//                controller.refreshOrderStatusOnly();
-
                 JOptionPane.showMessageDialog(
                         frame,
                         message,  // "餐桌 #7 已恢复为已结账状态"
@@ -5463,6 +6220,21 @@ public class HomePanel extends JPanel {
         dialog.setVisible(true);
     }
 
+    /**
+     * 显示标记菜品准备状态对话框（预约订单专用）
+     *
+     * <p>功能说明：
+     * <ul>
+     *   <li>验证订单类型并解析预约号</li>
+     *   <li>校验预约时间必须为当天</li>
+     *   <li>加载并显示待准备菜品列表</li>
+     *   <li>支持调整已准备数量并更新状态</li>
+     *   <li>仅处理未上桌的菜品（跳过已上桌项）</li>
+     * </ul>
+     *
+     * @note 仅支持 {@link OrderType#RESERVATION} 和 {@link OrderType#DINE_IN} 类型
+     * @note 使用 orderItemId 作为唯一标识，支持聚餐桌场景下同一菜品的多订单项区分
+     */
     private void showPrepareOrderItemDialog() {
         // ═══════════════════════════════════════════════════════════
         // 【步骤 1】验证订单类型
@@ -5498,7 +6270,7 @@ public class HomePanel extends JPanel {
                 return;
             }
 
-            // 🔧【核心】通过餐桌号查询餐桌实体，获取关联的 reservation_id
+            // 【核心】通过餐桌号查询餐桌实体，获取关联的 reservation_id
             Tables table = service.getTableById(currentTableNumber);
             if (table == null) {
                 JOptionPane.showMessageDialog(this,
@@ -5508,7 +6280,7 @@ public class HomePanel extends JPanel {
                 return;
             }
 
-            // 🔧 关联 table_orders / restaurant_tables 中的 reservation_id
+            //  关联 table_orders / restaurant_tables 中的 reservation_id
             reservationId = table.getCurrentReservationId();
             if (reservationId == null || reservationId.isEmpty()) {
                 JOptionPane.showMessageDialog(this,
@@ -5528,12 +6300,12 @@ public class HomePanel extends JPanel {
             return;
         }
 // ═══════════════════════════════════════════════════════════
-// 【步骤 2.5】🔧 创建 final 副本（关键修复！）
+// 【步骤 2.5】 创建 final 副本（关键修复！）
 // ═══════════════════════════════════════════════════════════
         final String finalReservationId = reservationId;
 
         // ═══════════════════════════════════════════════════════════
-        // 【步骤 2.6】🔧【新增】验证预约时间是否为当天（核心修复！）
+        // 【步骤 2.6】【新增】验证预约时间是否为当天（核心修复！）
         // ═══════════════════════════════════════════════════════════
         TableReservation reservation = controller.getReservationDetail(finalReservationId);
         if (reservation != null && reservation.getReservationTime() != null) {
@@ -5548,7 +6320,7 @@ public class HomePanel extends JPanel {
                                 "请在预约当天再进行菜品准备操作。</html>",
                         "日期限制",
                         JOptionPane.WARNING_MESSAGE);
-                return;  // 🔑 关键：直接返回，阻止后续操作
+                return;  //  关键：直接返回，阻止后续操作
             }
         }
 
@@ -5566,7 +6338,7 @@ public class HomePanel extends JPanel {
         dialog.getContentPane().setBackground(new Color(245, 248, 255));
 
         // ═══════════════════════════════════════════════════════════
-        // 【步骤 4】🔧 使用解析出的 reservationId 加载订单菜品
+        // 【步骤 4】 使用解析出的 reservationId 加载订单菜品
         // ═══════════════════════════════════════════════════════════
         List<OrderItem> orderItems = frame.loadFormalOrderItemsByReservationId(reservationId);
 
@@ -5587,13 +6359,13 @@ public class HomePanel extends JPanel {
         listPanel.setBackground(new Color(245, 248, 255));
         listPanel.setBorder(new EmptyBorder(10, 15, 10, 15));
 
-        // 🔧【核心修复】存储：orderItemId → 已准备数量输入框
+        // 存储：orderItemId → 已准备数量输入框
         // 使用 orderItemId（数据库主键）作为 Key，而不是 itemCode（菜品编号）
         // 这样可以区分同一个菜品的多个不同订单项（如聚餐桌场景）
         Map<Integer, JTextField> preparedQtyMap = new HashMap<>();
 
         for (OrderItem item : orderItems) {
-            // 🔧【新增】跳过已上桌的菜品（只处理准备状态的菜品）
+            // 跳过已上桌的菜品（只处理准备状态的菜品）
             String itemStatus = item.getStatus();
             if ("PARTIALLY_SERVED".equals(itemStatus) || "SERVED".equals(itemStatus)) {
                 continue;  // 跳过已上桌的菜品，不显示在准备对话框中
@@ -5666,6 +6438,7 @@ public class HomePanel extends JPanel {
             statusPreview.setFont(new Font("Microsoft YaHei", Font.BOLD, 14));
             statusPreview.setPreferredSize(new Dimension(120, 100));
 
+            // 状态预览更新逻辑
             Runnable updatePreview = () -> {
                 try {
                     int prepared = Integer.parseInt(preparedQtyField.getText().trim());
@@ -5686,8 +6459,9 @@ public class HomePanel extends JPanel {
                 }
             };
 
-            minusBtn.addActionListener(e -> {
-                try {
+            // 绑定数量调整按钮事件
+            minusBtn.addActionListener(e -> { // 定义更新预览状态的 Lambda 表达式
+                try {// 尝试执行状态更新逻辑
                     int val = Integer.parseInt(preparedQtyField.getText().trim());
                     if (val > 0) {
                         preparedQtyField.setText(String.valueOf(val - 1));
@@ -5695,7 +6469,7 @@ public class HomePanel extends JPanel {
                 } catch (NumberFormatException ex) {
                     preparedQtyField.setText("0");
                 }
-                updatePreview.run();
+                updatePreview.run();// 执行状态预览更新
             });
 
             plusBtn.addActionListener(e -> {
@@ -5734,7 +6508,7 @@ public class HomePanel extends JPanel {
             listPanel.add(itemPanel);
             listPanel.add(Box.createRigidArea(new Dimension(0, 8)));
 
-            // 🔧【核心修复】使用 orderItemId 作为 Key（唯一标识），而不是 itemCode
+            // 使用 orderItemId 作为 Key（唯一标识），而不是 itemCode
             // 这样可以正确区分同一个菜品的多个不同订单项
             preparedQtyMap.put(item.getOrderItemId(), preparedQtyField);
         }
@@ -5784,15 +6558,15 @@ public class HomePanel extends JPanel {
                 int updatedCount = 0;
                 StringBuilder updateLog = new StringBuilder();
 
-                // 🔧 遍历所有订单菜品
+                //  遍历所有订单菜品
                 for (OrderItem item : orderItems) {
-                    // 🔧【新增】跳过已上桌的菜品（只处理准备状态的菜品）
+                    // 跳过已上桌的菜品（只处理准备状态的菜品）
                     String itemStatus = item.getStatus();
                     if ("PARTIALLY_SERVED".equals(itemStatus) || "SERVED".equals(itemStatus)) {
                         continue;  // 跳过已上桌的菜品，不显示在准备对话框中
                     }
 
-                    // 【核心修复】使用 orderItemId 作为 Key 获取输入框
+                    // 使用 orderItemId 作为 Key 获取输入框
                     // 这样可以区分同一个菜品的多个不同订单项（如聚餐桌场景）
                     JTextField qtyField = preparedQtyMap.get(item.getOrderItemId());
                     if (qtyField != null) {
@@ -5807,7 +6581,7 @@ public class HomePanel extends JPanel {
                         // 边界校验：确保准备数量在 0~总数量 之间
                         preparedQty = Math.max(0, Math.min(preparedQty, item.getQuantity()));
 
-                        // 🔧 根据准备数量计算新状态
+                        //  根据准备数量计算新状态
                         String newStatus;
                         if (preparedQty <= 0) {
                             newStatus = "UNSERVED";        // 未准备
@@ -5823,7 +6597,7 @@ public class HomePanel extends JPanel {
                         //  调用 Controller 更新准备状态
                         controller.updateReservationOrderItemPrepared(
                                 finalReservationId,           // 预约号
-                                item.getOrderItemId(),        // 🔧 使用 orderItemId（主键）
+                                item.getOrderItemId(),        //  使用 orderItemId（主键）
                                 item.getItemCode(),           // 菜品编号
                                 preparedQty,                  // 已准备数量
                                 newStatus,                    // 新状态
@@ -5850,18 +6624,18 @@ public class HomePanel extends JPanel {
                     }
                 }
 
-                // 🔧 显示成功提示
+                //  显示成功提示
                 JOptionPane.showMessageDialog(dialog,
                         " 成功更新 " + updatedCount + " 个菜品的准备进度！\n\n" +
                                 (updateLog.length() > 0 ? updateLog.toString() : "无变更"),
                         "成功", JOptionPane.INFORMATION_MESSAGE);
 
-                // 🔧 刷新订单显示并关闭对话框
+                //  刷新订单显示并关闭对话框
                 refreshFormalOrderDisplay();
                 dialog.dispose();
 
             } catch (Exception ex) {
-                // 🔧 异常处理
+                //  异常处理
                 JOptionPane.showMessageDialog(dialog,
                         " 更新失败：" + ex.getMessage(),
                         "错误", JOptionPane.ERROR_MESSAGE);
@@ -5875,6 +6649,8 @@ public class HomePanel extends JPanel {
 
     /**
      *  解析 quantity_distribution JSON 字符串为 Map
+     *  @param jsonStr JSON 格式的 distribution 字符串
+     *  @return 解析后的 Map，解析失败返回 null
      * 格式示例：{"13":4,"14":4,"15":3} → Map{"13"=4, "14"=4, "15"=3}
      */
     private Map<String, Integer> parseDistribution(String jsonStr) {
@@ -5883,14 +6659,17 @@ public class HomePanel extends JPanel {
         }
         Map<String, Integer> result = new LinkedHashMap<>();
         try {
-            // 移除花括号和空格
+            // 移除最外层花括号 {} 和所有空白字符（空格/换行/制表符），便于后续分割
+            // 示例：{"13":4,"14":4} → "13":4,"14":4
             String content = jsonStr.replaceAll("[{}\\s]", "");
             if (content.isEmpty()) {
                 return result;
             }
             // 按逗号分割键值对
             String[] pairs = content.split(",");
-            for (String pair : pairs) {
+            for (String pair : pairs) {//── 步骤3：逐个解析键值对 ──
+                // 按冒号分割键和值
+                // 示例："13":4 → ["13", "4"]
                 String[] kv = pair.split(":");
                 if (kv.length == 2) {
                     String tableId = kv[0].replaceAll("\"", "").trim();
@@ -5900,7 +6679,7 @@ public class HomePanel extends JPanel {
             }
             return result;
         } catch (Exception e) {
-            System.err.println("⚠️ 解析 quantity_distribution 失败: " + jsonStr + " | 错误: " + e.getMessage());
+            System.err.println(" 解析 quantity_distribution 失败: " + jsonStr + " | 错误: " + e.getMessage());
             return null;
         }
     }

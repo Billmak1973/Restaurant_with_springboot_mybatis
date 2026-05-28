@@ -141,11 +141,6 @@
         WHERE business_date = #{revenueDate}
     </update>
 
-    <!-- 兜底插入（需在 Service 层判断 affected==0 后调用） -->
-    <insert id="insertDailyRevenueIfNotExists">
-        INSERT INTO business_status (business_date, daily_revenue)
-        VALUES (#{revenueDate}, #{amount})
-    </insert>
 
     <!-- ===== 季度销售报表 ===== -->
 
@@ -514,7 +509,7 @@
         LIMIT 1
     </select>
 
-    <!-- 🔧 根据 reservation_id 查询订单明细（预约订单专用） -->
+    <!--  根据 reservation_id 查询订单明细（预约订单专用） -->
     <select id="findOrderItemsByReservationId" resultMap="OrderItemResult">
         SELECT
         oi.order_item_id,
@@ -576,21 +571,6 @@
         AND status = #{oldStatus}  <!-- 🔧 樂觀鎖：只更新預期舊狀態 -->
     </update>
 
-    <!-- OrderMapper.xml - 新增：根据餐桌ID和状态查找订单 -->
-    <select id="findOrderByTableIdAndStatus" resultType="Order">
-        SELECT
-        order_id, order_number, table_id, reservation_id,
-        order_type, delivery_method, delivery_address, customer_phone,
-        order_time, status,
-        items_total, delivery_fee, total_amount,
-        is_checked_out, is_prepaid, prepaid_amount,
-        delivery_status, reorder_time
-        FROM table_orders
-        WHERE table_id = #{tableId}
-        AND status = #{status}
-        LIMIT 1
-    </select>
-
     <!-- 新增：同时更新订单状态+items_total+total_amount -->
     <update id="updateOrderStatusAndTotals">
         UPDATE table_orders
@@ -608,7 +588,6 @@
         AND table_id IS NOT NULL
     </update>
 
-    <!-- OrderMapper.xml -->
     <select id="findOrderIdByTableIdAndStatus" resultType="java.lang.Integer">
         SELECT order_id
         FROM table_orders

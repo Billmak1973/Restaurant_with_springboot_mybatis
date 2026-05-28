@@ -65,13 +65,6 @@ public interface OrderMapper {
      */
     Integer findOrderIdByTableId(@Param("tableId") int tableId);
 
-    /**
-     * 根据餐桌ID和订单状态查找订单
-     * @param tableId 餐桌ID
-     * @param status 订单状态
-     * @return Order 对象，不存在返回 null
-     */
-    Order findOrderByTableIdAndStatus(@Param("tableId") int tableId, @Param("status") String status);
 
     /**
      * 根据餐桌ID和订单状态查找订单ID
@@ -89,35 +82,35 @@ public interface OrderMapper {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * 🔧 根据 reservation_id 查询预点餐订单（状态=NO_ORDER/ORDERED）
+     *  根据 reservation_id 查询预点餐订单（状态=NO_ORDER/ORDERED）
      * @param reservationId 预约号
      * @return Order 对象，不存在返回 null
      */
     Order findPreOrderByReservationId(@Param("reservationId") String reservationId);
 
     /**
-     * 🔧 根据 reservation_id 查询活跃订单（预点餐/已下单）
+     *  根据 reservation_id 查询活跃订单（预点餐/已下单）
      * @param reservationId 预约号
      * @return Order 对象，不存在返回 null
      */
     Order findActiveOrderByReservationId(@Param("reservationId") String reservationId);
 
     /**
-     * 🔧 根据 reservation_id 查询订单 ID（预约订单专用）
+     *  根据 reservation_id 查询订单 ID（预约订单专用）
      * @param reservationId 预约号
      * @return 订单 ID，不存在返回 null
      */
     Integer findOrderIdByReservationId(@Param("reservationId") String reservationId);
 
     /**
-     * 🔧 根据 reservation_id 查询活跃订单 ID（预约订单专用）
+     *  根据 reservation_id 查询活跃订单 ID（预约订单专用）
      * @param reservationId 预约号
      * @return 订单 ID，不存在返回 null
      */
     Integer findActiveOrderIdByReservationId(@Param("reservationId") String reservationId);
 
     /**
-     * 🔧 根据 reservation_id 查询订单明细（预约订单专用）
+     *  根据 reservation_id 查询订单明细（预约订单专用）
      * @param reservationId 预约号
      * @return OrderItem 列表
      */
@@ -142,15 +135,9 @@ public interface OrderMapper {
      */
     List<OrderItem> findOrderItemsByOrderNumber(@Param("orderNumber") String orderNumber);
 
-    /**
-     * 根据餐桌显示ID查询订单明细（带菜品信息，支持聚餐桌）
-     * @param displayId 餐桌显示编号（如 "7" 或 "7a"）
-     * @return OrderItem 列表
-     */
-    List<OrderItem> findOrderItemsByTableDisplayId(@Param("displayId") String displayId);
 
     /**
-     * 🔧 根据多个餐桌显示ID查询订单明细（支持聚餐桌）
+     *  根据多个餐桌显示ID查询订单明细（支持聚餐桌）
      * @param tableDisplayIds 餐桌显示ID列表
      * @return OrderItem 列表
      */
@@ -168,17 +155,6 @@ public interface OrderMapper {
      */
     int checkoutOrder(@Param("orderId") int orderId);
 
-    /**
-     * 更新订单状态和金额
-     * @param orderId 订单ID
-     * @param status 新状态（如 "ORDERED" / "CHECKED_OUT"）
-     * @param amount 新总金额
-     * @return 影响行数
-     */
-    int updateOrderStatusAndAmount(
-            @Param("orderId") int orderId,
-            @Param("status") String status,
-            @Param("amount") double amount);
 
     /**
      * 同时更新订单状态+items_total+total_amount
@@ -292,7 +268,7 @@ public interface OrderMapper {
     );
 
     /**
-     * 🔧 根据预约号更新预付信息
+     *  根据预约号更新预付信息
      * @param reservationId 预约号
      * @param isPrepaid 是否预付
      * @param prepaidAmount 预付金额

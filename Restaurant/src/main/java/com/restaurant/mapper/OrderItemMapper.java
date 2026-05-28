@@ -79,7 +79,7 @@ public interface OrderItemMapper {
             @Param("items") List<OrderItem> items);
 
     /**
-     * 🔧 聚餐桌专用：更新现有订单项数量（只更新 UNSERVED 状态）
+     *  聚餐桌专用：更新现有订单项数量（只更新 UNSERVED 状态）
      *
      * @param orderId 订单主键ID
      * @param items   待更新的订单项列表
@@ -140,7 +140,7 @@ public interface OrderItemMapper {
             @Param("itemId") int itemId);
 
     /**
-     * 🔧 通过 order_item_id 精确更新 prepared_quantity + status
+     *  通过 order_item_id 精确更新 prepared_quantity + status
      *
      * @param orderItemId      订单项主键ID（精确匹配）
      * @param preparedQuantity 新已准备数量
@@ -196,7 +196,7 @@ public interface OrderItemMapper {
     boolean hasServedItems(@Param("orderId") int orderId);
 
     /**
-     * 🔧 按 order_item_id 精确更新已上菜数量 + 状态
+     *  按 order_item_id 精确更新已上菜数量 + 状态
      *
      * @param orderItemId 订单项主键ID
      * @param served      新已上菜数量
@@ -209,7 +209,7 @@ public interface OrderItemMapper {
                          @Param("status") String status);
 
     /**
-     * 🔧 按 assigned_table_display_id + itemId 精确查找订单项
+     *  按 assigned_table_display_id + itemId 精确查找订单项
      *
      * @param itemId                 菜品主键ID
      * @param assignedTableDisplayId 分配的餐桌显示ID（如 "13" 或 "13,14,15"）
@@ -222,7 +222,7 @@ public interface OrderItemMapper {
     );
 
     /**
-     * 🔧 聚餐桌共享菜品模糊匹配查询
+     *  聚餐桌共享菜品模糊匹配查询
      *
      * @param itemId         菜品主键ID
      * @param tableDisplayId 当前操作的餐桌显示ID
@@ -235,7 +235,7 @@ public interface OrderItemMapper {
     );
 
     /**
-     * 🔧 聚餐桌专用：同时更新 served_quantity + status + served_table_display_id
+     *  聚餐桌专用：同时更新 served_quantity + status + served_table_display_id
      *
      * @param orderItemId       订单项主键ID
      * @param newServedQuantity 新已上菜数量
@@ -317,7 +317,7 @@ public interface OrderItemMapper {
     String getItemStatus(@Param("orderId") int orderId, @Param("itemId") int itemId);
 
     /**
-     * 🔧 聚餐桌专用：根据 order_item_id 删除订单项
+     *  聚餐桌专用：根据 order_item_id 删除订单项
      *
      * @param orderItemId 订单项主键ID
      * @return 影响行数
@@ -326,7 +326,7 @@ public interface OrderItemMapper {
     int deleteOrderItemByOrderItemId(@Param("orderItemId") int orderItemId);
 
     /**
-     * 🔧 聚餐桌专用：更新订单项数量 + 已上桌数量 + 状态
+     *  聚餐桌专用：更新订单项数量 + 已上桌数量 + 状态
      *
      * @param orderItemId       订单项主键ID
      * @param newQuantity       新总数量
@@ -343,7 +343,7 @@ public interface OrderItemMapper {
     );
 
     /**
-     * 🔧 聚餐桌共同菜品专用：智能更新 quantity + served_quantity + status + distribution
+     *  聚餐桌共同菜品专用：智能更新 quantity + served_quantity + status + distribution
      *
      * @param orderItemId         订单项主键ID
      * @param newQuantity         新总数量
@@ -364,7 +364,7 @@ public interface OrderItemMapper {
     );
 
     /**
-     * 🔧 更新订单项的 assigned_table_display_id 和 quantity_distribution
+     *  更新订单项的 assigned_table_display_id 和 quantity_distribution
      *
      * @param orderItemId          订单项主键ID
      * @param assignedTableDisplayId 分配的餐桌显示ID列表（如 "13,14,15"）
@@ -379,7 +379,7 @@ public interface OrderItemMapper {
     );
 
     /**
-     * 🔧 聚餐桌延迟释放专用：清除订单明细中的分配信息
+     *  聚餐桌延迟释放专用：清除订单明细中的分配信息
      *
      * @param orderId 订单主键ID
      * @return 影响行数
@@ -445,7 +445,7 @@ public interface OrderItemMapper {
     OrderItem selectByPrimaryKey(@Param("orderItemId") int orderItemId);
 
     /**
-     * 🔧 聚餐桌专用：更新订单项数量（仅数量字段）
+     *  聚餐桌专用：更新订单项数量（仅数量字段）
      *
      * @param orderItemId 订单项主键ID
      * @param newQuantity 新总数量

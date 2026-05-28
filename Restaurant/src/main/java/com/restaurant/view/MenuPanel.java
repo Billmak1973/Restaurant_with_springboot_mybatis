@@ -68,7 +68,7 @@ public class MenuPanel extends JPanel {
      */
     public MenuPanel(OrderSystemGUI frame, RestaurantService service, RestaurantController controller, MenuItemService menuItemService, int menuType) {
         this.frame = frame;
-        this.service = service;           // 🔧【新增】赋值 service
+        this.service = service;           // 【新增】赋值 service
         this.menuType = menuType;
         this.menuItemService = menuItemService;
         this.controller=controller;
@@ -747,7 +747,7 @@ public class MenuPanel extends JPanel {
                     currentTableNumber   // 🔧 当前餐桌显示ID（用于显示分配餐桌）
             );
         } else {
-            // 🔧 外賣/自取：使用已查詢的 items 數據，自己生成 HTML（顯示"製作中/製作完成"）
+            //  外賣/自取：使用已查詢的 items 數據，自己生成 HTML（顯示"製作中/製作完成"）
             htmlContent = generateTakeoutOrderHtml(items, false);
         }
 

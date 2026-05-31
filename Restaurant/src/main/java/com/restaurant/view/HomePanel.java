@@ -1668,6 +1668,7 @@ public class HomePanel extends JPanel {
      * - 组件更新直接在当前线程执行，调用方需确保线程安全
      */
     private void refreshDineInOrders() {
+        // List封装多行查询结果，Map以列名为键存储单行字段值，组合成免实体类的动态数据结构
         List<Map<String, Object>> orders = frame.loadDineInOrders();
         StringBuilder html = new StringBuilder();
         html.append("<html><body style='font-family: Microsoft YaHei; padding: 5px; font-size: 11px;'>");

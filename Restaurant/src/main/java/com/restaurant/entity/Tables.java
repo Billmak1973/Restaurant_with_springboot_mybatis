@@ -97,6 +97,23 @@ public class Tables {
 
 
 
+    /**
+     * 餐桌实体默认构造函数
+     *
+     * 功能说明：
+     * 初始化餐桌对象的核心状态字段为默认值，确保新创建对象处于一致的可使用状态。
+     *
+     * 默认值设定：
+     * - status: VACANT（空闲），新餐桌默认可接受顾客入座
+     * - tableType: MAIN（主桌），默认为独立餐桌而非子桌或合并桌
+     * - actualSeats: 0，初始无顾客入座，避免空指针或计算错误
+     * - orderStatus: NO_ORDER，初始无关联订单，支持后续正常点餐流程
+     *
+     * 应用场景：
+     * - 通过 new 关键字创建新餐桌实例时自动调用
+     * - 反序列化或反射创建对象后手动调用以重置状态
+     * - 单元测试中快速构造测试数据
+     */
     public Tables() {
         // 初始化默认值（可选，但建议）// ===== 新增属性 =====
         this.status = TableStatus.VACANT;
@@ -140,14 +157,50 @@ public class Tables {
         return baseId;
     }
 
+    /**
+     * 设置餐桌的基础编号
+     *
+     * 功能说明：
+     * 更新餐桌的baseId字段，用于标识餐桌在物理布局中的逻辑分组或排序基准。
+     *
+     * @param baseId 待设置的基础编号值
+     *
+     * 应用场景：
+     * - 餐桌初始化时设置默认编号
+     * - 餐桌重组或布局调整时更新分组标识
+     */
     public void setBaseId(int baseId) {
         this.baseId = baseId;
     }
 
+    /**
+     * 获取当前餐桌关联的顾客组主键
+     *
+     * 功能说明：
+     * 返回当前餐桌绑定的顾客组数据库主键，用于快速判断餐桌是否被占用及关联查询。
+     *
+     * @return 顾客组主键；未关联顾客组时返回null
+     *
+     * 业务规则：
+     * - 仅当餐桌状态为占用时该字段非空
+     * - 调用方需自行校验返回值是否为null，避免空指针异常
+     */
     public Integer getCurrentGroupId() {
         return currentGroupId;
     }
 
+    /**
+     * 设置当前餐桌关联的顾客组主键
+     *
+     * 功能说明：
+     * 更新餐桌的currentGroupId字段，建立或解除餐桌与顾客组的关联关系。
+     *
+     * @param currentGroupId 顾客组主键；传入null时表示解除关联
+     *
+     * 使用建议：
+     * - 优先使用assignCustomerGroup方法确保对象与ID同步更新
+     * - 本方法适用于仅需更新ID引用的内部调用场景
+     */
     public void setCurrentGroupId(Integer currentGroupId) {
         this.currentGroupId = currentGroupId;
     }
@@ -321,13 +374,38 @@ public class Tables {
         return "未结束";
     }
 
-    // 修改 setCurrentGroup 方法 - 移除ID设置逻辑
+    /**
+     * 设置当前餐桌关联的顾客组对象
+     *
+     * 功能说明：
+     * 仅更新顾客组对象引用，不修改currentGroupId字段。
+     * 适用于内部状态同步场景，由调用方确保ID与对象的一致性。
+     *
+     * @param group 待关联的顾客组对象；传入null时表示解除关联
+     *
+     */
     public void setCurrentGroup(CustomerGroup group) {
         this.currentGroup = group;
         // 不再设置 currentGroupId
     }
 
-    // 添加专用方法，确保组ID和对象同步
+    /**
+     * 分配顾客组到当前餐桌（确保对象与ID同步）
+     *
+     * 功能说明：
+     * 1. 同步设置顾客组对象与对应的顾客组ID，避免数据不一致
+     * 2. 若顾客组非空且餐桌状态为占用中，自动记录入座开始时间
+     *
+     * @param group 待分配的顾客组对象；传入null时表示解除关联并清空ID
+     *
+     * 业务规则：
+     * - 仅当餐桌状态为OCCUPIED时更新startTime，确保入座时间准确
+     * - 解除关联时同时清空currentGroup与currentGroupId，保持状态纯净
+     *
+     * 应用场景：
+     * - 顾客入座时绑定顾客组与餐桌
+     * - 换桌操作时更新关联关系并重置时间戳
+     */
     public void assignCustomerGroup(CustomerGroup group) {
         this.currentGroup = group;
         this.currentGroupId = (group != null) ? group.getGroup_id() : null;
@@ -356,6 +434,17 @@ public class Tables {
         return true;
     }
 
+    /**
+     * 获取当前餐桌关联的顾客组对象
+     *
+     * 功能说明：
+     * 返回当前餐桌绑定的顾客组对象。若顾客组ID存在但对象引用为null，
+     * @return 顾客组对象；未关联顾客组时返回null
+     *
+     * 容错处理：
+     * - 捕获加载异常时静默处理，保持业务状态不变，避免中断主流程
+     * - 调用方需自行校验返回值是否为null，再进行后续操作
+     */
     public CustomerGroup getCurrentGroup() {
         // 如果ID存在但对象为null，尝试重新加载
         if (currentGroupId != null && currentGroup == null) {
@@ -388,7 +477,10 @@ public class Tables {
         return pendingGroup;
     }
 
+    /** 获取餐桌当前的订单状态枚举值，用于界面展示与业务流程校验*/
     public OrderStatus getOrderStatus() { return orderStatus; }
+
+    /** 设置餐桌的订单状态，订单状态变更时同步更新以触发界面刷新*/
     public void setOrderStatus(OrderStatus orderStatus) {
         this.orderStatus = orderStatus;
     }
@@ -426,11 +518,12 @@ public class Tables {
     }
 
 
-    // ===== Getter/Setter =====
+    /** 获取当前餐桌关联的预约记录编号，用于支持预约顾客的入座与订单关联*/
     public String getCurrentReservationId() {
         return currentReservationId;
     }
 
+    /** 设置当前餐桌关联的预约记录编号，顾客入座时绑定预约与餐桌*/
     public void setCurrentReservationId(String currentReservationId) {
         this.currentReservationId = currentReservationId;
     }

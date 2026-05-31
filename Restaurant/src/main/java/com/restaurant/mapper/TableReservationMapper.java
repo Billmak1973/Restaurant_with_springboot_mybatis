@@ -30,7 +30,7 @@ public interface TableReservationMapper {
     TableReservation findById(@Param("id") String id);
 
     /**
-     * 🔧 根据预约号查询完整预约详情（包含所有字段，含 rescheduled_time 等）
+     *  根据预约号查询完整预约详情（包含所有字段，含 rescheduled_time 等）
      * @param reservationId 预约号
      * @return TableReservation 对象，不存在返回 null
      */
@@ -115,28 +115,28 @@ public interface TableReservationMapper {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * 🔧 根据预约号片段模糊查询（仅返回基本信息，用于 CREATE/ASSIGN 模式）
+     *  根据预约号片段模糊查询（仅返回基本信息，用于 CREATE/ASSIGN 模式）
      * @param codeFragment 预约号片段
      * @return Map 列表，包含预约基本信息
      */
     List<Map<String, Object>> findReservationsByCodeFragment(@Param("codeFragment") String codeFragment);
 
     /**
-     * 🔧 根据电话号码后4位模糊查询（仅返回基本信息）
+     *  根据电话号码后4位模糊查询（仅返回基本信息）
      * @param phoneLast4 电话号码后4位
      * @return Map 列表，包含预约基本信息
      */
     List<Map<String, Object>> findReservationsByPhoneLast4(@Param("phoneLast4") String phoneLast4);
 
     /**
-     * 🔧 根据预约号片段查询完整预约详情（支持模糊查询，用于 EDIT_TIME 模式）
+     *  根据预约号片段查询完整预约详情（支持模糊查询，用于 EDIT_TIME 模式）
      * @param codeFragment 预约号片段
      * @return TableReservation 列表，包含完整预约信息
      */
     List<TableReservation> findDetailByCodeFragment(@Param("codeFragment") String codeFragment);
 
     /**
-     * 🔧 CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态）
+     *  CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态）
      * @param codeFragment 预约号片段
      * @return TableReservation 列表，包含完整预约信息（状态：PRE_CONFIRMED/CONFIRMED/NO_SHOW/DELAYED）
      */
@@ -177,7 +177,7 @@ public interface TableReservationMapper {
                                @Param("reason") String reason);
 
     /**
-     * 🔧 更新预约记录的 pre_order 标志（预点餐状态切换）
+     *  更新预约记录的 pre_order 标志（预点餐状态切换）
      * @param reservationId 预约号
      * @param preOrder 是否预点餐
      * @return 影响行数
@@ -186,7 +186,7 @@ public interface TableReservationMapper {
                            @Param("preOrder") boolean preOrder);
 
     /**
-     * 🔧 延迟预约专用更新方法（支持多字段原子更新）
+     *  延迟预约专用更新方法（支持多字段原子更新）
      * @param reservationId 预约号
      * @param newTime 新的预约时间
      * @param newStatus 新状态
@@ -210,7 +210,7 @@ public interface TableReservationMapper {
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * 🔧 根据 reservation_id 查询预付信息（仅返回 is_prepaid 和 prepaid_amount）
+     *  根据 reservation_id 查询预付信息（仅返回 is_prepaid 和 prepaid_amount）
      * @param reservationId 预约号
      * @return Map{is_prepaid: Boolean, prepaid_amount: Double}，不存在返回空 Map
      */

@@ -35,6 +35,8 @@
     <!-- ===== 查询操作 ===== -->
 
     <!-- 2. findByCategory(int categoryId) -->
+<!--    resultMap="MenuItemResult" 表示：查询结果不直接映射为实体类，而是使用名为 "MenuItemResult" 的预定义映射规则-->
+<!--    （在 XML 其他位置用 <resultMap> 标签配置），用于处理字段名与 Java 属性名不一致、关联查询、类型转换等复杂映射场景。-->
     <select id="findByCategory" resultMap="MenuItemResult">
         SELECT
         item_id,
@@ -70,6 +72,7 @@
 
     <!-- 5. existsInOrderItems(String itemCode) -->
     <select id="existsInOrderItems" resultType="boolean">
+<!--        EXISTS(SELECT 1 FROM ...) 是 SQL 中最高效的存在性检查写法：数据库引擎只需确认“有没有数据”，一旦找到第一条匹配行立刻短路返回 true（MyBatis 自动映射为 boolean），无需读取或统计完整行数据。-->
         SELECT EXISTS(
         SELECT 1
         FROM order_items oi
@@ -94,8 +97,13 @@
         WHERE item_code = #{itemCode}
     </update>
 
-    <!-- MenuItemMapper.xml 新增 -->
     <select id="getMaxItemNumberByPrefix" resultType="java.lang.Integer">
+<!--        MAX(): 聚合函数，返回满足条件的最大整数值，用于计算当前前缀下的最大序号以生成下一个递增编码-->
+<!--         CAST(... AS UNSIGNED): 将截取的字符串强制转为无符号整型，确保按数值大小比较，避免字典序导致 "10" < "2"-->
+<!--        SUBSTRING(item_code, 2): 从第2个字符开始截取，跳过首字母分类前缀，仅提取编码中的纯数字部分-->
+<!--         LIKE: 模糊匹配操作符，用于筛选出符合指定字符串模式的所有记录-->
+<!--         CONCAT(#{prefix}, '%'): 字符串拼接函数，将动态传入的前缀与通配符%组合，构造“以XX开头”的查询条件-->
+<!--        先用 CONCAT 和 LIKE 过滤出同类前缀的菜品 → 用 SUBSTRING 剥离前缀字母 → 用 CAST 将剩余字符转为数字 → 最后用 MAX 取出最大序号，供业务层 +1 生成新编码-->
         SELECT MAX(CAST(SUBSTRING(item_code, 2) AS UNSIGNED))
         FROM menu_items
         WHERE item_code LIKE CONCAT(#{prefix}, '%')

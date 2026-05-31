@@ -50,15 +50,37 @@ public class DatabaseInitializer implements CommandLineRunner {
     @Value("${db.init.username:root}")
     private String dbUsername;
 
+    //@Value(...)：Spring 注解，声明该字段需要从配置中注入值
+    //${...}:占位符语法，表示从配置文件（如 application.properties）中查找键值
+    //db.init.password:配置项的键名（key）
+    //:默认值分隔符，冒号后面是"找不到该键时使用的备用值"
+    //""（空）:默认值为空字符串，即配置不存在时 dbPassword 被赋值为 ""
     @Value("${db.init.password:}")
     private String dbPassword;
 
-    // 动态构建数据库连接 URL
+    /**
+     * 获取数据库服务器连接URL（不含数据库名）
+     *
+     * 功能说明：
+     * 拼接主机地址、端口及连接参数，构建用于管理级操作（如创建数据库）的JDBC连接字符串。
+     *
+     * 连接参数说明：
+     * - useSSL=false: 禁用SSL加密，适用于本地或内网开发环境
+     * - serverTimezone=UTC: 指定服务器时区为UTC，避免时间转换歧义
+     * - characterEncoding=utf-8: 指定字符编码为UTF-8，确保中文数据正常读写
+     * - allowPublicKeyRetrieval=true: 允许客户端获取服务器公钥，兼容MySQL 8.0+认证机制
+     *
+     * @return 数据库服务器级别的JDBC连接URL
+     */
     private String getServerUrl() {
         return "jdbc:mysql://" + dbHost + ":" + dbPort +
                 "/?useSSL=false&serverTimezone=UTC&characterEncoding=utf-8&allowPublicKeyRetrieval=true";
     }
 
+    /**
+     * 系统必需的数据表名称列表
+     * 用于初始化时校验表结构完整性
+     */
     private static final String[] REQUIRED_TABLES = {
             "business_status", "customer_groups", "menu_categories",
             "menu_items", "restaurant_tables", "table_orders",
@@ -66,10 +88,27 @@ public class DatabaseInitializer implements CommandLineRunner {
             "order_cancellations", "queues","forfeited_deposits"
     };
 
+    /**
+     * 构造函数：初始化 JdbcTemplate
+     * @param dataSource 数据源实例，用于执行数据库操作
+     */
     public DatabaseInitializer(DataSource dataSource) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
     }
 
+    /**
+     * 应用启动时执行数据库初始化
+     *
+     * 功能说明：
+     * 1. 检查初始化标志，避免重复执行
+     * 2. 确保目标数据库存在，不存在则创建
+     * 3. 校验必需表结构，若缺失则执行 schema.sql 建表
+     * 4. 建表成功后插入默认餐桌、菜单分类及今日营业状态数据
+     * 5. 表已存在时静默跳过，不输出日志
+     *
+     * @param args 命令行参数（未使用）
+     * @throws Exception 初始化过程中发生异常时抛出
+     */
     @Override
     public void run(String... args) throws Exception {
         if (initialized) {
@@ -104,7 +143,18 @@ public class DatabaseInitializer implements CommandLineRunner {
     }
 
     /**
-     * 确保数据库存在（使用注入的配置）
+     * 确保目标数据库存在
+     *
+     * 功能说明：
+     * 1. 连接至数据库服务器（非目标库）
+     * 2. 查询 INFORMATION_SCHEMA 确认目标库是否存在
+     * 3. 若不存在则执行 CREATE DATABASE 语句创建，指定 utf8mb4 字符集
+     *
+     * 安全说明：
+     * - 使用 PreparedStatement 防止数据库名注入
+     * - 使用 IF NOT EXISTS 避免并发创建冲突
+     *
+     * @throws Exception 连接数据库或执行建库语句失败时抛出
      */
     private void ensureDatabaseExists() throws Exception {
         try (Connection conn = DriverManager.getConnection(getServerUrl(), dbUsername, dbPassword);
@@ -127,7 +177,15 @@ public class DatabaseInitializer implements CommandLineRunner {
     }
 
     /**
-     * 检查所有必需表是否存在
+     * 检查所有必需数据表是否已存在
+     *
+     * 功能说明：
+     * 1. 通过 DatabaseMetaData 获取当前库中所有用户表
+     * 2. 将表名转为小写存入集合，避免大小写敏感问题
+     * 3. 遍历 REQUIRED_TABLES 数组，任一表缺失则返回 false
+     *
+     * @return true=所有必需表均存在；false=存在缺失表
+     * @throws Exception 获取元数据或遍历结果集失败时抛出
      */
     private boolean hasRequiredTables() throws Exception {
         try (Connection conn = jdbcTemplate.getDataSource().getConnection()) {
@@ -155,7 +213,19 @@ public class DatabaseInitializer implements CommandLineRunner {
     }
 
     /**
-     * 执行 schema.sql 创建表结构
+     * 执行 schema.sql 脚本创建数据库表结构
+     *
+     * 功能说明：
+     * 1. 从 classpath:db/schema.sql 加载 SQL 脚本文件
+     * 2. 逐行读取并拼接完整 SQL 语句，跳过空行与注释
+     * 3. 按分号分割语句并逐条执行，捕获并过滤"表已存在"类非致命错误
+     * 4. 记录执行的语句总数与成功数，创建表时输出表名日志
+     *
+     * 异常处理：
+     * - 文件不存在时抛出 RuntimeException
+     * - SQL 执行异常时，若错误信息不含"already exists"或"duplicate"则向上抛出
+     *
+     * @throws Exception 读取文件或执行 SQL 失败时抛出
      */
     private void executeSchemaScript() throws Exception {
         var resolver = new PathMatchingResourcePatternResolver();
@@ -229,6 +299,13 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     /**
      * 从 CREATE TABLE 语句中提取表名
+     *
+     * 功能说明：
+     * 解析 SQL 语句，跳过可选的 IF NOT EXISTS 子句，提取第一个标识符作为表名，
+     * 并移除可能存在的反引号包裹。
+     *
+     * @param sql CREATE TABLE 语句字符串
+     * @return 提取的表名；解析失败或非建表语句时返回 null
      */
     private String extractTableName(String sql) {
         try {
@@ -248,6 +325,16 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     /**
      * 插入默认餐桌数据（仅在首次建表时调用）
+     *
+     * 功能说明：
+     * 向 restaurant_tables 表插入 18 张默认餐桌记录：
+     * - 编号 1-6：2 人桌，容量 2
+     * - 编号 7-12：4 人桌，容量 4
+     * - 编号 13-18：6 人桌，容量 6
+     * 所有餐桌初始状态为 VACANT，类型为 MAIN
+     *
+     * 容错处理：
+     * - 捕获插入异常并记录错误日志，避免中断初始化流程
      */
     //2.6. 默認數據種子 (Default Data Seeding)
     //技術說明：在表結構創建後，自動插入基礎數據（如 15 張默認餐桌、4 個菜單分類），確保系統首次啟動即可使用，無需手動錄入基礎資料。
@@ -278,6 +365,16 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     /**
      * 插入默认菜单分类数据（仅在首次建表时调用）
+     *
+     * 功能说明：
+     * 向 menu_categories 表插入 4 条默认分类记录：
+     * - 特色食物（前缀 A）
+     * - 饮料（前缀 B）
+     * - 小炒（前缀 C）
+     * - 套餐（前缀 D）
+     *
+     * 容错处理：
+     * - 捕获插入异常并记录错误日志，避免中断初始化流程
      */
     private void insertDefaultCategories() {
         String sql = "INSERT INTO menu_categories (name, prefix) VALUES (?, ?)";
@@ -301,6 +398,20 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
     }
 
+    /**
+     * 插入或跳过今日营业状态记录
+     *
+     * 功能说明：
+     * 1. 查询 business_status 表是否存在当前日期的记录
+     * 2. 若不存在则插入一条新记录，初始化营业状态为开启、叫号序号为 1、各项统计为 0
+     * 3. 若已存在则跳过，避免重复插入消耗自增主键
+     *
+     * 数据字段：
+     * - business_date: 当前日期（CURDATE()）
+     * - is_open: true（默认营业）
+     * - next_call_number: 1（起始叫号）
+     * - daily_total_customers / daily_revenue / daily_takeout_count: 0（初始统计）
+     */
     private void insertTodayBusinessStatus() {
         // 先检查是否存在
         Integer count = jdbcTemplate.queryForObject(

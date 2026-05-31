@@ -29,6 +29,28 @@ import java.util.stream.Stream;
 @Service
 public class RestaurantService {
 
+    /**
+     * 预约匹配信息封装类（私有静态内部类）
+     *
+     * 功能说明：
+     * 用于在服务层内部传递预约匹配检查的中间结果，
+     * 包含预约基本信息与所需餐桌规格，避免方法参数过多。
+     *
+     * 字段说明：
+     * - reservationId: 预约记录唯一标识
+     * - requiredCapacity: 所需餐桌容量（2/4/6人桌）
+     * - requiredCount: 所需餐桌数量
+     * - reservationTime: 预约到店时间
+     * - customerName: 预约客人姓名
+     * - customerPhone: 预约客人联系电话
+     *
+     * 使用场景：
+     * - 餐桌状态变更为空闲时，检查是否存在匹配的1.5小时内预约
+     * - 匹配成功时构建提示信息供界面展示
+     *
+     * 访问权限：
+     * - private修饰，仅当前类内部使用，避免外部依赖
+     */
     private static class ReservationMatchInfo {
         String reservationId;
         int requiredCapacity;  // 需要的餐桌容量（2/4/6）
@@ -38,25 +60,82 @@ public class RestaurantService {
         String customerPhone;
     }
 
-    //  静态内部类：合并机会封装
+    /**
+     * 餐桌合并机会封装类（公共静态内部类）
+     *
+     * 功能说明：
+     * 用于传递相邻空闲餐桌的合并可行性信息，
+     * 支持服务层与视图层之间安全交换合并建议数据。
+     *
+     * 核心字段：
+     * - available: 是否存在可合并的相邻餐桌对
+     * - mainTableDisplayId: 合并后的主桌显示编号
+     * - subTableA: 第一张子桌显示编号
+     * - subTableB: 第二张子桌显示编号
+     *
+     * 设计模式：
+     * - 静态工厂方法：none()表示无合并机会，of()表示有机会
+     * - 避免外部直接new，确保对象状态初始化完整
+     *
+     * 框架兼容：
+     * - 提供标准getter/setter，支持MyBatis结果映射
+     * - 重写toString方法，便于调试日志输出
+     *
+     * 应用场景：
+     * - 顾客点餐时检查是否可通过合并餐桌满足人数需求
+     * - 界面展示合并建议供操作员确认执行
+     */
     public static class MergeOpportunity {
-        private boolean available = false;
-        private String mainTableDisplayId;
+        private boolean available = false;//标记是否存在可合并的相邻餐桌对
+        private String mainTableDisplayId;//合并后的主桌显示编号
         private String subTableA;
         private String subTableB;
 
-        //  默认构造函数
+        /**
+         * 默认构造函数
+         *
+         * 功能说明：
+         * 供框架反射实例化或静态工厂方法内部调用，
+         * 初始化时available默认为false，需显式设置有效值。
+         */
         public MergeOpportunity() {
         }
 
-        //  静态工厂方法：无机会
+        /**
+         * 创建无合并机会的实例
+         *
+         * 功能说明：
+         * 返回available=false的MergeOpportunity对象，
+         * 表示当前无符合条件的相邻餐桌可合并。
+         *
+         * @return 不可用的合并机会实例
+         *
+         * 使用场景：
+         * - 查询无相邻空闲餐桌时返回
+         * - 调用方通过isAvailable()快速判断是否可执行合并
+         */
         public static MergeOpportunity none() {
             MergeOpportunity op = new MergeOpportunity();
             op.available = false;
             return op;
         }
 
-        //  静态工厂方法：有机会
+        /**
+         * 创建有合并机会的实例
+         *
+         * 功能说明：
+         * 返回available=true且包含完整餐桌信息的MergeOpportunity对象，
+         * 表示存在可合并的相邻餐桌对。
+         *
+         * @param mainTableDisplayId 合并后的主桌显示编号
+         * @param subTableA 第一张子桌显示编号
+         * @param subTableB 第二张子桌显示编号
+         * @return 可用的合并机会实例
+         *
+         * 使用场景：
+         * - 找到相邻空闲餐桌对时构建返回结果
+         * - 视图层根据返回信息展示合并建议按钮
+         */
         public static MergeOpportunity of(String mainTableDisplayId, String subTableA, String subTableB) {
             MergeOpportunity op = new MergeOpportunity();
             op.available = true;
@@ -66,7 +145,11 @@ public class RestaurantService {
             return op;
         }
 
-        // ✅ Getter/Setter（必须！供MyBatis/外部调用）
+        /**
+         * 判断是否存在可合并的相邻餐桌对
+         *
+         * @return true=存在合并机会；false=无合并机会
+         */
         public boolean isAvailable() {
             return available;
         }
@@ -75,26 +158,58 @@ public class RestaurantService {
             this.available = available;
         }
 
+        /**
+         * 获取合并后的主桌显示编号
+         *
+         * @return 主桌显示编号；无合并机会时返回null
+         */
         public String getMainTableDisplayId() {
             return mainTableDisplayId;
         }
 
+        /**
+         * 设置合并后的主桌显示编号
+         *
+         * @param mainTableDisplayId 主桌显示编号
+         */
         public void setMainTableDisplayId(String mainTableDisplayId) {
             this.mainTableDisplayId = mainTableDisplayId;
         }
 
+
+        /**
+         * 获取第一张子桌的显示编号
+         *
+         * @return 子桌A显示编号；无合并机会时返回null
+         */
         public String getSubTableA() {
             return subTableA;
         }
 
+        /**
+         * 设置第一张子桌的显示编号
+         *
+         * @param subTableA 子桌A显示编号
+         */
         public void setSubTableA(String subTableA) {
             this.subTableA = subTableA;
         }
 
+
+        /**
+         * 获取第二张子桌的显示编号
+         *
+         * @return 子桌B显示编号；无合并机会时返回null
+         */
         public String getSubTableB() {
             return subTableB;
         }
 
+        /**
+         * 设置第二张子桌的显示编号
+         *
+         * @param subTableB 子桌B显示编号
+         */
         public void setSubTableB(String subTableB) {
             this.subTableB = subTableB;
         }
@@ -110,7 +225,7 @@ public class RestaurantService {
     private final TablesMapper tablesMapper;
     private final CustomerGroupMapper customerGroupMapper;
     private final BusinessStatusMapper businessStatusMapper;
-    private final OrderMapper orderMapper; //  新增注入
+    private final OrderMapper orderMapper;
     private final QueueMapper queueMapper;
     private final OrderItemMapper orderItemMapper;
     private final TableReservationMapper reservationMapper;
@@ -191,7 +306,7 @@ public class RestaurantService {
      * - 首次启动时数据库未就绪的预期错误仅记录提示
      * - 其他异常记录简洁错误信息及关键堆栈，避免日志刷屏
      */
-    @PostConstruct
+    @PostConstruct// 依赖注入完成后自动执行的初始化方法，用于执行Bean的初始配置逻辑
     public void initCache() {
         try {
             // 稍微延迟，给数据库初始化一点时间
@@ -328,7 +443,7 @@ public class RestaurantService {
      * - 执行失败时记录错误日志，不影响主业务运行
      * - 支持后续扩展告警通知机制
      */
-    @Scheduled(cron = "0 0 0 * * ?")  // 秒 分 時 日 月 周 = 每天午夜 00:00:00
+    @Scheduled(cron = "0 0 0 * * ?")  //启用定时任务调度
     public void autoCreateDailyStatus() {
         try {
             LocalDate today = LocalDate.now();
@@ -1080,6 +1195,7 @@ public class RestaurantService {
 
         //【关键修复】4.2 分别插入两个子桌（确保主键回填）
         // 插入子桌 A
+        // MyBatis 的 insert 语句返回受影响行数：成功插入返回 1，失败或无变化返回 0，因此 ==0 表示插入未生效
         if (tablesMapper.saveSubTable(subTableA) == 0) {
             throw new RuntimeException("插入子桌 A 失败");
         }
@@ -1102,7 +1218,7 @@ public class RestaurantService {
         orderMapper.migrateOrdersToTable(targetTable.getTableId(), subTableA.getTableId());
         System.out.println(" 订单已迁移至子桌 #" + subTableA.getDisplayId());
 
-        // 【修复】累加當日顧客總數（自动分裂分配也需统计）
+        // 累加當日顧客總數（自动分裂分配也需统计）
         businessStatusMapper.incrementDailyTotalCustomers(
                 group.getGroupSize(), LocalDate.now());
 
@@ -1572,32 +1688,61 @@ public class RestaurantService {
 
     /**
      * 检查并尝试为等待顾客分配餐桌
-     *
-     * 功能说明：
-     * 1. 查询1.5小时内的预约需求，按餐桌容量统计所需桌数
-     * 2. 按队列类型顺序（2人→4人→6人）遍历处理
-     * 3. 若某容量餐桌存在预约需求，则跳过该容量队列的排队顾客分配
-     * 4. 若无预约需求，则调用对应队列的分配逻辑尝试为顾客安排餐桌
-     *
-     * 业务规则：
-     * - 预约顾客优先于排队顾客，保障预约权益
-     * - 按容量维度隔离资源分配，避免不同桌型相互干扰
+     * 【前置条件】只有满足以下条件才执行分配：
+     * 1. 至少有一个队列不为空（有排队顾客）
+     * 2. 不是所有容量的餐桌都被1.5小时内预约占用
      */
     public void checkAndAssignWaitingCustomers() {
-        // 1. 获取1.5小时内的预约需求（按容量统计需要的桌子数量）
+        // 【前置条件1】检查是否有排队顾客（三个队列都为空则直接返回）
+        if (queue2Seat.isEmpty() && queue4Seat.isEmpty() && queue6Seat.isEmpty()) {
+            System.out.println(" [跳过] 所有队列为空，无需执行餐桌分配检查");
+            return;
+        }
+
+
+        // 【前置条件2】获取1.5小时内的预约需求
         Map<Integer, Integer> reservedDemand = getReservedDemandByCapacity();
 
-        // 2. 按队列类型顺序处理（2人→4人→6人）
+
+        // 【前置条件3】检查是否"所有有排队顾客的容量"都被预约占用
+        // 只有当某个容量：(1)有排队顾客 且 (2)无预约需求 时，才执行分配
+        boolean shouldProceed = false;
+
         for (String queueType : Arrays.asList("2_SEAT", "4_SEAT", "6_SEAT")) {
             int capacity = parseCapacityFromQueueType(queueType);
+            Queue<CustomerGroup> queue = getQueueByType(queueType);
 
-            // 【核心规则】如果该容量有预约需求，跳过该队列的排队顾客
-            if (reservedDemand.getOrDefault(capacity, 0) > 0) {
-                System.out.println("⏭ 容量" + capacity + "人桌有预约需求，暂停分配排队顾客");
+            // 该队列有排队顾客 + 该容量无预约需求 = 可以执行分配
+            if (!queue.isEmpty() && reservedDemand.getOrDefault(capacity, 0) == 0) {
+                shouldProceed = true;
+                break;
+            }
+        }
+
+        if (!shouldProceed) {
+            System.out.println(" [跳过] 无符合条件的排队顾客可分配（队列空 或 全被预约占用）");
+            return;
+        }
+
+        System.out.println(" [执行] 开始检查排队顾客餐桌分配...");
+
+        // 【主逻辑】按队列类型顺序处理（2人→4人→6人）
+        for (String queueType : Arrays.asList("2_SEAT", "4_SEAT", "6_SEAT")) {
+            int capacity = parseCapacityFromQueueType(queueType);
+            Queue<CustomerGroup> queue = getQueueByType(queueType);
+
+            // 该队列为空，跳过
+            if (queue.isEmpty()) {
                 continue;
             }
 
-            // 无预约需求：尝试为排队顾客分配餐桌
+            // 【核心规则】如果该容量有1.5小时内预约需求，跳过该队列
+            if (reservedDemand.getOrDefault(capacity, 0) > 0) {
+                System.out.println("⏭ 容量" + capacity + "人桌有1.5小时内预约需求，暂停分配该队列顾客");
+                continue;
+            }
+
+            //  条件满足：执行分配
             assignWaitingCustomersByQueueType(queueType);
         }
     }

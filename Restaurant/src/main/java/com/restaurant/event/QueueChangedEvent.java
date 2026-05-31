@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 队列变更事件
  * 用于通知前端刷新排队队列显示
- * 🔧 支持指定受影响的餐桌列表（合并桌/聚餐桌精准刷新）
+ *  支持指定受影响的餐桌列表（合并桌/聚餐桌精准刷新）
  */
 //5.1. Spring 事件驅動架構 (ApplicationEvent & Publisher)
 //技術說明：利用 Spring 內置的事件發布機制，將 Service 層的狀態變更（如隊列變動、餐桌分配）抽象為事件對象，實現業務邏輯與 UI 刷新的徹底解耦。
@@ -17,7 +17,7 @@ import java.util.List;
 //通過靜態工廠方法（fullRefresh, of, ofTables）封裝事件創建邏輯，提供語義化 API，使業務層發佈事件時意圖清晰、代碼簡潔。
 public class QueueChangedEvent extends ApplicationEvent {
 
-    // 🔹 可选：携带变更的队列类型，用于局部刷新
+    //  可选：携带变更的队列类型，用于局部刷新
     private final String queueType;  // "2_SEAT" / "4_SEAT" / "6_SEAT" / null(全量刷新)
 
     // 受影响的餐桌显示ID列表（用于精准刷新指定餐桌）
@@ -51,7 +51,7 @@ public class QueueChangedEvent extends ApplicationEvent {
     }
 
     /**
-     * 🔧 获取受影响的餐桌显示ID列表
+     *  获取受影响的餐桌显示ID列表
      * @return 餐桌显示ID列表，null 表示刷新全部
      */
     public List<String> getAffectedTableDisplayIds() {
@@ -59,21 +59,44 @@ public class QueueChangedEvent extends ApplicationEvent {
     }
 
     /**
-     * 便捷工厂方法：全量刷新事件
+     * 创建全量刷新事件
+     *
+     * 功能说明：
+     * 构建队列类型为 null、受影响餐桌列表为 null 的事件实例，
+     * 指示监听器执行全局刷新：重绘所有排队队列与餐桌显示。
+     *
+     * @param source 事件来源对象（通常为发布事件的 Service 实例）
+     * @return 全量刷新事件实例
+     *
+     * 应用场景：
+     * - 服务启动初始化完成后触发全局界面同步
+     * - 不确定具体变更范围时兜底刷新所有组件
      */
     public static QueueChangedEvent fullRefresh(Object source) {
         return new QueueChangedEvent(source, null, null);
     }
 
     /**
-     * 便捷工厂方法：指定队列刷新
+     * 创建指定队列类型的刷新事件
+     *
+     * 功能说明：
+     * 构建携带指定队列类型、受影响餐桌列表为 null 的事件实例，
+     * 指示监听器仅刷新对应容量的排队队列显示。
+     *
+     * @param source 事件来源对象（通常为发布事件的 Service 实例）
+     * @param queueType 队列类型标识（"2_SEAT"/"4_SEAT"/"6_SEAT"）
+     * @return 局部刷新事件实例
+     *
+     * 应用场景：
+     * - 单一容量队列的顾客增减操作后精准刷新
+     * - 避免全量刷新带来的性能开销，提升界面响应速度
      */
     public static QueueChangedEvent of(Object source, String queueType) {
         return new QueueChangedEvent(source, queueType, null);
     }
 
     /**
-     * 🔧 新增：支持指定餐桌的工厂方法（精准刷新）
+     *  新增：支持指定餐桌的工厂方法（精准刷新）
      * @param source 事件源
      * @param tableDisplayIds 需要刷新的餐桌显示ID列表
      */

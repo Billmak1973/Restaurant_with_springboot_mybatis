@@ -26,6 +26,7 @@
     </insert>
 
     <!-- 2. getNextQueuePosition -->
+<!--    resultType="int"：適用於确定永不返回 NULL 的聚合查询（如 COUNT(*)）-->
     <select id="getNextQueuePosition" resultType="int">
         SELECT COALESCE(MAX(position), 0) + 1
         FROM queues

@@ -21,7 +21,7 @@ public class OrderService {
     private final OrderItemMapper orderItemMapper;
     private final MenuItemMapper menuItemMapper;
     private final TablesMapper tablesMapper;  //  新增
-    private final BusinessStatusMapper businessStatusMapper;  // 🔧 新增字段
+    private final BusinessStatusMapper businessStatusMapper;  //  新增字段
     private final TableReservationMapper reservationMapper;
 
     public OrderService(OrderMapper orderMapper,
@@ -38,14 +38,33 @@ public class OrderService {
         this.reservationMapper = reservationMapper;
     }
 
-
+    /**
+     * 加载堂食订单的菜品明细
+     *
+     * 功能说明：
+     * 1. 校验餐桌显示编号有效性，为空或"未选择"时返回空列表
+     * 2. 查询餐桌对象并判断是否为聚餐桌类型
+     * 3. 聚餐桌处理：解析 group_with 字段获取所有关联桌号，批量查询订单明细
+     * 4. 普通餐桌处理：仅查询当前餐桌关联的订单明细
+     *
+     * @param tableDisplayId 餐桌显示编号
+     * @return 订单项列表；参数无效、餐桌不存在或无关联订单时返回空列表
+     *
+     * 业务规则：
+     * - 聚餐桌订单明细需聚合所有关联桌的数据，确保菜品展示完整
+     * - 普通餐桌仅加载本桌订单，避免数据泄露
+     *
+     * 应用场景：
+     * - 顾客点餐界面加载已点菜品
+     * - 结账前展示订单明细供确认
+     */
     @Transactional(readOnly = true)
     public List<OrderItem> loadFormalOrderItems(String tableDisplayId) {
         if (tableDisplayId == null || tableDisplayId.trim().isEmpty() || "未选择".equals(tableDisplayId)) {
             return Collections.emptyList();
         }
 
-        // 🔧【核心修改】检查是否为聚餐桌，如果是则获取所有关联桌号
+        // 【核心修改】检查是否为聚餐桌，如果是则获取所有关联桌号
         Tables table = tablesMapper.findByDisplayId(tableDisplayId.trim());
         if (table == null) {
             return Collections.emptyList();
@@ -62,7 +81,7 @@ public class OrderService {
             for (String id : groupIds) {
                 tableDisplayIds.add(id.trim());
             }
-            // System.out.println("🔧 聚餐桌查询订单: " + String.join(",", tableDisplayIds));
+            // System.out.println(" 聚餐桌查询订单: " + String.join(",", tableDisplayIds));
         } else {
             // 普通餐桌，只查询当前桌
             tableDisplayIds.add(tableDisplayId.trim());
@@ -74,6 +93,19 @@ public class OrderService {
 
     /**
      * 加载堂食订单列表
+     *
+     * 功能说明：
+     * 查询所有堂食类型（DINE_IN）的订单记录，返回包含订单号、餐桌号、金额、状态等字段的映射列表，
+     * 供订单管理界面展示与筛选。
+     *
+     * @return 堂食订单映射列表；无订单时返回空列表
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：order_type = 'DINE_IN'
+     *
+     * 应用场景：
+     * - 前台订单管理界面展示所有堂食订单
+     * - 运营报表统计堂食订单数量与营收
      */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> loadDineInOrders() {
@@ -82,17 +114,61 @@ public class OrderService {
 
     /**
      * 加载自取订单列表
+     *
+     * 功能说明：
+     * 查询所有自取类型（TAKEOUT + PICKUP）的外卖订单记录，返回包含订单号、客户信息、金额、状态等字段的映射列表，
+     * 供外卖订单管理界面展示与跟踪。
+     *
+     * @return 自取订单映射列表；无订单时返回空列表
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：order_type = 'TAKEOUT' AND delivery_method = 'PICKUP'
+     *
+     * 应用场景：
+     * - 外卖窗口展示待制作/待取餐订单
+     * - 店员通知顾客取餐时查询订单状态
      */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> loadPickupOrders() {
         return orderMapper.findPickupOrders();
     }
 
+    /**
+     * 加载配送订单列表
+     *
+     * 功能说明：
+     * 查询所有配送类型（TAKEOUT + DELIVERY）的外卖订单记录，返回包含订单号、客户信息、配送地址、金额、配送状态等字段的映射列表，
+     * 供配送员接单与跟踪使用。
+     *
+     * @return 配送订单映射列表；无订单时返回空列表
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：order_type = 'TAKEOUT' AND delivery_method = 'DELIVERY'
+     *
+     * 应用场景：
+     * - 配送员接单界面展示待配送订单
+     * - 客服查询配送进度时获取订单详情
+     */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> loadDeliveryOrders() {
         return orderMapper.findDeliveryOrders();
     }
 
+    /**
+     * 获取下一个外卖订单序号
+     *
+     * 功能说明：
+     * 1. 根据订单类型确定订单号前缀：自取订单用"P"，配送订单用"D"
+     * 2. 获取当前日期字符串（格式：yyyyMMdd）作为订单号日期部分
+     * 3. 调用 Mapper 查询指定前缀、日期、配送方式下的最大序号，返回下一个可用序号
+     *
+     * @param orderType 外卖订单类型枚举（PICKUP 或 DELIVERY）
+     * @return 下一个订单序号；查询无结果时返回 1
+     *
+     * 业务规则：
+     * - 订单号格式：前缀 + 日期 + 序号（如 "P-20260528-001"）
+     * - 序号按日期与配送方式独立递增，确保每日每类订单号唯一
+     */
     @Transactional(readOnly = true)
     public int getNextTakeoutOrderNumber(OrderType orderType) {
         String prefix = (orderType == OrderType.PICKUP) ? "P" : "D";
@@ -103,27 +179,44 @@ public class OrderService {
         return next != null ? next : 1;
     }
 
-
+    /**
+     * 创建新订单并插入明细
+     *
+     * 功能说明：
+     * 1. 校验配送状态合法性：堂食订单必须为 null，配送订单必须指定状态，自取订单必须为 null
+     * 2. 构建订单实体：设置餐桌、订单号、类型、配送信息、客户信息、金额字段及初始状态
+     * 3. 插入订单主表并获取回填的主键
+     * 4. 若存在订单项列表，批量插入订单明细记录
+     * 5. 校验订单创建结果，失败时记录详细日志并抛出异常
+     *
+     * @param tableId 关联餐桌主键（外卖订单可为 null）
+     * @param orderNumber 订单编号（格式：前缀 + 日期 + 序号）
+     * @param orderType 订单类型（"DINE_IN"/"TAKEOUT"）
+     * @param deliveryMethod 配送方式（"DELIVERY"/"PICKUP"/null）
+     * @param deliveryAddress 配送地址（仅配送订单需要）
+     * @param customerPhone 客户联系电话
+     * @param customerName 客户姓名
+     * @param itemsTotal 菜品总额
+     * @param deliveryFee 配送费（非配送订单为 0.0）
+     * @param totalAmount 应付总额（= itemsTotal + deliveryFee）
+     * @param orderItems 订单项列表（可为空）
+     * @param deliveryStatus 配送状态枚举（仅配送订单需要）
+     * @return 创建成功的订单主键；创建失败时抛出 RuntimeException
+     *
+     * 事务管理：
+     * - 方法标注 @Transactional，确保订单主表与明细插入的原子性
+     * - 失败时自动回滚，避免数据不一致
+     */
     @Transactional
-    public Integer createOrder(
-            Integer tableId,
-            String orderNumber,
-            String orderType,
-            String deliveryMethod,
-            String deliveryAddress,
-            String customerPhone,
-            String customerName,
-            Double itemsTotal,
-            Double deliveryFee,
-            Double totalAmount,
-            List<OrderItem> orderItems,
-            Order.DeliveryStatus deliveryStatus  //  新增参数
+    public Integer createOrder(Integer tableId, String orderNumber, String orderType, String deliveryMethod,
+                               String deliveryAddress, String customerPhone, String customerName, Double itemsTotal,
+                                Double deliveryFee, Double totalAmount, List<OrderItem> orderItems,
+                               Order.DeliveryStatus deliveryStatus
     ) {
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【新增】校验 delivery_status 合法性
-        // ═══════════════════════════════════════════════════════════
+
+        // 校验 delivery_status 合法性
         validateDeliveryStatus(orderType, deliveryMethod, deliveryStatus);
-        // ═══════════════════════════════════════════════════════════
+
 
         // 创建 Order 实体
         Order order = new Order();
@@ -143,7 +236,7 @@ public class OrderService {
         order.setStatus("ORDERED");
         order.setIsCheckedOut(false);
 
-        // 🔧 设置配送状态（校验通过后）
+        //  设置配送状态（校验通过后）
         order.setDeliveryStatus(deliveryStatus);
 
         // 插入订单主表
@@ -159,7 +252,7 @@ public class OrderService {
             orderItemMapper.addOrderItems(orderId, orderItems);
         }
         if (orderId == null || orderId <= 0) {
-            // 🔧 打印详细错误信息
+            //  打印详细错误信息
             System.err.println(" 创建订单失败！order 对象状态：");
             System.err.println("  orderType=" + order.getOrderType());
             System.err.println("  deliveryMethod=" + order.getDeliveryMethod());
@@ -171,8 +264,22 @@ public class OrderService {
     }
 
     /**
-     *  校验 delivery_status 合法性
-     * 规则：仅 DELIVERY 模式允许非空状态，其他必须为 NULL
+     * 校验配送状态字段的合法性
+     *
+     * 功能说明：
+     * 1. 堂食订单：配送状态必须为 null，禁止设置
+     * 2. 外卖订单：
+     *    - 配送方式：配送状态不能为 null，必须指定初始状态
+     *    - 自取方式：配送状态必须为 null
+     *    - 未指定配送方式：配送状态必须为 null
+     *
+     * @param orderType 订单类型（"DINE_IN"/"TAKEOUT"）
+     * @param deliveryMethod 配送方式（"DELIVERY"/"PICKUP"/null）
+     * @param deliveryStatus 待校验的配送状态枚举值
+     *
+     * 异常处理：
+     * - 任一规则校验失败时抛出 IllegalArgumentException，提示具体冲突原因
+     * - 调用方需在创建订单前调用此方法，确保数据合规
      */
     private void validateDeliveryStatus(String orderType, String deliveryMethod, Order.DeliveryStatus deliveryStatus) {
         // 堂食订单：配送状态必须为 NULL
@@ -205,6 +312,20 @@ public class OrderService {
     }
 
 
+    /**
+     * 根据订单号加载订单项列表
+     *
+     * 功能说明：
+     * 1. 校验订单号参数有效性，为空时返回空列表
+     * 2. 调用 Mapper 查询该订单关联的所有订单项记录
+     *
+     * @param orderNumber 订单编号字符串
+     * @return 订单项列表；参数为空或无关联明细时返回空列表
+     *
+     * 应用场景：
+     * - 外卖订单详情查询时加载菜品明细
+     * - 订单修改或撤销前校验可操作项
+     */
     @Transactional(readOnly = true)
     public List<OrderItem> loadOrderItemsByOrderNumber(String orderNumber) {
         if (orderNumber == null || orderNumber.trim().isEmpty()) {
@@ -216,6 +337,18 @@ public class OrderService {
 
     /**
      * 根据订单号查询配送费
+     *
+     * 功能说明：
+     * 1. 校验订单号参数有效性，为空时返回默认值 0.0
+     * 2. 通过订单号查询订单对象
+     * 3. 返回配送费字段，若为空则返回 0.0
+     *
+     * @param orderNumber 外卖订单编号
+     * @return 配送费金额；订单不存在或字段为空时返回 0.0
+     *
+     * 应用场景：
+     * - 外卖订单结算界面显示配送费用
+     * - 订单详情查询时计算应付总额
      */
     @Transactional(readOnly = true)
     public Double getDeliveryFeeByOrderNumber(String orderNumber) {
@@ -230,7 +363,21 @@ public class OrderService {
     }
 
     /**
-     * 根据餐桌ID查询活跃订单ID（供 Controller 调用）
+     * 根据餐桌主键查询活跃订单主键
+     *
+     * 功能说明：
+     * 查询指定餐桌当前状态为"已点餐"或"未点餐"的订单主键，
+     * 用于支持点餐、结账、撤销等业务流程的订单定位。
+     *
+     * @param tableId 餐桌数据库主键
+     * @return 活跃订单主键；无匹配订单时返回 null
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：table_id 匹配且状态为有效订单状态
+     *
+     * 应用场景：
+     * - 顾客点餐时加载或创建订单
+     * - 结账时校验订单是否存在且状态正确
      */
     @Transactional(readOnly = true)
     public Integer findActiveOrderIdByTableId(Integer tableId) {
@@ -239,7 +386,23 @@ public class OrderService {
     }
 
     /**
-     * 根据订单号查询活跃订单（供 Controller 调用）
+     * 根据订单号查询活跃订单对象
+     *
+     * 功能说明：
+     * 1. 校验订单号参数有效性，为空时返回 null
+     * 2. 通过订单号查询订单对象
+     * 3. 仅返回状态为"已点餐"的订单，过滤已结账或无效订单
+     *
+     * @param orderNumber 订单编号字符串
+     * @return 活跃订单对象；订单不存在或状态非"已点餐"时返回 null
+     *
+     * 业务规则：
+     * - 仅"已点餐"状态的订单视为活跃，支持后续点餐或修改操作
+     * - 已结账订单需通过其他方法查询，避免状态混淆
+     *
+     * 应用场景：
+     * - 外卖订单详情查询时校验订单有效性
+     * - 订单修改前确认订单仍处于可编辑状态
      */
     @Transactional(readOnly = true)
     public Order findActiveOrderByOrderNumber(String orderNumber) {
@@ -250,10 +413,21 @@ public class OrderService {
     }
 
     /**
-     *  根据 reservation_id 查找活跃订单（预约订单专用）
+     * 根据预约号查询活跃的预点餐订单
      *
-     * @param reservationId 预约号
-     * @return 订单对象，不存在返回 null
+     * 功能说明：
+     * 查询指定预约记录关联的、状态为有效的预点餐订单对象，
+     * 用于顾客入座时加载提前点选的菜品明细。
+     *
+     * @param reservationId 预约记录唯一标识
+     * @return 预点餐订单对象；无关联订单或订单无效时返回 null
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：reservation_id 匹配且订单类型为"RESERVATION"
+     *
+     * 应用场景：
+     * - 顾客入座时自动加载预点餐菜品到正式订单
+     * - 预约修改时同步更新关联订单的预付信息与菜品明细
      */
     @Transactional(readOnly = true)
     public Order findActiveOrderByReservationId(String reservationId) {
@@ -285,9 +459,8 @@ public class OrderService {
                                          boolean isReservationSeated) {
         int totalQty = originalQty + newQty;
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【情况1】预约订单（客人未入座）→ 只能是 PREPARING/PREPARED
-        // ═══════════════════════════════════════════════════════════
         if (isReservationOrder && !isReservationSeated) {
             if (servedQty >= totalQty) {
                 return "PREPARED";  // 全部已准备
@@ -296,9 +469,8 @@ public class OrderService {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【情况2&3】预约入座（currentReservationId 存在）
-        // ═══════════════════════════════════════════════════════════
         if (isReservationSeated) {
             // ──【情况2】菜品未上桌（PREPARING/PREPARED/UNSERVED）→ PREPARING
             if ("PREPARING".equals(originalStatus) ||
@@ -321,9 +493,8 @@ public class OrderService {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【情况4】普通堂食订单（无 currentReservationId）
-        // ═══════════════════════════════════════════════════════════
         if (servedQty >= totalQty) {
             return "SERVED";
         } else if (servedQty > 0) {
@@ -334,9 +505,37 @@ public class OrderService {
     }
 
 
+    /**
+     * 合并新菜品到现有订单
+     *
+     * 功能说明：
+     * 1. 校验订单主键与新菜品映射有效性
+     * 2. 查询订单实体，若为预点餐订单且状态为未点餐，则升级为已点餐状态
+     * 3. 判断订单类型：预约订单/预约入座订单/普通堂食订单，以及是否为聚餐桌
+     * 4. 查询现有订单项，构建复合键映射（聚餐桌使用"菜品编码 + 标准化分配餐桌"作为键）
+     * 5. 遍历新菜品列表，分类为待更新或待新增：
+     *    - 聚餐桌且已有上桌记录：强制新增记录，避免覆盖已上桌数据
+     *    - 复合键匹配现有项：标记为更新，计算合并后状态与数量分布
+     *    - 无匹配项：标记为新增，初始化状态为未上桌
+     * 6. 执行批量数据库操作：
+     *    - 已上桌菜品：使用普通堂食更新逻辑
+     *    - 未上桌菜品：使用预约订单更新逻辑
+     *    - 新增菜品：批量插入并设置初始状态
+     * 7. 重算订单总金额并更新订单主表
+     *
+     * @param orderId 订单主键
+     * @param newItemsMap 新菜品映射，键为菜品编码（聚餐桌含分配餐桌信息），值为新增数量
+     *
+     * 业务规则：
+     * - 聚餐桌菜品使用复合键匹配，确保相同菜品分配不同餐桌时独立管理
+     * - 已有上桌记录的聚餐桌菜品强制新增，避免影响已上桌数据
+     * - 预约订单无配送费，总金额等于菜品总额
+     *
+     * 事务管理：
+     * - 方法标注 @Transactional，确保合并操作原子性，失败自动回滚
+     */
     @Transactional  // 声明事务：保证操作的原子性，失败自动回滚
-    public void mergeOrderItems(Integer orderId,      // 参数1：订单主键ID
-                                Map<String, Integer> newItemsMap) {
+    public void mergeOrderItems(Integer orderId, Map<String, Integer> newItemsMap) {
         if (orderId == null || orderId <= 0) {
             throw new IllegalArgumentException("订单 ID 无效");
         }
@@ -344,17 +543,15 @@ public class OrderService {
             return;
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤2】查询订单实体
-        // ─────────────────────────────────────────────────────────────
         Order order = orderMapper.findById(orderId);
         if (order == null) {
             throw new IllegalArgumentException("订单不存在：" + orderId);
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤3】预点餐订单状态升级（NO_ORDER → ORDERED）
-        // ─────────────────────────────────────────────────────────────
         if ("RESERVATION".equals(order.getOrderType()) &&
                 "NO_ORDER".equals(order.getStatus()) &&
                 !newItemsMap.isEmpty()) {
@@ -368,12 +565,11 @@ public class OrderService {
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤4】判断订单类型和餐桌类型（核心分支逻辑）
-        // ─────────────────────────────────────────────────────────────
         boolean isReservationOrder = "RESERVATION".equals(order.getOrderType());
         boolean isReservationSeated = false;
-        boolean isGroupedTable = false;  // 🔧 新增：标记是否为聚餐桌
+        boolean isGroupedTable = false;  //  新增：标记是否为聚餐桌
 
         if (order.getTableId() != null) {
             Tables table = tablesMapper.findById(order.getTableId());
@@ -383,27 +579,26 @@ public class OrderService {
                     System.out.println("检测到预约入座订单：orderId=" + orderId +
                             ", reservationId=" + table.getCurrentReservationId());
                 }
-                // 🔧【核心修复】判断是否为聚餐桌
+                // 【核心修复】判断是否为聚餐桌
                 if (table.getTableType() == Tables.TableType.GROUPED) {
                     isGroupedTable = true;
-                    System.out.println("🔧 检测到聚餐桌订单：orderId=" + orderId +
+                    System.out.println(" 检测到聚餐桌订单：orderId=" + orderId +
                             ", tableType=GROUPED, groupWith=" + table.getGroupWith());
                 }
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤5】获取订单现有明细（构建匹配映射表）
-        // ─────────────────────────────────────────────────────────────
         List<Map<String, Object>> rawList = orderItemMapper.getExistingItemQuantitiesRaw(orderId, null);
 
         Map<String, Integer> existingItems = new HashMap<>();
         Map<String, Integer> existingServedQty = new HashMap<>();
         Map<String, String> existingItemStatus = new HashMap<>();
-        // 🔧 新增：创建映射表：复合键 → 原distribution
+        //  新增：创建映射表：复合键 → 原distribution
         Map<String, String> existingQuantityDistribution = new HashMap<>();
 
-        // 🔧【新增】记录已有上桌记录的复合键（聚餐桌一键点餐专用）
+        // 【新增】记录已有上桌记录的复合键（聚餐桌一键点餐专用）
         Set<String> itemsWithServedRecords = new HashSet<>();
 
         for (Map<String, Object> row : rawList) {
@@ -411,13 +606,13 @@ public class OrderService {
             Integer qty = (Integer) row.get("quantity");
             Integer served = (Integer) row.get("servedQuantity");
             String status = (String) row.get("status");
-            // 🔧 提取原distribution
+            //  提取原distribution
             String quantityDist = (String) row.get("quantityDistribution");
 
-            // 🔧【关键修复】提取分配的餐桌显示ID
+            // 【关键修复】提取分配的餐桌显示ID
             String assignedTableId = (String) row.get("assignedTableDisplayId");
 
-            // 🔧【核心修复】根据餐桌类型构建复合键
+            // 【核心修复】根据餐桌类型构建复合键
             String key = code;
             if (isGroupedTable && assignedTableId != null && !assignedTableId.isEmpty()) {
                 String sortedTableIds = sortTableIds(assignedTableId);
@@ -428,19 +623,18 @@ public class OrderService {
             existingItems.put(key, qty);
             existingServedQty.put(key, served != null ? served : 0);
             existingItemStatus.put(key, status);
-            // 🔧 记录原distribution
+            //  记录原distribution
             existingQuantityDistribution.put(key, quantityDist);
 
-            // 🔧 记录已有上桌记录的菜品
+            //  记录已有上桌记录的菜品
             if (served != null && served > 0) {
                 itemsWithServedRecords.add(key);
                 System.out.println(" 菜品已有上桌记录：key=" + key + ", served=" + served);
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤6】分类新菜品：更新 vs 新增
-        // ─────────────────────────────────────────────────────────────
         List<OrderItem> itemsToUpdate = new ArrayList<>();
         List<OrderItem> itemsToInsert = new ArrayList<>();
 
@@ -448,7 +642,7 @@ public class OrderService {
             String itemKey = entry.getKey().trim().toUpperCase();
             int newQty = entry.getValue();
 
-            // 🔧 解析特殊 Key 格式：B1[BATCH:13,14,15]
+            //  解析特殊 Key 格式：B1[BATCH:13,14,15]
             String pureItemCode = itemKey;
             String assignedTableId = null;
             boolean isBatchOrder = false;
@@ -458,7 +652,7 @@ public class OrderService {
                 int batchStart = itemKey.indexOf("[BATCH:");
                 pureItemCode = itemKey.substring(0, batchStart);
                 assignedTableId = itemKey.substring(batchStart + 7, itemKey.length() - 1);
-                System.out.println("🔧 解析一键点餐：pureItemCode=" + pureItemCode +
+                System.out.println(" 解析一键点餐：pureItemCode=" + pureItemCode +
                         ", assignedTableId=" + assignedTableId);
             }
 
@@ -472,41 +666,40 @@ public class OrderService {
             orderItem.setQuantity(newQty);
             orderItem.setPriceAtOrder(menuItem.getPrice());
 
-            // 🔧 标准化 assigned_table_display_id
+            //  标准化 assigned_table_display_id
             if (isGroupedTable && assignedTableId != null && !assignedTableId.isEmpty()) {
                 orderItem.setAssignedTableDisplayId(sortTableIds(assignedTableId));
             } else {
                 orderItem.setAssignedTableDisplayId(null);
             }
 
-            // 🔧 构建复合键
+            //  构建复合键
             String key = pureItemCode;
             if (isGroupedTable && assignedTableId != null && !assignedTableId.isEmpty()) {
                 String sortedTableIds = sortTableIds(assignedTableId);
                 key = pureItemCode + "|" + sortedTableIds;
-                System.out.println("🔧 使用复合键：" + key);
+                System.out.println(" 使用复合键：" + key);
             }
 
-            // 🔧【核心修复】根据餐桌类型 + 上桌记录决定合并/插入
+            // 【核心修复】根据餐桌类型 + 上桌记录决定合并/插入
             boolean hasServedRecord = itemsWithServedRecords.contains(key);
 
             if (isGroupedTable && hasServedRecord) {
                 itemsToInsert.add(orderItem);
-                System.out.println("🔧 聚餐桌一键点餐：菜品 " + pureItemCode +
+                System.out.println(" 聚餐桌一键点餐：菜品 " + pureItemCode +
                         " 已有上桌记录，创建新记录：key=" + key);
             } else if (existingItems.containsKey(key)) {
                 itemsToUpdate.add(orderItem);
-                System.out.println("🔧 找到匹配项，准备合并更新：key=" + key +
+                System.out.println(" 找到匹配项，准备合并更新：key=" + key +
                         ", 原数量=" + existingItems.get(key) + ", 新增=" + newQty);
             } else {
                 itemsToInsert.add(orderItem);
-                System.out.println("🔧 未找到匹配项，准备插入：key=" + key);
+                System.out.println(" 未找到匹配项，准备插入：key=" + key);
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
-        // 【步骤7】🔧【核心修正】处理待更新项（计算状态 + 生成distribution + 分组更新）
-        // ─────────────────────────────────────────────────────────────
+
+        // 【步骤7】【核心修正】处理待更新项（计算状态 + 生成distribution + 分组更新）
         if (!itemsToUpdate.isEmpty()) {
             List<OrderItem> servedGroup = new ArrayList<>();
             List<OrderItem> unservedGroup = new ArrayList<>();
@@ -515,7 +708,7 @@ public class OrderService {
                 String itemCode = item.getItemCode();
                 int newQty = item.getQuantity();
 
-                // 🔧 构建 lookupKey
+                //  构建 lookupKey
                 String lookupKey = itemCode;
                 String itemAssignedTableId = item.getAssignedTableDisplayId();
                 if (itemAssignedTableId != null && !itemAssignedTableId.isEmpty()) {
@@ -523,19 +716,19 @@ public class OrderService {
                     lookupKey = itemCode + "|" + sortedTableIds;
                 }
 
-                // 🔧 获取原有数据
+                //  获取原有数据
                 Integer originalQty = existingItems.get(lookupKey);
                 Integer originalServed = existingServedQty.getOrDefault(lookupKey, 0);
                 String originalStatus = existingItemStatus.get(lookupKey);
                 String originalDistribution = existingQuantityDistribution.get(lookupKey);
 
-                // 🔧 计算合并后的状态
+                //  计算合并后的状态
                 String newStatus = calculateMergedStatus(
                         originalServed, originalQty, newQty,
                         originalStatus, isReservationOrder, isReservationSeated
                 );
 
-                // 🔧【核心新增】为聚餐桌生成/更新 quantity_distribution
+                // [核心新增】为聚餐桌生成/更新 quantity_distribution
                 if (isGroupedTable && itemAssignedTableId != null && !itemAssignedTableId.isEmpty()) {
                     int totalQuantity = originalQty + newQty;  // 合并后的总数量
                     String newDistribution = generateQuantityDistribution(
@@ -546,12 +739,12 @@ public class OrderService {
                             true,                     // isMerge: 是合并操作
                             originalDistribution      // 原distribution
                     );
-                    item.setQuantityDistribution(newDistribution);  // 🔧 设置到订单项
-                    System.out.println("🔧 更新菜品 distribution: " + itemCode +
+                    item.setQuantityDistribution(newDistribution);  //  设置到订单项
+                    System.out.println(" 更新菜品 distribution: " + itemCode +
                             " → " + newDistribution);
                 }
 
-                System.out.println("🔧 菜品 " + itemCode +
+                System.out.println(" 菜品 " + itemCode +
                         " 原:" + originalStatus + "(" + originalServed + "/" + originalQty + ")" +
                         " + 新增:" + newQty +
                         " → 新状态:" + newStatus + "(" + originalServed + "/" + (originalQty + newQty) + ")" +
@@ -567,21 +760,20 @@ public class OrderService {
                 item.setStatus(newStatus);
             }
 
-            // 🔹 已上桌的菜品 → 普通堂食逻辑
+            //  已上桌的菜品 → 普通堂食逻辑
             if (!servedGroup.isEmpty()) {
                 System.out.println(" 已上桌菜品 → 普通逻辑，数量：" + servedGroup.size());
                 orderItemMapper.updateExistingOrderItems(orderId, servedGroup);
             }
-            // 🔹 未上桌的菜品 → 预约逻辑
+            // 未上桌的菜品 → 预约逻辑
             if (!unservedGroup.isEmpty()) {
                 System.out.println(" 未上桌菜品 → 预约逻辑，数量：" + unservedGroup.size());
                 orderItemMapper.updateExistingOrderItemsForReservation(orderId, unservedGroup);
             }
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤8】处理待新增项（设置初始状态 + 生成distribution）
-        // ─────────────────────────────────────────────────────────────
         if (!itemsToInsert.isEmpty()) {
             String initialStatus = "UNSERVED";
 
@@ -599,7 +791,7 @@ public class OrderService {
                             null                         // existingDistribution: 新菜品无现有值
                     );
                     item.setQuantityDistribution(distribution);
-                    System.out.println("🔧 新菜品生成 distribution: " + distribution);
+                    System.out.println(" 新菜品生成 distribution: " + distribution);
                 }
             }
 
@@ -607,9 +799,8 @@ public class OrderService {
             orderItemMapper.insertNewOrderItemsWithStatus(orderId, itemsToInsert, initialStatus);
         }
 
-        // ─────────────────────────────────────────────────────────────
+
         // 【步骤9】重算订单金额（预约订单无配送费）
-        // ─────────────────────────────────────────────────────────────
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
             orderMapper.updateOrderTotals(orderId, newTotal, newTotal);
@@ -628,7 +819,23 @@ public class OrderService {
 
 
     /**
-     *  辅助方法：排序餐桌ID（确保 "14,13,15" = "13,14,15"）
+     * 标准化排序餐桌显示编号列表
+     *
+     * 功能说明：
+     * 1. 校验输入字符串有效性，为空时直接返回
+     * 2. 按逗号分割餐桌编号，提取数字部分进行升序排序
+     * 3. 重新拼接为逗号分隔的字符串，确保"14,13,15"与"13,14,15"视为相同
+     *
+     * @param tableIds 餐桌显示编号列表字符串（如"14,13,15"）
+     * @return 排序后的餐桌编号字符串（如"13,14,15"）；输入为空时返回原值
+     *
+     * 应用场景：
+     * - 聚餐桌菜品分配时构建复合键，确保不同顺序的餐桌列表能正确匹配
+     * - 数量分布生成时保证桌号顺序一致，便于前端展示与后端校验
+     *
+     * 排序规则：
+     * - 仅比较餐桌编号的数字部分，忽略字母后缀（如"7a"→7）
+     * - 数字相同时按原始字符串字典序排列（Java Arrays.sort 稳定排序）
      */
     private String sortTableIds(String tableIds) {
         if (tableIds == null || tableIds.isEmpty()) {
@@ -648,6 +855,14 @@ public class OrderService {
 
     /**
      * 根据订单号获取订单状态显示文本
+     *
+     * 功能说明：
+     * 1. 校验订单号参数有效性，为空时返回默认提示文本
+     * 2. 查询订单当前状态枚举值
+     * 3. 拼接状态显示名称，返回格式化结果供界面展示
+     *
+     * @param orderNumber 订单编号字符串
+     * @return 格式化状态文本（如"订单情况：已结账"）；订单不存在时返回"未找到订单"提示
      */
     @Transactional(readOnly = true)
     public String getOrderStatusDisplayByOrderNumber(String orderNumber) {
@@ -661,7 +876,34 @@ public class OrderService {
         return "订单情况：" + status.getDisplayName();
     }
 
-
+    /**
+     * 标记指定菜品为已上桌
+     *
+     * 功能说明：
+     * 1. 校验餐桌号、菜品主键、上桌数量等基础参数有效性
+     * 2. 查询餐桌对象并判断是否为聚餐桌类型
+     * 3. 聚餐桌处理逻辑：
+     *    - 优先查询多桌共享菜品（模糊匹配分配餐桌列表）
+     *    - 若未找到则查询单桌分配菜品（精确匹配餐桌编号）
+     *    - 根据分配类型调用对应处理方法：共享菜品执行顺序校验与份额计算，单桌菜品直接累加数量
+     * 4. 普通餐桌处理逻辑：
+     *    - 查询活跃订单及菜品明细
+     *    - 校验菜品未全部上桌，计算新已上桌数量与状态
+     *    - 更新订单项并检查订单是否全部完成
+     * 5. 若订单所有菜品均已上桌，更新餐桌订单状态为"制作完成"
+     *
+     * @param tableNumber 餐桌显示编号
+     * @param itemId 待上桌的菜品主键
+     * @param quantity 本次上桌的菜品数量
+     *
+     * 业务规则：
+     * - 聚餐桌共享菜品需按桌号顺序上桌，禁止跳过中间桌号
+     * - 共享菜品每桌份额由总数量整除桌数计算，输入数量自动修正
+     * - 普通餐桌直接累加已上桌数量，不超过菜品总数量
+     *
+     * 异常处理：
+     * - 参数无效、餐桌/订单/菜品不存在或状态冲突时抛出相应异常
+     */
     @Transactional
     public void markItemsAsServed(String tableNumber, int itemId, int quantity) throws SQLException {
         // ===== 1-3. 基础验证 + 获取餐桌（保持不变）=====
@@ -676,9 +918,7 @@ public class OrderService {
 
         boolean isGroupedTable = (table.getTableType() == Tables.TableType.GROUPED);
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】聚餐桌：区分【单桌分配】与【多桌共享】两种模式
-        // ═══════════════════════════════════════════════════════════
+        // 【核心修改】聚餐桌：区分【单桌分配】与【多桌共享】两种模式
         OrderItem targetItem;
 
         if (isGroupedTable) {
@@ -696,9 +936,8 @@ public class OrderService {
                 );
             }
 
-            // ═══════════════════════════════════════════════════════════
-            // 🔧【核心分支】根据 assigned_table_display_id 判断菜品类型
-            // ═══════════════════════════════════════════════════════════
+
+            // 【核心分支】根据 assigned_table_display_id 判断菜品类型
             String assignedId = targetItem.getAssignedTableDisplayId();
             boolean isSharedDish = (assignedId != null && assignedId.contains(","));
 
@@ -752,38 +991,47 @@ public class OrderService {
     }
 
     /**
-     *  处理【多桌共享菜品】上桌逻辑（聚餐桌专用）
-     * <p>
-     * 📋 核心规则：
-     * 1. 共享菜品必须按桌号顺序上桌，不能跳过中间桌号
-     * 2. 允许"回退"上桌（如 18→17），但前提是当前桌号必须与已上桌桌号相邻
-     * 3. 禁止"跳跃"上桌（如 18→16，跳过了 17）
-     * 4. 🔧【新增】检查 quantity_distribution：null 或均匀时按整除计算，不均匀时跳过
+     * 处理聚餐桌多桌共享菜品的上桌逻辑
      *
-     * @param item               订单项对象
-     * @param currentTableNumber 当前操作的餐桌号（如 "16"）
-     * @param inputQuantity      用户输入的上桌数量
-     * @throws SQLException 数据库操作异常
+     * 功能说明：
+     * 1. 校验菜品状态，若已全部上桌则直接返回
+     * 2. 解析分配餐桌列表并按数字排序，确保顺序一致性
+     * 3. 获取已上桌桌号列表，校验当前桌号未重复上桌
+     * 4. 执行相邻性校验：当前桌号必须与任意已上桌桌号数字相邻，禁止跳过中间桌号
+     * 5. 计算每桌份额：
+     *    - 若 distribution 为空或均匀：总数量整除桌数
+     *    - 若 distribution 不均匀：抛出异常提示分配不一致
+     * 6. 自动修正输入数量：若与计算份额不符，按份额执行并记录日志
+     * 7. 更新订单项：累加已上桌数量、追加当前桌号到已上桌列表、推导新状态
+     *
+     * @param item 待更新的订单项对象
+     * @param currentTableNumber 当前操作的餐桌显示编号
+     * @param inputQuantity 用户输入的上桌数量
+     *
+     * 业务规则：
+     * - 共享菜品必须按桌号顺序上桌，确保每桌公平分配
+     * - 允许回退上桌（如 18→17），但必须与已上桌桌号相邻
+     * - 每桌份额固定，输入数量自动修正，避免人为误差
+     *
+     * 异常处理：
+     * - 分配餐桌列表为空、桌号数量不足 2 或输入数量超限时抛出相应异常
+     * - 跳过桌号或分配不均匀时抛出异常，提示用户按规则操作
      */
-    private void handleSharedDishServing(OrderItem item, String currentTableNumber, int inputQuantity) throws SQLException {
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤 0】🔧 检查菜品状态：如果已全部上桌则直接跳过
-        // ══════════════════════════════════════════════════════════
+    private void handleSharedDishServing(OrderItem item, String currentTableNumber, int inputQuantity) {
 
+        // 【步骤 0】 检查菜品状态：如果已全部上桌则直接跳过
         if ("SERVED".equals(item.getStatus())) {
-            return;  // 🔑 关键：直接返回，不执行任何后续逻辑
+            return;  //  关键：直接返回，不执行任何后续逻辑
         }
-        // ═══════════════════════════════════════════════════════════
+
         // 【步骤 1】基础验证：检查 assigned_table_display_id 是否为空
-        // ═══════════════════════════════════════════════════════════
         String assignedId = item.getAssignedTableDisplayId();
         if (assignedId == null || assignedId.isEmpty()) {
             throw new IllegalStateException("共享菜品 assigned_table_display_id 不能为空");
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【步骤 2】解析聚餐桌号列表（格式："15,16,17" → 排序后 [15,16,17]）
-        // ═══════════════════════════════════════════════════════════
         String[] tableIds = assignedId.split(",");
         List<String> sortedTableIds = Arrays.stream(tableIds)
                 .map(String::trim)
@@ -795,26 +1043,22 @@ public class OrderService {
             throw new IllegalStateException("共享菜品必须分配给至少 2 张餐桌");
         }
 
-        // ═══════════════════════════════════════════════════════════
         // 【步骤 3】获取已上桌的桌号列表（格式："16,18" → ["16", "18"]）
-        // ═══════════════════════════════════════════════════════════
         String servedTables = item.getServedTableDisplayId();
         List<String> alreadyServedTables = (servedTables != null && !servedTables.isEmpty())
                 ? Arrays.asList(servedTables.split(","))
                 : Collections.emptyList();
 
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤 4】🔧【核心修复】检查当前桌号是否已上桌，避免重复更新
-        // ═══════════════════════════════════════════════════════════
+
+        // 【步骤 4】【核心修复】检查当前桌号是否已上桌，避免重复更新
         String currentTableTrimmed = currentTableNumber.trim();
         if (alreadyServedTables.contains(currentTableTrimmed)) {
             System.out.println("⚠️ 桌号 " + currentTableTrimmed + " 已上桌，跳过重复更新");
-            return;  // 🔑 关键：直接返回，不执行后续更新逻辑
+            return;  //  关键：直接返回，不执行后续更新逻辑
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤 5】🔧【核心规则】验证上桌顺序：相邻性校验（禁止任何"跳过"行为）
-        // ═══════════════════════════════════════════════════════════
+
+        // 【步骤 5】【核心规则】验证上桌顺序：相邻性校验（禁止任何"跳过"行为）
         int currentNum = Integer.parseInt(currentTableTrimmed.replaceAll("[^0-9]", ""));
 
         if (!alreadyServedTables.isEmpty()) {
@@ -823,7 +1067,7 @@ public class OrderService {
                     .map(s -> Integer.parseInt(s.replaceAll("[^0-9]", "")))
                     .collect(Collectors.toList());
 
-            // 🔧【核心】检查当前桌号是否与任意已上桌桌号相邻（差值=1）
+            // 【核心】检查当前桌号是否与任意已上桌桌号相邻（差值=1）
             boolean hasAdjacentServed = false;
             for (Integer servedNum : servedNums) {
                 if (Math.abs(currentNum - servedNum) == 1) {
@@ -833,7 +1077,7 @@ public class OrderService {
             }
 
             if (!hasAdjacentServed) {
-                // ❌ 不满足相邻条件，说明跳过了中间的桌号
+                //  不满足相邻条件，说明跳过了中间的桌号
                 throw new IllegalStateException(
                         "聚餐桌一键上桌不能跳过桌号！\n" +
                                 "当前桌号：" + currentTableNumber + "\n" +
@@ -841,20 +1085,19 @@ public class OrderService {
                                 "💡 提示：请按桌号顺序上桌，相邻桌号才能操作");
             }
 
-            // ✅ 相邻验证通过，记录日志
-            System.out.println("ℹ️ 桌号 " + currentTableNumber +
+            //  相邻验证通过，记录日志
+            System.out.println(" 桌号 " + currentTableNumber +
                     " 与已上桌桌号相邻，允许上桌");
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 【步骤 6】🔧【核心修改】检查 quantity_distribution 并计算每桌份额
-        // ═══════════════════════════════════════════════════════════
+
+        // 【步骤 6】【核心修改】检查 quantity_distribution 并计算每桌份额
         int totalQuantity = item.getQuantity();
         int perTableQuantity;  // 每桌应上桌的份额
 
         String quantityDistribution = item.getQuantityDistribution();
-        // 🔧【DEBUG 1】打印原始 distribution 值
-//        System.out.println("🔍 [DEBUG] itemCode=" + item.getItemCode() +
+        // 【DEBUG 1】打印原始 distribution 值
+//        System.out.println(" [DEBUG] itemCode=" + item.getItemCode() +
 //                ", quantityDistribution=[" + quantityDistribution + "]");
 
         if (quantityDistribution == null || quantityDistribution.isEmpty()) {
@@ -864,7 +1107,7 @@ public class OrderService {
                         "共享菜品总数量 (" + totalQuantity + ") 不能被桌子数量 (" + tableCount + ") 整除！");
             }
             perTableQuantity = totalQuantity / tableCount;
-            System.out.println("🔧 distribution 为空，使用整除计算：每桌 " + perTableQuantity + " 份");
+            System.out.println(" distribution 为空，使用整除计算：每桌 " + perTableQuantity + " 份");
         } else {
             // ── 情况 2：distribution 不为空 → 解析并检查均匀性
             Map<String, Integer> distributionMap = parseDistribution(quantityDistribution);
@@ -876,9 +1119,9 @@ public class OrderService {
                             "共享菜品总数量 (" + totalQuantity + ") 不能被桌子数量 (" + tableCount + ") 整除！");
                 }
                 perTableQuantity = totalQuantity / tableCount;
-                System.out.println("🔧 distribution 解析失败，兜底使用整除计算：每桌 " + perTableQuantity + " 份");
+                System.out.println(" distribution 解析失败，兜底使用整除计算：每桌 " + perTableQuantity + " 份");
             } else {
-                // 🔧 检查 distribution 中的数量是否一致（均匀性校验）
+                //  检查 distribution 中的数量是否一致（均匀性校验）
                 boolean isUniform = true;
                 Integer firstQty = null;
 
@@ -892,32 +1135,31 @@ public class OrderService {
                 }
 
                 if (isUniform) {
-                    // ✅ 数量一致 → 依旧使用【无余数整除】计算
+                    //  数量一致 → 依旧使用【无余数整除】计算
                     if (totalQuantity % tableCount != 0) {
                         throw new IllegalStateException(
                                 "共享菜品总数量 (" + totalQuantity + ") 不能被桌子数量 (" + tableCount + ") 整除！");
                     }
                     perTableQuantity = totalQuantity / tableCount;
-                    System.out.println("🔧 distribution 均匀，使用整除计算：每桌 " + perTableQuantity + " 份");
+                    System.out.println(" distribution 均匀，使用整除计算：每桌 " + perTableQuantity + " 份");
                 } else {
-                    // 🔧【关键修改】抛出带关键词的异常，供上层识别
+                    // 【关键修改】抛出带关键词的异常，供上层识别
                     throw new IllegalArgumentException(
                             "分配数量不均匀：" + item.getItemCode() +
-                                    " 在各桌分配不一致: " + quantityDistribution);  // 🔑 包含"分配数量不均匀"关键词
+                                    " 在各桌分配不一致: " + quantityDistribution);  //  包含"分配数量不均匀"关键词
                 }
             }
         }
 
-        // 🔧 校验：输入数量必须等于每桌份额（自动修正，不报错）
+        //  校验：输入数量必须等于每桌份额（自动修正，不报错）
         if (inputQuantity != perTableQuantity) {
             System.out.println("⚠️ [自动修正] 共享菜品数量：传入=" + inputQuantity +
                     " -> 实际执行每桌份额=" + perTableQuantity +
                     " (总" + totalQuantity + "份 ÷ " + tableCount + "桌)");
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【步骤 7】更新 served_quantity 和 served_table_display_id
-        // ═══════════════════════════════════════════════════════════
         int newServedQuantity = item.getServedQuantity() + perTableQuantity;
         String newServedTables = (servedTables == null || servedTables.isEmpty())
                 ? currentTableTrimmed
@@ -925,7 +1167,7 @@ public class OrderService {
 
         String newStatus = (newServedQuantity >= totalQuantity) ? "SERVED" : "PARTIALLY_SERVED";
 
-        // 🔧 调用新 Mapper 方法，同时更新 served_quantity + served_table_display_id + status
+        //  调用新 Mapper 方法，同时更新 served_quantity + served_table_display_id + status
         orderItemMapper.updateServedWithTableInfo(
                 item.getOrderItemId(),
                 newServedQuantity,
@@ -939,11 +1181,24 @@ public class OrderService {
     }
 
     /**
-     *  辅助方法：解析 quantity_distribution JSON 字符串为 Map
-     * 格式示例：{"13":4,"14":4,"15":3} → Map{"13"=4, "14"=4, "15"=3}
+     * 解析数量分配分布的 JSON 字符串为映射
      *
-     * @param jsonStr JSON 格式的 distribution 字符串
-     * @return 解析后的 Map，解析失败返回 null
+     * 功能说明：
+     * 1. 校验输入字符串有效性，为空时返回 null
+     * 2. 移除花括号与空格，按逗号分割键值对
+     * 3. 提取桌号（键）与数量（值），存入有序映射保持原始顺序
+     * 4. 解析失败时记录错误日志并返回 null，由调用方兜底处理
+     *
+     * @param jsonStr JSON 格式的分布字符串（如{"13":4,"14":4,"15":3}）
+     * @return 桌号 - 数量映射；解析失败或输入为空时返回 null
+     *
+     * 应用场景：
+     * - 聚餐桌共享菜品上桌时校验分配均匀性
+     * - 订单明细展示时解析每桌分配数量
+     *
+     * 容错处理：
+     * - 格式错误或数字解析失败时忽略该项，不影响其他项解析
+     * - 返回 null 表示解析失败，调用方需实现兜底逻辑
      */
     private Map<String, Integer> parseDistribution(String jsonStr) {
         if (jsonStr == null || jsonStr.isEmpty()) {
@@ -971,14 +1226,29 @@ public class OrderService {
             }
             return result;
         } catch (Exception e) {
-            System.err.println("⚠️ 解析 quantity_distribution 失败: " + jsonStr + " | 错误: " + e.getMessage());
+            System.err.println(" 解析 quantity_distribution 失败: " + jsonStr + " | 错误: " + e.getMessage());
             return null;  // 解析失败返回 null，调用方兜底处理
         }
     }
 
     /**
-     *  处理【单桌分配菜品】上桌逻辑（聚餐桌专用）
-     * 规则：跳过 prepared_quantity 校验，直接累加 served_quantity
+     * 处理单桌菜品的上桌操作
+     *
+     * 功能说明：
+     * 1. 校验菜品当前状态，若已全部上桌则抛出异常
+     * 2. 计算新已上桌数量：原数量 + 输入数量，不超过菜品总数量
+     * 3. 推导新状态：0 份→未上桌，部分→部分上桌，全部→已上桌
+     * 4. 调用 Mapper 更新订单项的已上桌数量与状态字段
+     *
+     * @param item 待更新的订单项对象
+     * @param inputQuantity 本次上桌的菜品数量
+     *
+     * 业务规则：
+     * - 单桌菜品不涉及分配餐桌，直接累加上桌数量
+     * - 状态自动推导，避免手动设置导致状态冲突
+     *
+     * 异常处理：
+     * - 菜品已全部上桌时抛出 IllegalStateException，防止重复操作
      */
     private void handleSingleTableDishServing(OrderItem item, int inputQuantity) {
         int total = item.getQuantity();
@@ -989,7 +1259,7 @@ public class OrderService {
             throw new IllegalStateException("该菜已全部上桌");
         }
 
-        // 🔧 核心差异：不与 prepared_quantity 对比，直接累加
+        //  核心差异：不与 prepared_quantity 对比，直接累加
         int newServed = Math.min(served + inputQuantity, total);
         String newStatus = (newServed == 0) ? "UNSERVED" : (newServed < total ? "PARTIALLY_SERVED" : "SERVED");
 
@@ -1000,10 +1270,23 @@ public class OrderService {
     }
 
     /**
-     * 一鍵標記所有菜品為已上桌（Service 層事務管理）
+     * 一键标记餐桌所有菜品为已上桌
      *
-     * @param tableNumber 餐桌編號
-     * @throws SQLException 操作失敗
+     * 功能说明：
+     * 1. 校验餐桌号有效性及存在性
+     * 2. 查询餐桌关联的活跃订单
+     * 3. 校验订单存在待上桌菜品，避免无效操作
+     * 4. 批量更新订单下所有未上桌菜品的状态为"已上桌"
+     * 5. 更新餐桌订单状态为"制作完成"
+     *
+     * @param tableNumber 餐桌显示编号
+     *
+     * 业务规则：
+     * - 仅更新状态为"未上桌"或"部分上桌"的菜品
+     * - 餐桌订单状态同步更新，确保界面展示一致
+     *
+     * 异常处理：
+     * - 餐桌不存在、无活跃订单或无待上桌菜品时抛出相应异常
      */
     @Transactional
     public void markAllItemsAsServed(String tableNumber) throws SQLException {
@@ -1045,7 +1328,25 @@ public class OrderService {
     }
 
     /**
-     * 標記外賣訂單菜品為製作完成（僅支持訂單號）
+     * 标记外卖订单指定菜品为制作完成
+     *
+     * 功能说明：
+     * 1. 校验订单号、菜品主键、制作数量有效性
+     * 2. 通过订单号查询外卖订单及菜品当前状态
+     * 3. 计算新已制作数量：原数量 + 输入数量，不超过菜品总数量
+     * 4. 推导新状态：全部完成→"已上桌"，部分完成→"部分上桌"
+     * 5. 调用 Mapper 更新菜品的已制作数量与状态
+     *
+     * @param orderNumber 外卖订单编号
+     * @param itemId 待更新的菜品主键
+     * @param quantity 本次标记完成的数量
+     *
+     * 业务规则：
+     * - 外卖订单使用"制作完成"概念，对应堂食的"已上桌"状态
+     * - 状态字段复用 served_quantity，保持数据模型统一
+     *
+     * 异常处理：
+     * - 参数无效、订单不存在或菜品未找到时抛出相应异常
      */
     @Transactional
     public void markTakeoutItemsAsReady(String orderNumber, int itemId, int quantity) throws SQLException {
@@ -1079,8 +1380,25 @@ public class OrderService {
     }
 
     /**
-     * 一鍵標記外賣訂單所有菜品為製作完成
-     * 🔧【新增】如果菜品已全部完成，自动将配送状态从"未配送"改为"送单中"
+     * 一键标记外卖订单所有菜品为制作完成
+     *
+     * 功能说明：
+     * 1. 校验订单号有效性及订单存在性
+     * 2. 若订单已无待制作菜品：
+     *    - 配送订单且状态为"未配送"时，自动更新为"送单中"
+     *    - 其他情况直接返回，避免重复操作
+     * 3. 若存在待制作菜品：批量更新所有菜品状态为"已上桌"
+     * 4. 配送订单自动推进配送状态至"送单中"
+     *
+     * @param orderNumber 外卖订单编号
+     *
+     * 业务规则：
+     * - 菜品全部完成后自动触发配送流程，减少人工操作
+     * - 仅配送订单更新配送状态，自取订单保持原状态
+     *
+     * 异常处理：
+     * - 订单号无效或订单不存在时抛出相应异常
+     * - 无待更新菜品时静默返回，不视为错误
      */
     @Transactional
     public void markAllTakeoutItemsAsReady(String orderNumber) throws SQLException {
@@ -1095,7 +1413,7 @@ public class OrderService {
 
         Integer orderId = order.getOrderId();
 
-        // 🔧【核心修改】如果没有待制作的菜品，检查是否需要自动更新配送状态
+        // 【核心修改】如果没有待制作的菜品，检查是否需要自动更新配送状态
         if (!orderItemMapper.hasUnservedItems(orderId)) {
             System.out.println(" 订单 " + orderNumber + " 所有菜品已制作完成，检查配送状态...");
 
@@ -1108,8 +1426,7 @@ public class OrderService {
                 System.out.println(" 自动更新配送状态: " + orderNumber +
                         " [未配送 → 送单中]");
 
-                // 可选：弹出提示告知用户
-                // JOptionPane.showMessageDialog(..., "菜品已全部完成，已自动更新为【送单中】状态");
+
             } else {
                 System.out.println(" 订单 " + orderNumber + " 已制作完成，配送状态: " +
                         (order.getDeliveryStatus() != null ? order.getDeliveryStatus().getDisplayName() : "N/A"));
@@ -1123,7 +1440,7 @@ public class OrderService {
             throw new IllegalStateException("未找到可更新的菜品明細");
         }
 
-        // 🔧【新增】如果是配送订单，自动将配送状态更新为"送单中"
+        // 【新增】如果是配送订单，自动将配送状态更新为"送单中"
         if ("DELIVERY".equals(order.getDeliveryMethod())) {
             orderMapper.updateDeliveryStatus(orderId, Order.DeliveryStatus.DELIVERING.name());
             System.out.println(" 配送状态已更新: " + orderNumber + " [未配送 → 送单中]");
@@ -1136,7 +1453,28 @@ public class OrderService {
 
 
     /**
-     * 【核心修复】根据 served_quantity 和总数量计算撤销后的正确状态
+     * 计算菜品撤销后的新状态
+     *
+     * 功能说明：
+     * 1. 根据撤销数量计算新总数量与新已上桌数量
+     * 2. 针对预约订单（未入座）、预约入座订单、普通堂食订单三种场景，分别推导状态
+     * 3. 状态推导规则：
+     *    - 新数量为 0：返回"未上桌"
+     *    - 已上桌数量 ≥ 新总数量：返回"已上桌"或"已准备"
+     *    - 已上桌数量 > 0 但 < 新总数量：返回"部分上桌"或"准备中"
+     *
+     * @param servedQty 原已上桌数量
+     * @param originalQty 原总数量
+     * @param cancelQuantity 撤销数量
+     * @param originalStatus 原状态字符串
+     * @param isReservationOrder 是否为预约订单
+     * @param isReservationSeated 预约顾客是否已入座
+     * @param cancelServedPart 是否撤销已上桌部分
+     * @return 撤销后的新状态字符串（"UNSERVED"/"PREPARING"/"PREPARED"/"PARTIALLY_SERVED"/"SERVED"）
+     *
+     * 业务规则：
+     * - 预约未入座订单仅使用准备相关状态，不涉及上桌状态
+     * - 撤销已上桌部分时，已上桌数量直接减少；撤销未上桌部分时保持不变
      */
     private String calculateCancelledStatus(int servedQty, int originalQty, int cancelQuantity,
                                             String originalStatus,
@@ -1145,7 +1483,7 @@ public class OrderService {
                                             boolean cancelServedPart) {
         int newQty = Math.max(0, originalQty - cancelQuantity);
 
-        // 🔧【核心修复】计算新的已上桌数量，确保与 cancelOrderItem 中的逻辑完全一致
+        // 【核心修复】计算新的已上桌数量，确保与 cancelOrderItem 中的逻辑完全一致
         int newServedQty;
         if ("PARTIALLY_SERVED".equals(originalStatus)) {
             if (cancelServedPart) {
@@ -1160,14 +1498,13 @@ public class OrderService {
             newServedQty = Math.min(servedQty, newQty);
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【情况 1】预约订单（客人未入座）→ 只能是 PREPARING/PREPARED/UNSERVED
-        // ═══════════════════════════════════════════════════════════
         if (isReservationOrder && !isReservationSeated) {
             if (newQty == 0) {
                 return "UNSERVED";                          // 全部撤销，状态重置
             } else if (newServedQty == 0) {
-                return "UNSERVED";                          // 🔧 已准备 0 份 = 未准备
+                return "UNSERVED";                          //  已准备 0 份 = 未准备
             } else if (newServedQty >= newQty) {
                 return "PREPARED";                          // 剩余的全部已准备
             } else {
@@ -1175,9 +1512,8 @@ public class OrderService {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
+
         // 【情况 2&3】预约入座（currentReservationId 存在）
-        // ═══════════════════════════════════════════════════════════
         if (isReservationSeated) {
             if ("PREPARING".equals(originalStatus) || "PREPARED".equals(originalStatus) || "UNSERVED".equals(originalStatus)) {
                 if (newQty == 0) return "UNSERVED";
@@ -1194,13 +1530,11 @@ public class OrderService {
             }
         }
 
-        // ═══════════════════════════════════════════════════════════
         // 【情况 4】普通堂食订单（无 currentReservationId）
-        // ═══════════════════════════════════════════════════════════
         if (newQty == 0) {
             return "UNSERVED";                              // 全部撤销
         } else if (newServedQty == 0) {
-            return "UNSERVED";                              // 🔧【核心修复】没有已上桌的 -> UNSERVED
+            return "UNSERVED";                              // 【核心修复】没有已上桌的 -> UNSERVED
         } else if (newServedQty >= newQty) {
             return "SERVED";                                // 剩余的全部已上桌
         } else if (newServedQty > 0) {
@@ -1210,6 +1544,31 @@ public class OrderService {
         }
     }
 
+    /**
+     * 撤销堂食订单中的指定菜品
+     *
+     * 功能说明：
+     * 1. 校验基础参数：餐桌号、菜品编码、撤销数量、撤销部分标识有效性
+     * 2. 查询餐桌、活跃订单、菜品信息，获取当前上桌状态
+     * 3. 判断订单类型：预约订单/预约入座订单/普通堂食订单，采用不同状态推导规则
+     * 4. 校验撤销数量：部分上桌菜品需分别校验已上桌与未上桌数量上限
+     * 5. 计算新数量、新已上桌数量与新状态
+     * 6. 执行撤销操作：
+     *    - 新数量为 0：记录审计日志（若已上桌）并删除订单项
+     *    - 新数量大于 0：更新订单项数量、已上桌数量与状态
+     * 7. 重算订单总金额并更新数据库
+     * 8. 若订单无剩余明细，自动删除空订单
+     *
+     * @param tableNumber 餐桌显示编号
+     * @param itemCode 待撤销的菜品编码
+     * @param cancelQuantity 撤销数量
+     * @param cancellationReason 撤销原因说明
+     * @param cancelServedPart 撤销部分标识（"SERVED"表示撤销已上桌部分，其他值表示撤销未上桌部分）
+     *
+     * 异常处理：
+     * - 参数校验失败、餐桌/订单/菜品不存在或撤销数量超限时抛出相应异常
+     * - 事务自动回滚，确保数据一致性
+     */
     @Transactional
     public void cancelOrderItem(String tableNumber, String itemCode, int cancelQuantity,
                                 String cancellationReason, String cancelServedPart) throws SQLException {
@@ -1224,12 +1583,12 @@ public class OrderService {
             throw new IllegalArgumentException("撤銷數量必須大於 0");
         }
 
-        // 🔧 验证 cancelServedPart 参数
+        //  验证 cancelServedPart 参数
         if (cancelServedPart == null || cancelServedPart.trim().isEmpty()) {
             throw new IllegalArgumentException("cancelServedPart 参数不能为空");
         }
 
-        // 🔧 将字符串转换为 boolean 逻辑
+        //  将字符串转换为 boolean 逻辑
         // 支持值: "SERVED"/"true"/"1" 表示删除已上桌部分；其他值表示删除未上桌部分
         boolean shouldCancelServed = "SERVED".equalsIgnoreCase(cancelServedPart.trim()) ||
                 "true".equalsIgnoreCase(cancelServedPart.trim()) ||
@@ -1260,7 +1619,7 @@ public class OrderService {
             throw new IllegalStateException("訂單中找不到菜品: " + itemCode);
         }
 
-        // ===== 6. 🔧【核心】判斷訂單類型和入座狀態 =====
+        // ===== 6. 【核心】判斷訂單類型和入座狀態 =====
         Order order = orderMapper.findById(orderId);
         boolean isReservationOrder = "RESERVATION".equals(order.getOrderType());
         boolean isReservationSeated = false;
@@ -1306,14 +1665,14 @@ public class OrderService {
                 isReservationOrder, isReservationSeated, shouldCancelServed);
 
         int newQty = Math.max(0, totalQty - cancelQuantity);
-        // 🔧【核心】根据取消部分计算新的已上桌数量
+        // 【核心】根据取消部分计算新的已上桌数量
         int newServedQty;
         if ("PARTIALLY_SERVED".equals(originalStatus)) {
             if (shouldCancelServed) {
-                // 🔹 撤銷已上桌部分：直接減少 served_quantity
+                //  撤銷已上桌部分：直接減少 served_quantity
                 newServedQty = Math.max(0, servedQty - cancelQuantity);
             } else {
-                // 🔹 撤銷未上桌部分：served_quantity 保持不變
+                //  撤銷未上桌部分：served_quantity 保持不變
                 newServedQty = servedQty;
             }
         } else {
@@ -1321,12 +1680,12 @@ public class OrderService {
             newServedQty = Math.min(servedQty, newQty);
         }
 
-        System.out.println("🔧 菜品 " + itemCode +
+        System.out.println(" 菜品 " + itemCode +
                 " 原:" + originalStatus + "(" + servedQty + "/" + totalQty + ")" +
                 " - 撤銷:" + cancelQuantity + " (cancelServedPart=" + cancelServedPart + ")" +
                 " → 新狀態:" + newStatus + "(" + newServedQty + "/" + newQty + ")");
 
-        // ===== 8. 🔧【核心修復】執行撤銷操作 =====
+        // ===== 8. 【核心修復】執行撤銷操作 =====
         if (newQty == 0) {
             if ("SERVED".equals(originalStatus) || "PARTIALLY_SERVED".equals(originalStatus)) {
                 orderItemMapper.recordCancellation(itemCode, cancelQuantity,
@@ -1341,7 +1700,7 @@ public class OrderService {
         // ===== 9. 重新計算訂單總金額 =====
         Double newTotal = orderItemMapper.recalculateOrderTotal(orderId);
         if (newTotal != null) {
-            orderMapper.updateOrderTotals(orderId, newTotal, newTotal); // ✅ 同步更新 items_total
+            orderMapper.updateOrderTotals(orderId, newTotal, newTotal); //  同步更新 items_total
         }
 
         // ===== 10. 檢查訂單是否為空 → 刪除空訂單 =====
@@ -1354,7 +1713,29 @@ public class OrderService {
 
 
     /**
-     * 撤銷外賣訂單中的菜品（@Transactional，原因可選）
+     * 撤销外卖订单中的指定菜品
+     *
+     * 功能说明：
+     * 1. 校验订单号、菜品主键、撤销数量有效性
+     * 2. 通过订单号查询外卖订单，获取菜品当前上桌状态
+     * 3. 计算新数量与新已上桌数量：已上桌数量不超过新总数量
+     * 4. 执行撤销操作：
+     *    - 新数量为 0：记录审计日志并删除订单项
+     *    - 新数量大于 0：更新订单项数量、已上桌数量与状态
+     * 5. 重算订单总金额并更新数据库
+     * 6. 若订单无剩余明细，自动删除空订单
+     *
+     * @param orderNumber 外卖订单编号
+     * @param itemId 待撤销的菜品主键
+     * @param quantity 撤销数量
+     * @param cancellationReason 撤销原因说明
+     *
+     * 业务规则：
+     * - 外卖订单不涉及餐桌分配，状态推导仅基于上桌数量
+     * - 已上桌菜品的撤销需记录审计日志，便于财务对账
+     *
+     * 异常处理：
+     * - 参数无效、订单不存在或菜品未找到时抛出相应异常
      */
     @Transactional
     public void cancelTakeoutOrderItem(String orderNumber, int itemId, int quantity, String cancellationReason) throws SQLException {
@@ -1415,10 +1796,27 @@ public class OrderService {
     }
 
     /**
-     * 撤销整个外卖订单（整单取消）
+     * 撤销整个外卖订单
+     *
+     * 功能说明：
+     * 1. 校验订单号有效性
+     * 2. 通过订单号查询外卖订单
+     * 3. 记录整单撤销审计日志：类型为"ORDER"，金额为订单总额
+     * 4. 删除订单所有明细记录
+     * 5. 删除订单主表记录
+     *
+     * @param orderNumber 外卖订单编号
+     * @param reason 撤销原因说明
+     *
+     * 业务规则：
+     * - 整单撤销不校验菜品状态，直接删除所有明细
+     * - 审计日志记录订单级撤销，与菜品级撤销区分
+     *
+     * 异常处理：
+     * - 订单号无效或订单不存在时抛出相应异常
      */
     @Transactional
-    public void cancelTakeoutOrder(String orderNumber, String reason) throws SQLException {
+    public void cancelTakeoutOrder(String orderNumber, String reason)  {
         // 1. 基础验证
         if (orderNumber == null || orderNumber.trim().isEmpty()) {
             throw new IllegalArgumentException("订单号不能为空");
@@ -1454,6 +1852,21 @@ public class OrderService {
     }
 
 
+    /**
+     * 更新外卖订单的配送状态
+     *
+     * 功能说明：
+     * 1. 校验订单号与配送状态参数有效性
+     * 2. 查询订单并验证其配送方式为"配送"，避免误操作堂食订单
+     * 3. 调用 Mapper 更新订单的配送状态字段
+     *
+     * @param orderNumber 外卖订单编号
+     * @param newStatus 新的配送状态枚举值（如 NOT_DELIVERED/DELIVERED）
+     *
+     * 异常处理：
+     * - 参数为空、订单不存在或非配送订单时抛出相应异常
+     * - 数据库更新失败时抛出 RuntimeException，确保状态变更原子性
+     */
     @Transactional
     public void updateDeliveryStatus(String orderNumber, Order.DeliveryStatus newStatus) {
         // 1. 验证参数
@@ -1488,7 +1901,24 @@ public class OrderService {
         System.out.println(" 配送状态更新成功: " + orderNumber + " → " + newStatus.getDisplayName());
     }
 
-
+    /**
+     * 更新订单的配送费并重新计算总金额
+     *
+     * 功能说明：
+     * 1. 校验订单主键与配送费参数有效性
+     * 2. 查询订单获取菜品总额，计算新总金额 = 菜品总额 + 新配送费
+     * 3. 调用 Mapper 更新配送费字段，总金额由数据库触发器或应用层同步更新
+     *
+     * @param orderId 订单主键
+     * @param newDeliveryFee 新的配送费金额
+     *
+     * 业务规则：
+     * - 配送费不可为负数，避免金额计算错误
+     * - 总金额自动重算，确保订单财务数据一致性
+     *
+     * 异常处理：
+     * - 订单不存在或更新失败时抛出相应异常
+     */
     @Transactional
     public void updateOrderDeliveryFee(Integer orderId, Double newDeliveryFee) {
         if (orderId == null || orderId <= 0) {
@@ -1517,7 +1947,24 @@ public class OrderService {
                 ", 新配送费=" + newDeliveryFee + ", 新总金额=" + totalAmount);
     }
 
-
+    /**
+     * 计算撤销操作后的菜品状态
+     *
+     * 功能说明：
+     * 根据撤销后的新总数量与已上桌数量，推导菜品当前状态：
+     * - 新数量为 0：返回"未上桌"
+     * - 已上桌数量 ≥ 新总数量：返回"已上桌"
+     * - 已上桌数量 > 0 但 < 新总数量：返回"部分上桌"
+     * - 其他情况：返回"未上桌"
+     *
+     * @param newTotalQty 撤销后的菜品总数量
+     * @param servedQty 当前已上桌数量
+     * @return 推导后的状态字符串（"UNSERVED"/"PARTIALLY_SERVED"/"SERVED"）
+     *
+     * 应用场景：
+     * - 顾客撤销部分菜品后自动更新订单项状态
+     * - 确保界面展示与后端状态逻辑一致
+     */
     // 辅助方法：计算撤销后状态
     private String calculateStatusAfterCancel(int newTotalQty, int servedQty) {
         if (newTotalQty <= 0) return "UNSERVED";
@@ -1526,7 +1973,40 @@ public class OrderService {
         return "UNSERVED";
     }
 
-
+    /**
+     * 处理外卖订单结账流程
+     *
+     * 功能说明：
+     * 1. 查询订单并校验存在性
+     * 2. 状态校验：
+     *    - 已结账订单禁止重复结账
+     *    - 自取订单需制作完成（ORDERED_FINISHED）方可结账
+     *    - 配送订单需已送达（DELIVERED）方可结账
+     * 3. 校验支付金额是否不小于订单总额
+     * 4. 执行结账操作：
+     *    - 更新订单状态为已结账
+     *    - 记录当日营收与外卖订单计数
+     *    - 记录季度销售统计
+     *    - 删除订单明细与主表记录，完成数据清理
+     * 5. 返回结账结果：成功标志、找零金额、订单总额、营收日期
+     *
+     * @param orderNumber 外卖订单编号
+     * @param paymentAmount 顾客实际支付金额
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *         - changeAmount: double，找零金额
+     *         - totalAmount: double，订单总额
+     *         - revenueDate: Date，营收计入日期
+     *
+     * 业务规则：
+     * - 自取与配送订单的结账前置条件不同，需分别校验
+     * - 结账后自动清理订单数据，避免历史数据冗余
+     *
+     * 异常处理：
+     * - 状态校验失败时直接返回错误结果，提示具体原因
+     * - 系统异常时记录日志并返回友好提示
+     */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> processTakeoutCheckout(String orderNumber, double paymentAmount) {
         Map<String, Object> result = new HashMap<>();
@@ -1550,7 +2030,7 @@ public class OrderService {
             }
 
             if ("PICKUP".equals(deliveryMethod)) {
-                // 🟢 自取订单：检查制作状态
+                //  自取订单：检查制作状态
                 if (order.getTableId() != null) {
                     Tables table = tablesMapper.findById(order.getTableId());
                     if (table != null) {
@@ -1564,7 +2044,7 @@ public class OrderService {
                     }
                 }
             } else if ("DELIVERY".equals(deliveryMethod)) {
-                // 🚚 配送订单：检查配送状态
+                //  配送订单：检查配送状态
                 Order.DeliveryStatus deliveryStatus = order.getDeliveryStatus();
                 if (deliveryStatus != Order.DeliveryStatus.DELIVERED) {
                     result.put("success", false);
@@ -1624,6 +2104,16 @@ public class OrderService {
         return result;
     }
 
+    /**
+     * 根据日期计算所属季度
+     *
+     * 功能说明：
+     * 将月份映射为季度标识：1-3 月→Q1，4-6 月→Q2，7-9 月→Q3，10-12 月→Q4，
+     * 用于销售统计与经营报表的季度分组。
+     *
+     * @param date 待计算的日期对象
+     * @return 季度字符串（"Q1" / "Q2" / "Q3" / "Q4"）
+     */
     private String getQuarterFromDate(LocalDate date) {
         int month = date.getMonthValue();
         if (month <= 3) return "Q1";
@@ -1633,11 +2123,23 @@ public class OrderService {
     }
 
     /**
-     * 获取订单详情（支持堂食 + 外卖）
+     * 获取订单详情（支持堂食与外卖）
      *
-     * @param orderType  "DINE_IN" 或 "TAKEOUT"
-     * @param identifier 餐桌号 或 订单号
-     * @return 订单详情 Map
+     * 功能说明：
+     * 1. 堂食订单：通过餐桌号查询关联活跃订单，返回订单时间、总金额、菜品明细及金额构成
+     * 2. 外卖订单：通过订单号直接查询订单，返回相同结构的详情数据
+     * 3. 补充金额明细字段：itemsTotal（菜品总额）、deliveryFee（配送费）、deliveryMethod（配送方式）
+     *
+     * @param orderType 订单类型（"DINE_IN" 或 "TAKEOUT"）
+     * @param identifier 堂食时为餐桌显示编号，外卖时为订单号
+     * @return 订单详情映射，包含以下字段：
+     *         - orderTime: LocalDateTime，下单时间
+     *         - totalAmount: Double，应付总额
+     *         - itemsTotal: Double，菜品总额
+     *         - deliveryFee: Double，配送费
+     *         - deliveryMethod: String，配送方式
+     *         - items: List<Map>，菜品明细列表
+     *         - error: String，查询失败时的错误信息
      */
     @Transactional(readOnly = true)
     public Map<String, Object> getOrderDetails(String orderType, String identifier) {
@@ -1663,7 +2165,7 @@ public class OrderService {
                 result.put("totalAmount", order.getTotalAmount());
                 result.put("items", itemsToMapList(items));
 
-                // ===== 🔧 新增：补充金额明细字段（修复下方金额显示为 0 的问题）=====
+                // =====  新增：补充金额明细字段（修复下方金额显示为 0 的问题）=====
                 result.put("itemsTotal", order.getItemsTotal());
                 result.put("deliveryFee", order.getDeliveryFee());
                 result.put("deliveryMethod", order.getDeliveryMethod());
@@ -1680,7 +2182,7 @@ public class OrderService {
                 result.put("totalAmount", order.getTotalAmount());
                 result.put("items", itemsToMapList(items));
 
-                // ===== 🔧 新增：补充金额明细字段（修复下方金额显示为 0 的问题）=====
+                // =====  新增：补充金额明细字段（修复下方金额显示为 0 的问题）=====
                 result.put("itemsTotal", order.getItemsTotal());
                 result.put("deliveryFee", order.getDeliveryFee());
                 result.put("deliveryMethod", order.getDeliveryMethod());
@@ -1693,7 +2195,18 @@ public class OrderService {
     }
 
     /**
-     * 辅助方法：将 OrderItem 列表转换为 Map 列表（供 View 层渲染）
+     * 将订单项列表转换为视图层可用的映射列表
+     *
+     * 功能说明：
+     * 遍历 OrderItem 对象，提取菜品编码、名称、数量、已上桌数量、单价、小计金额与状态，
+     * 封装为 Map 列表供前端直接渲染，避免视图层依赖实体类结构。
+     *
+     * @param items 订单项对象列表
+     * @return 映射列表，每个元素包含：itemCode/itemName/quantity/servedQuantity/price/subtotal/status
+     *
+     * 容错处理：
+     * - 输入为 null 时返回空列表，避免空指针异常
+     * - 小计金额自动计算：数量 × 单价，确保视图展示准确
      */
     private List<Map<String, Object>> itemsToMapList(List<OrderItem> items) {
         if (items == null) {
@@ -1713,10 +2226,18 @@ public class OrderService {
     }
 
     /**
-     * 根据订单号查询订单状态（返回枚举）
+     * 根据订单号查询订单状态
      *
-     * @param orderNumber 订单号
-     * @return Tables.OrderStatus 枚举
+     * 功能说明：
+     * 通过订单号查询其当前订单状态枚举值，用于界面状态展示与业务流程校验。
+     *
+     * @param orderNumber 订单编号字符串
+     * @return 订单状态枚举（如 NO_ORDER/ORDERED/CHECKED_OUT）；参数为空时返回默认值 NO_ORDER
+     *
+     * 应用场景：
+     * - 结账前校验订单是否已点餐
+     * - 重单时判断订单是否曾结账
+     * - 界面动态显示订单当前进度
      */
     @Transactional(readOnly = true)
     public Tables.OrderStatus getOrderStatusByOrderNumber(String orderNumber) {
@@ -1728,16 +2249,26 @@ public class OrderService {
 
 
     /**
-     * 重置已结账订单（供重单使用）
+     * 重置已结账订单为可重新点餐状态
      *
-     * @param orderId 已结账订单ID
+     * 功能说明：
+     * 1. 校验订单主键有效性，为空时直接返回
+     * 2. 调用 Mapper 更新订单状态为"已点餐"、金额清零，并记录重单时间为当前时间
+     *
+     * @param orderId 待重置的订单主键
+     *
+     * 业务规则：
+     * - 重单时间（reorder_time）用于区分首次下单与重新点餐，确保营收统计准确
+     * - 金额清零避免重复计费，后续点餐将重新累加
+     *
+     * 执行时机：
+     * - 顾客结账后要求重新点餐时调用
+     * - 确保订单可继续添加菜品且财务数据可追溯
      */
     @Transactional
     public void resetCheckedOutOrder(Integer orderId) {
         if (orderId == null) return;
 
-        // 【关键修复】使用 updateOrderForReorder 而不是 updateOrderStatusAndAmount
-        // 这样才能记录 reorder_time
         orderMapper.updateOrderForReorder(
                 orderId,
                 "ORDERED",    // 状态
@@ -1745,11 +2276,21 @@ public class OrderService {
                 LocalDateTime.now()  //  设置重单时间为当前时间
         );
 
-        System.out.println("🔄 订单重置成功: orderId=" + orderId);
+        System.out.println(" 订单重置成功: orderId=" + orderId);
     }
 
     /**
-     * 根据餐桌ID查询最近的已结账订单
+     * 根据餐桌主键查询最近的已结账订单
+     *
+     * 功能说明：
+     * 查询指定餐桌最近一次状态为"已结账"的订单主键，用于支持重新点餐场景。
+     *
+     * @param tableId 餐桌数据库主键
+     * @return 已结账订单主键；无匹配记录时返回 null
+     *
+     * 应用场景：
+     * - 顾客结账后要求加菜时，加载原订单明细
+     * - 校验餐桌是否处于可重新点餐状态
      */
     @Transactional(readOnly = true)
     public Integer findCheckedOutOrderIdByTableId(Integer tableId) {
@@ -1759,10 +2300,29 @@ public class OrderService {
 
 
     /**
-     * 取消重新点餐（恢复订单为已结账状态）
+     * 取消重新点餐并恢复订单为已结账状态
+     *
+     * 功能说明：
+     * 1. 校验餐桌号有效性及存在性
+     * 2. 查询餐桌关联的活跃订单，校验是否存在
+     * 3. 验证订单是否为重新点餐场景（原订单曾结账），避免误操作全新订单
+     * 4. 验证订单无已上桌菜品，防止撤销已消费内容
+     * 5. 执行恢复操作：更新订单状态为"已结账"、金额清零、记录重单时间
+     * 6. 可选：清空订单明细，确保后续点餐从空开始
      *
      * @param tableNumber 餐桌显示编号
-     * @return Map{success: Boolean, message: String}
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *         - tableNumber: String，返回餐桌号供调用方刷新界面
+     *
+     * 业务规则：
+     * - 仅允许撤销未上桌的重新点餐订单，保障顾客权益
+     * - 恢复后订单状态与结账后一致，支持正常离店流程
+     *
+     * 异常处理：
+     * - 参数校验失败时直接返回错误结果
+     * - 系统异常时记录日志并返回友好提示，不暴露技术细节
      */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> cancelReorder(String tableNumber) {
@@ -1818,10 +2378,8 @@ public class OrderService {
                     0.0,              // 金额清零
                     now               //  更新重单时间为当前时间
             );
-            // 6.1 更新订单状态为已结账 + 金额清零
-            // orderMapper.updateOrderStatusAndAmount(orderId, "CHECKED_OUT", 0.0);
 
-            // 6.2 可选：清空订单明细（根据业务需求决定）
+            // 6.1 可选：清空订单明细（根据业务需求决定）
             orderItemMapper.deleteOrderItemsByOrderId(orderId);
 
             // ===== 7. 返回成功结果 =====
@@ -1840,6 +2398,22 @@ public class OrderService {
         return result;
     }
 
+    /**
+     * 根据预约号查询预点餐订单
+     *
+     * 功能说明：
+     * 查询指定预约记录关联的预点餐订单对象，用于加载顾客提前点选的菜品。
+     *
+     * @param reservationId 预约记录唯一标识
+     * @return 预点餐订单对象；无关联订单时返回 null
+     *
+     * 数据来源：
+     * - 直接查询数据库 table_orders 表，条件：reservation_id 匹配且订单类型为"RESERVATION"
+     *
+     * 应用场景：
+     * - 顾客入座时加载预点餐明细到正式订单
+     * - 预约修改时同步更新关联订单的预付信息
+     */
     @Transactional(readOnly = true)
     public Order findPreOrderByReservationId(String reservationId) {
         return orderMapper.findPreOrderByReservationId(reservationId);
@@ -1847,7 +2421,18 @@ public class OrderService {
 
 
     /**
-     *  根据 reservation_id 查询订单明细（预约订单专用）
+     * 根据预约号加载正式订单的菜品明细
+     *
+     * 功能说明：
+     * 1. 校验预约号参数有效性，为空时返回空列表
+     * 2. 调用 Mapper 查询该预约关联的所有订单项记录
+     *
+     * @param reservationId 预约记录唯一标识
+     * @return 订单项列表；参数为空或无关联订单时返回空列表
+     *
+     * 应用场景：
+     * - 顾客入座后加载预点餐菜品到正式订单界面
+     * - 结账前展示订单明细供顾客确认
      */
     @Transactional(readOnly = true)
     public List<OrderItem> loadFormalOrderItemsByReservationId(String reservationId) {
@@ -1859,19 +2444,29 @@ public class OrderService {
 
 
     /**
-     *  更新预约订单菜品准备状态（精确到 order_item_id）
+     * 更新预约订单菜品的准备进度
      *
-     * @param reservationId          预约号
-     * @param orderItemId            订单项 ID（精确标识）
-     * @param itemCode               菜品编号（用于日志）
-     * @param preparedQty            已准备数量
-     * @param newStatus              新状态
-     * @param assignedTableDisplayId 分配的餐桌显示ID
+     * 功能说明：
+     * 1. 校验参数有效性：预约号、订单项 ID、菜品编码、准备数量
+     * 2. 精确查询订单项并校验其归属预约记录，防止越权操作
+     * 3. 校验已准备数量不超过菜品总数量，避免数据逻辑冲突
+     * 4. 更新订单项的已准备数量与状态字段（如"PREPARING"→"PREPARED"）
+     *
+     * @param reservationId 预约记录唯一标识
+     * @param orderItemId 待更新的订单项主键
+     * @param itemCode 菜品编码（用于日志记录）
+     * @param preparedQty 已准备的数量
+     * @param newStatus 更新后的状态值
+     * @param assignedTableDisplayId 分配的餐桌列表（用于日志或后续逻辑）
+     *
+     * 异常处理：
+     * - 参数无效、订单项不存在或归属校验失败时抛出相应异常
+     * - 确保厨房准备进度更新操作的准确性与安全性
      */
     @Transactional
     public void updateReservationOrderItemPrepared(
             String reservationId,
-            Integer orderItemId,        // 🔧 新增：精确标识
+            Integer orderItemId,
             String itemCode,
             int preparedQty,
             String newStatus,
@@ -1887,46 +2482,75 @@ public class OrderService {
         if (preparedQty < 0)
             throw new IllegalArgumentException("已准备数量不能为负数");
 
-        // 🔧【修改】通过 orderItemId 精确查询单条记录
+        // 【修改】通过 orderItemId 精确查询单条记录
         OrderItem orderItem = orderItemMapper.selectByPrimaryKey(orderItemId);
         if (orderItem == null)
             throw new IllegalStateException("订单项不存在: #" + orderItemId);
 
-        // 🔧 验证：预约号匹配（安全防护）
+        //  验证：预约号匹配（安全防护）
         Order order = orderMapper.findById(orderItem.getOrderId());
         if (order == null || !reservationId.equals(order.getReservationId())) {
             throw new IllegalStateException("订单项 #" + orderItemId +
                     " 不属于预约 " + reservationId);
         }
 
-        // 🔧【修改】验证：已准备数量不能超过该记录的总数量
+        // 【修改】验证：已准备数量不能超过该记录的总数量
         if (preparedQty > orderItem.getQuantity()) {
             throw new IllegalArgumentException(
                     "已准备数量 (" + preparedQty + ") 不能超过菜品总数量 (" +
                             orderItem.getQuantity() + ")");
         }
 
-        // 🔧【修改】调用新方法：通过 orderItemId 精确更新
+        // 【修改】调用新方法：通过 orderItemId 精确更新
         orderItemMapper.updatePreparedQuantityById(
-                orderItemId,              // 🔧 精确主键
+                orderItemId,
                 preparedQty,
                 newStatus
         );
 
-        System.out.println("🍳 菜品准备进度已更新: " + itemCode +
+        System.out.println(" 菜品准备进度已更新: " + itemCode +
                 " (orderItemId=#" + orderItemId + ") → " +
                 preparedQty + "/" + orderItem.getQuantity() +
                 " (" + newStatus + ")");
     }
 
-
+    /**
+     * 撤销预约订单中的菜品并处理确认逻辑
+     *
+     * 功能说明：
+     * 1. 校验基础参数：预约号、菜品 ID、撤销数量有效性
+     * 2. 查询预约订单及菜品当前上桌状态
+     * 3. 计算新数量与新已上桌数量：已上桌数量不超过新总数量
+     * 4. 执行撤销操作：
+     *    - 新数量为 0：记录审计日志（若已上桌）并删除订单项
+     *    - 新数量大于 0：更新订单项数量、已上桌数量与状态
+     * 5. 重算订单总金额并更新数据库
+     * 6. 若非部分撤销且为最后一个菜品，返回需确认标志供前端展示
+     * 7. 若订单无剩余明细，自动删除空订单
+     *
+     * @param reservationId 预约记录唯一标识
+     * @param itemId 待撤销的菜品主键
+     * @param quantity 撤销数量
+     * @param cancellationReason 撤销原因说明
+     * @param cancelPart 是否仅撤销部分（字符串格式，支持"true"/"false"等）
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *         - needConfirm: boolean，是否为最后一个菜品需用户确认
+     *         - orderId: Integer，关联订单主键（需确认时返回）
+     *         - reservationId: String，预约记录编号（需确认时返回）
+     *
+     * 业务规则：
+     * - 仅当非部分撤销且为最后一个菜品时才触发确认流程
+     * - 已上桌菜品的撤销需记录审计日志，便于财务对账
+     */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> cancelReservationOrderItem(
             String reservationId,
             int itemId,
             int quantity,
             String cancellationReason,
-            String cancelPart) throws SQLException {  // 🔧 参数类型改为 String
+            String cancelPart) throws SQLException {
 
         Map<String, Object> result = new HashMap<>();
 
@@ -1973,7 +2597,7 @@ public class OrderService {
             orderItemMapper.deleteOrderItem(orderId, itemId);
         } else {
             String itemCode = orderItemMapper.getItemCodeByItemId(itemId);
-            // 🔧 将 String 转为 boolean 传入（支持 "true"/"false" 或 "1"/"0"）
+            //  将 String 转为 boolean 传入（支持 "true"/"false" 或 "1"/"0"）
             boolean isCancelPart = Boolean.parseBoolean(cancelPart);
             String newStatus = calculateCancelledStatus(servedQty, totalQty, quantity,
                     "UNSERVED", true, false, isCancelPart);
@@ -1990,12 +2614,10 @@ public class OrderService {
             orderItemMapper.updateOrderTotalAmount(orderId, newTotal);
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🔧【核心修改】7. 检查是否为最后一个菜品（仅当 cancelPart=false 时执行）
-        // ═══════════════════════════════════════════════════════════
-        // 🔧 将 String 转为 boolean 进行判断
+        // 【核心修改】7. 检查是否为最后一个菜品（仅当 cancelPart=false 时执行）
+        //  将 String 转为 boolean 进行判断
         boolean shouldCheckLastItem = !Boolean.parseBoolean(cancelPart);
-        if (shouldCheckLastItem) {  // 🔑 关键：只有非部分撤销时才检查确认
+        if (shouldCheckLastItem) {  //  关键：只有非部分撤销时才检查确认
             boolean isLastItem = false;
             if (newQty == 0) {
                 List<OrderItem> remainingItems = orderMapper.findOrderItemsByReservationId(reservationId);
@@ -2029,14 +2651,33 @@ public class OrderService {
 
 
     /**
-     *  确认删除预约订单（用户选择"否"时调用）
+     * 确认删除预约订单
+     *
+     * 功能说明：
+     * 1. 将订单总金额更新为 0，确保财务数据一致性
+     * 2. 删除订单所有明细记录
+     * 3. 删除订单主表记录
+     * 4. 更新预约记录的预点餐标记为否，解除预约与订单的关联
+     *
+     * @param reservationId 预约记录唯一标识
+     * @param orderId 待删除的订单主键
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *
+     * 执行时机：
+     * - 用户确认不保留预约订单时调用
+     * - 确保订单删除后预约记录可正常复用或取消
+     *
+     * 异常处理：
+     * - 删除失败时记录日志并返回错误信息，不中断主流程
      */
     @Transactional
     public Map<String, Object> confirmDeleteReservationOrder(String reservationId, Integer orderId) {
         Map<String, Object> result = new HashMap<>();
 
         try {
-            // 🔧【核心修复】先更新 total_amount 为 0（在删除前）
+            // 【核心修复】先更新 total_amount 为 0（在删除前）
             orderItemMapper.updateOrderTotalAmount(orderId, 0.0);
             System.out.println(" 已将订单总金额更新为 0: orderId=" + orderId);
 
@@ -2046,7 +2687,7 @@ public class OrderService {
             // 2. 删除订单主表
             orderMapper.deleteOrder(orderId);
 
-            // 3. 🔧【核心】更新 table_reservations 的 pre_order 从 1 改为 0
+            // 3. 【核心】更新 table_reservations 的 pre_order 从 1 改为 0
             int updated = reservationMapper.updatePreOrderFlag(reservationId, false);
 
             result.put("success", true);
@@ -2065,20 +2706,34 @@ public class OrderService {
 
 
     /**
-     *  保留預約訂單（用戶選擇"是"時調用）
-     * 刪除所有菜品後，將訂單狀態改為 NO_ORDER，pre_order 保持為 1
+     * 确认保留预约订单
+     *
+     * 功能说明：
+     * 1. 校验订单是否已无剩余菜品，若有则跳过状态更新
+     * 2. 使用乐观锁将订单状态从"已点餐"更新为"未点餐"，允许顾客继续点餐
+     * 3. 可选：将订单总金额清零，保持数据一致性
+     *
+     * @param reservationId 预约记录唯一标识
+     * @param orderId 待处理的订单主键
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *
+     * 业务规则：
+     * - 仅当订单无剩余菜品时才执行状态回退，避免数据冲突
+     * - 状态更新失败时记录日志但不中断流程，保证用户体验
      */
     @Transactional
     public Map<String, Object> confirmKeepReservationOrder(String reservationId, Integer orderId) {
         Map<String, Object> result = new HashMap<>();
 
         try {
-            // 🔧【核心修復 1】先確認訂單確實沒有剩餘菜品（防禦性檢查）
+            // 【核心修復 1】先確認訂單確實沒有剩餘菜品（防禦性檢查）
             boolean hasItems = orderItemMapper.hasRemainingItems(orderId);
             if (hasItems) {
                 System.out.println(" 訂單 " + orderId + " 仍有菜品，跳過狀態更新");
             } else {
-                // 🔧【核心修復 2】將訂單狀態從 ORDERED → NO_ORDER
+                // 【核心修復 2】將訂單狀態從 ORDERED → NO_ORDER
                 int updated = orderMapper.updateOrderStatusOnly(orderId, "NO_ORDER", "ORDERED");
                 if (updated > 0) {
                     System.out.println(" 訂單狀態已更新: orderId=" + orderId +
@@ -2089,7 +2744,7 @@ public class OrderService {
                 }
             }
 
-            // 🔧【核心修復 3】可選：將金額也清零（保持一致性）
+            // 【核心修復 3】可選：將金額也清零（保持一致性）
             orderItemMapper.updateOrderTotalAmount(orderId, 0.0);
 
             result.put("success", true);
@@ -2108,10 +2763,44 @@ public class OrderService {
     }
 
 
+    /**
+     * 撤销预约订单中的菜品并处理确认逻辑
+     *
+     * 功能说明：
+     * 1. 校验基础参数：餐桌号、菜品编码、撤销数量有效性
+     * 2. 查询餐桌、预约订单、菜品信息，获取当前菜品上桌状态
+     * 3. 解析 cancelServedPart 参数，判断是否撤销已上桌部分
+     * 4. 计算新数量与新已上桌数量：
+     *    - 若仅撤销未上桌部分：已上桌数量保持不变
+     *    - 若撤销已上桌部分：已上桌数量不超过新总数量
+     * 5. 执行撤销操作：
+     *    - 新数量为 0：记录审计日志（若已上桌）并删除订单项
+     *    - 新数量大于 0：更新订单项数量、已上桌数量与状态
+     * 6. 重算订单总金额并更新数据库
+     * 7. 若为预约订单的最后一个菜品，返回需确认标志供前端展示
+     * 8. 若订单无剩余明细，自动删除空订单
+     *
+     * @param tableNumber 餐桌显示编号
+     * @param itemCode 待撤销的菜品编码
+     * @param cancelQuantity 撤销数量
+     * @param cancellationReason 撤销原因说明
+     * @param reservationId 预约记录唯一标识
+     * @param cancelServedPart 是否撤销已上桌部分的字符串标识（支持"true"/"YES"/"1"等格式）
+     * @return 操作结果映射，包含以下字段：
+     *         - success: boolean，操作是否成功
+     *         - message: String，提示消息
+     *         - needConfirm: boolean，是否为最后一个菜品需用户确认
+     *         - orderId: Integer，关联订单主键（需确认时返回）
+     *         - reservationId: String，预约记录编号（需确认时返回）
+     *
+     * 异常处理：
+     * - 参数校验失败时直接返回错误结果，不抛出异常
+     * - 数据库操作失败时抛出 SQLException，由调用方统一处理
+     */
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> cancelReservationOrderItemWithConfirm(
             String tableNumber, String itemCode, int cancelQuantity,
-            String cancellationReason, String reservationId, String cancelServedPart) throws SQLException {
+            String cancellationReason, String reservationId, String cancelServedPart)  {
 
         Map<String, Object> result = new HashMap<>();
 
@@ -2166,7 +2855,7 @@ public class OrderService {
             return result;
         }
 
-        // 🔧【關鍵修復】額外查詢菜品狀態字符串
+        // 【關鍵修復】額外查詢菜品狀態字符串
         String currentStatusStr = orderItemMapper.getItemStatus(orderId, itemId);
 
         // ===== 6. 解析 cancelServedPart 字符串為布爾值 =====
@@ -2178,7 +2867,7 @@ public class OrderService {
         int servedQty = currentStatus.getServedQuantity();
         int newQty = Math.max(0, totalQty - cancelQuantity);
 
-        // 🔧【核心】计算新的已上桌数量（根据 shouldCancelServed 参数）
+        // 【核心】计算新的已上桌数量（根据 shouldCancelServed 参数）
         int newServedQty;
         if ("PARTIALLY_SERVED".equals(currentStatusStr) && !shouldCancelServed) {
             // 删除未上桌部分：已上桌数量保持不变
@@ -2190,7 +2879,7 @@ public class OrderService {
 
         // ===== 8. 執行撤銷操作 =====
         if (newQty == 0) {
-            // 🔧 完全撤銷：記錄審計 + 刪除明細
+            //  完全撤銷：記錄審計 + 刪除明細
             if ("SERVED".equals(currentStatusStr) || "PARTIALLY_SERVED".equals(currentStatusStr)) {
                 orderItemMapper.recordCancellation(itemCode, cancelQuantity,
                         cancellationReason != null ? cancellationReason : "用戶撤銷",
@@ -2201,7 +2890,7 @@ public class OrderService {
             }
             orderItemMapper.deleteOrderItem(orderId, itemId);
         } else {
-            // 🔧 部分撤銷：更新數量和狀態
+            //  部分撤銷：更新數量和狀態
             String newStatus = calculateCancelledStatus(
                     servedQty,
                     totalQty,
@@ -2209,7 +2898,7 @@ public class OrderService {
                     currentStatusStr,
                     "RESERVATION".equals(order.getOrderType()),
                     table.getCurrentReservationId() != null,
-                    shouldCancelServed  // 🔧 传入解析后的布尔值
+                    shouldCancelServed  // 传入解析后的布尔值
             );
             orderItemMapper.updateOrderItemAfterCancel(orderId, itemId, newQty, newServedQty, newStatus);
         }
@@ -2257,11 +2946,21 @@ public class OrderService {
     }
 
     /**
-     * 🔧 輔助方法：將字符串解析為布爾值
-     * 支持格式："true"/"false", "YES"/"NO", "1"/"0", "Y"/"N"
+     * 将字符串解析为布尔值
      *
-     * @param value 字符串值
-     * @return 解析後的布爾值，無法解析時返回 false
+     * 功能说明：
+     * 支持多种常见格式的布尔字符串解析，包括：
+     * - "true"/"false"（不区分大小写）
+     * - "YES"/"NO"（不区分大小写）
+     * - "1"/"0"
+     * - "Y"/"N"
+     *
+     * @param value 待解析的字符串
+     * @return 解析成功的布尔值；输入为空或格式不匹配时返回 false
+     *
+     * 应用场景：
+     * - 解析前端传来的开关参数（如是否撤销已上桌菜品）
+     * - 兼容不同客户端的布尔值传递格式，提升接口健壮性
      */
     private boolean parseBooleanString(String value) {
         if (value == null || value.trim().isEmpty()) {
@@ -2272,7 +2971,23 @@ public class OrderService {
     }
 
 
-
+    /**
+     * 更新订单状态与金额字段
+     *
+     * 功能说明：
+     * 调用 Mapper 批量更新订单主表的状态、菜品总额与应付总额字段，
+     * 确保订单主记录与明细数据实时一致。
+     *
+     * @param orderId 订单主键
+     * @param status 新状态值（如"ORDERED"/"NO_ORDER"）
+     * @param itemsTotal 菜品总额
+     * @param totalAmount 应付总额
+     * @return 数据库影响行数（1=更新成功，0=记录不存在或状态未变更）
+     *
+     * 执行时机：
+     * - 订单项增删改后同步更新订单主表
+     * - 结账、撤销、合并等业务流程中确保金额准确
+     */
     @Transactional
     public int updateOrderStatusAndTotals(Integer orderId, String status,
                                           Double itemsTotal, Double totalAmount) {
@@ -2334,8 +3049,6 @@ public class OrderService {
      */
     @Transactional(readOnly = true)
     public Integer getNextTakeoutOrderNumber(String prefix, String dateStr, String deliveryMethod) {
-        // 修改前: orderMapper.getNextOrderNumber(prefix, dateStr, deliveryMethod);
-        // 修改后：传入 orderType = "TAKEOUT"
         Integer next = orderMapper.getNextOrderNumber(prefix, dateStr, deliveryMethod, "TAKEOUT");
         return next != null ? next : 1;
     }

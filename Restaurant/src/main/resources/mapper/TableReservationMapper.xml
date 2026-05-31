@@ -60,10 +60,10 @@
         table_config_desc,
         group_type,
         status,
-        pre_order  <!-- 🔧 返回预点餐字段 -->
+        pre_order
         FROM table_reservations
         WHERE status IN ('PRE_CONFIRMED', 'DELAYED')
-        AND pre_order = 1  <!-- 🔧 核心：只查预点餐 -->
+        AND pre_order = 1  <!--  核心：只查预点餐 -->
         ORDER BY
         CASE WHEN within_15h = 1 THEN 0 ELSE 1 END,
         reservation_time ASC
@@ -73,7 +73,7 @@
         SELECT
         reservation_id,
         reservation_time,
-        rescheduled_time,  <!-- 🔧 新增：延迟后的时间 -->
+        rescheduled_time,
         within_15h,
         customer_name,
         customer_phone,
@@ -96,7 +96,7 @@
         customer_name,
         customer_phone,
         reservation_time,
-        rescheduled_time,  <!-- 🔧 新增：返回延迟时间 -->
+        rescheduled_time,
         table_count,
         table_config_desc,
         group_type,
@@ -114,7 +114,7 @@
         WHERE reservation_id = #{id}
     </select>
 
-    <!-- 🔧 根据餐桌号查找预定记录（通过 reserved_table_ids 字段） -->
+    <!--  根据餐桌号查找预定记录（通过 reserved_table_ids 字段） -->
     <select id="findReservationByTableId" resultType="TableReservation">
         SELECT
         reservation_id,
@@ -135,7 +135,7 @@
         notes,
         created_at
         FROM table_reservations
-        WHERE FIND_IN_SET(#{tableId}, reserved_table_ids)  <!-- 🔧 改为 #{tableId} -->
+        WHERE FIND_IN_SET(#{tableId}, reserved_table_ids)
         AND status = 'CONFIRMED'
         ORDER BY reservation_time DESC
         LIMIT 1
@@ -150,7 +150,7 @@
         WHERE reservation_id = #{id}
     </update>
 
-    <!-- 🔧 根据预约号片段查询 -->
+    <!--  根据预约号片段查询 -->
     <select id="findReservationsByCodeFragment" resultType="java.util.Map">
         SELECT
         reservation_id,
@@ -167,7 +167,7 @@
         ORDER BY reservation_time DESC
     </select>
 
-    <!-- 🔧 根据电话号码后4位查询 -->
+    <!--  根据电话号码后4位查询 -->
     <select id="findReservationsByPhoneLast4" resultType="java.util.Map">
         SELECT
         reservation_id,
@@ -185,7 +185,7 @@
     </select>
 
 
-    <!-- 🔧 根据预约号片段查询完整预约详情（支持模糊查询） -->
+    <!--  根据预约号片段查询完整预约详情（支持模糊查询） -->
     <select id="findDetailByCodeFragment" resultType="TableReservation">
         SELECT
         reservation_id,
@@ -207,7 +207,6 @@
         created_at
         FROM table_reservations
         WHERE reservation_id LIKE CONCAT('%', #{codeFragment}, '%')
-<!--        AND status = 'PRE_CONFIRMED'-->
         AND status IN ('PRE_CONFIRMED', 'CONFIRMED')
         ORDER BY reservation_time DESC
     </select>
@@ -247,7 +246,7 @@
         WHERE reservation_id = #{reservationId}
     </update>
 
-    <!-- 🔧 CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态） -->
+    <!--  CANCEL 模式专用：根据预约号片段查询完整预约详情（支持所有状态） -->
     <select id="findDetailByCodeFragmentForCancel" resultType="TableReservation">
         SELECT
         reservation_id,
@@ -300,30 +299,29 @@
         )
     </insert>
 
-    <!-- 🔧 更新预约记录的 pre_order 标志 -->
+    <!--  更新预约记录的 pre_order 标志 -->
     <update id="updatePreOrderFlag">
         UPDATE table_reservations
         SET pre_order = #{preOrder}
         WHERE reservation_id = #{reservationId}
     </update>
 
-    <!-- 🔧 延迟预约：更新预约时间 + 状态 + within_15h + 餐桌配置 + 可选清空餐桌关联 -->
+    <!--  延迟预约：更新预约时间 + 状态 + within_15h + 餐桌配置 + 可选清空餐桌关联 -->
     <update id="updateReservationForDelay">
         UPDATE table_reservations
         SET
         rescheduled_time = #{newTime},
         status = #{newStatus},
         within_15h = #{within15h},
-        table_config_desc = #{newConfigDesc},  <!-- 🔧 新增：更新配置描述 -->
-        <!-- 🔧 如果释放餐桌，清空关联字段 -->
+        table_config_desc = #{newConfigDesc},
         <if test="releaseTables">
             reserved_table_ids = NULL,
-            table_selection_mode = #{tableSelectionMode}  <!-- 🔧 新增：更新选择模式 -->
+            table_selection_mode = #{tableSelectionMode}
         </if>
         WHERE reservation_id = #{reservationId}
     </update>
 
-    <!-- 🔧 根据 reservation_id 查询预付信息 -->
+    <!--  根据 reservation_id 查询预付信息 -->
     <select id="findPrepaidInfoByReservationId" resultType="java.util.Map">
         SELECT
         is_prepaid,

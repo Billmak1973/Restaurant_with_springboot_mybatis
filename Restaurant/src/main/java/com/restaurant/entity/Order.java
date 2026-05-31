@@ -107,17 +107,11 @@ public class Order {
     /** 预付金额数目 */
     private Double prepaidAmount;
 
-    // ═══════════════════════════════════════════════════════════
-    // 【关联的订单项列表】（非数据库字段，用于业务逻辑）
-    // ═══════════════════════════════════════════════════════════
 
     private List<OrderItem> orderItems;
 
     private LocalDateTime reorderTime;
 
-    // ═══════════════════════════════════════════════════════════
-    // 【构造方法】
-    // ═══════════════════════════════════════════════════════════
 
     /** 默认构造函数（MyBatis 必需） */
     public Order() {
@@ -172,104 +166,195 @@ public class Order {
         this.prepaidAmount = prepaidAmount != null ? prepaidAmount : 0.0;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 【Getter & Setter】
-    // ═══════════════════════════════════════════════════════════
 
+    /**
+     * 获取订单主键
+     * @return 订单主键
+     */
     public Integer getOrderId() {
         return orderId;
     }
 
+    /**
+     * 设置订单主键
+     * @param orderId 订单主键
+     */
     public void setOrderId(Integer orderId) {
         this.orderId = orderId;
     }
 
+    /**
+     * 获取订单编号
+     * @return 订单编号字符串
+     */
     public String getOrderNumber() {
         return orderNumber;
     }
 
+    /**
+     * 设置订单编号
+     * @param orderNumber 订单编号字符串
+     */
     public void setOrderNumber(String orderNumber) {
         this.orderNumber = orderNumber;
     }
 
+    /**
+     * 获取关联餐桌主键
+     * @return 餐桌主键
+     */
     public Integer getTableId() {
         return tableId;
     }
 
+    /**
+     * 设置关联餐桌主键
+     * @param tableId 餐桌主键
+     */
     public void setTableId(Integer tableId) {
         this.tableId = tableId;
     }
 
+    /**
+     * 获取关联预约记录编号
+     * @return 预约记录编号
+     */
     public String getReservationId() {
         return reservationId;
     }
 
+    /**
+     * 设置关联预约记录编号
+     * @param reservationId 预约记录编号
+     */
     public void setReservationId(String reservationId) {
         this.reservationId = reservationId;
     }
 
+    /**
+     * 获取订单类型
+     * @return 订单类型字符串
+     */
     public String getOrderType() {
         return orderType;
     }
 
+    /**
+     * 设置订单类型
+     * @param orderType 订单类型字符串
+     */
     public void setOrderType(String orderType) {
         this.orderType = orderType;
     }
 
+    /**
+     * 获取配送方式
+     * @return 配送方式字符串
+     */
     public String getDeliveryMethod() {
         return deliveryMethod;
     }
 
+    /**
+     * 设置配送方式
+     * @param deliveryMethod 配送方式字符串
+     */
     public void setDeliveryMethod(String deliveryMethod) {
         this.deliveryMethod = deliveryMethod;
     }
 
+    /**
+     * 获取配送地址
+     * @return 配送地址字符串
+     */
     public String getDeliveryAddress() {
         return deliveryAddress;
     }
 
+    /**
+     * 设置配送地址
+     * @param deliveryAddress 配送地址字符串
+     */
     public void setDeliveryAddress(String deliveryAddress) {
         this.deliveryAddress = deliveryAddress;
     }
 
+    /**
+     * 获取客户联系电话
+     * @return 联系电话字符串
+     */
     public String getCustomerPhone() {
         return customerPhone;
     }
 
+    /**
+     * 设置客户联系电话
+     * @param customerPhone 联系电话字符串
+     */
     public void setCustomerPhone(String customerPhone) {
         this.customerPhone = customerPhone;
     }
 
+    /**
+     * 获取客户姓名
+     * @return 客户姓名字符串
+     */
     public String getCustomerName() {
         return customerName;
     }
 
+    /**
+     * 设置客户姓名
+     * @param customerName 客户姓名字符串
+     */
     public void setCustomerName(String customerName) {
         this.customerName = customerName;
     }
 
+    /**
+     * 获取订单创建时间
+     * @return 订单时间
+     */
     public LocalDateTime getOrderTime() {
         return orderTime;
     }
 
+    /**
+     * 设置订单创建时间
+     * @param orderTime 订单时间
+     */
     public void setOrderTime(LocalDateTime orderTime) {
         this.orderTime = orderTime;
     }
 
+    /**
+     * 获取订单状态
+     * @return 状态字符串
+     */
     public String getStatus() {
         return status;
     }
 
+    /**
+     * 设置订单状态
+     * @param status 状态字符串
+     */
     public void setStatus(String status) {
         this.status = status;
     }
 
-    // ── 三金额字段 Getter/Setter ──
-
+    /**
+     * 获取菜品总额
+     * @return 菜品总额，为空时返回0.0
+     */
     public Double getItemsTotal() {
         return itemsTotal != null ? itemsTotal : 0.0;
     }
 
+    /**
+     * 设置菜品总额并自动更新应付总额
+     * @param itemsTotal 菜品总额
+     */
     public void setItemsTotal(Double itemsTotal) {
         this.itemsTotal = itemsTotal;
         // 自动更新总金额
@@ -279,10 +364,18 @@ public class Order {
         this.totalAmount = this.itemsTotal + this.deliveryFee;
     }
 
+    /**
+     * 获取配送费
+     * @return 配送费，为空时返回0.0
+     */
     public Double getDeliveryFee() {
         return deliveryFee != null ? deliveryFee : 0.0;
     }
 
+    /**
+     * 设置配送费并自动更新应付总额
+     * @param deliveryFee 配送费
+     */
     public void setDeliveryFee(Double deliveryFee) {
         this.deliveryFee = deliveryFee;
         // 自动更新总金额
@@ -292,103 +385,106 @@ public class Order {
         this.totalAmount = this.itemsTotal + this.deliveryFee;
     }
 
+    /**
+     * 获取订单应付总额
+     * @return 应付总额，为空时返回0.0
+     */
     public Double getTotalAmount() {
         return totalAmount != null ? totalAmount : 0.0;
     }
 
+    /**
+     * 设置订单应付总额
+     * @param totalAmount 应付总额
+     */
     public void setTotalAmount(Double totalAmount) {
         this.totalAmount = totalAmount;
     }
 
-    // ── 结账状态 Getter/Setter ──
-
-    public Boolean getIsCheckedOut() {
-        return isCheckedOut != null ? isCheckedOut : false;
-    }
-
+    /**
+     * 设置订单是否已结账
+     * @param checkedOut 是否已结账
+     */
     public void setIsCheckedOut(Boolean checkedOut) {
         isCheckedOut = checkedOut;
     }
 
+    /**
+     * 获取订单是否已预付
+     * @return 是否已预付，为空时返回false
+     */
     public Boolean getIsPrepaid() {
         return isPrepaid != null ? isPrepaid : false;
     }
 
+    /**
+     * 设置订单是否已预付
+     * @param prepaid 是否已预付
+     */
     public void setIsPrepaid(Boolean prepaid) {
         isPrepaid = prepaid;
     }
 
+    /**
+     * 获取预付金额
+     * @return 预付金额，为空时返回0.0
+     */
     public Double getPrepaidAmount() {
         return prepaidAmount != null ? prepaidAmount : 0.0;
     }
 
+    /**
+     * 设置预付金额
+     * @param prepaidAmount 预付金额
+     */
     public void setPrepaidAmount(Double prepaidAmount) {
         this.prepaidAmount = prepaidAmount;
     }
 
+    /**
+     * 获取订单明细列表
+     * @return 订单项列表
+     */
     public List<OrderItem> getOrderItems() {
         return orderItems;
     }
 
+    /**
+     * 设置订单明细列表
+     * @param orderItems 订单项列表
+     */
     public void setOrderItems(List<OrderItem> orderItems) {
         this.orderItems = orderItems;
     }
 
-    // ===== Getter/Setter =====
-
+    /**
+     * 获取重新点餐时间
+     * @return 重新点餐时间
+     */
     public LocalDateTime getReorderTime() {
         return reorderTime;
     }
 
-    public void setReorderTime(LocalDateTime reorderTime) {
-        this.reorderTime = reorderTime;
-    }
-    // ═══════════════════════════════════════════════════════════
-    // 【辅助方法】
-    // ═══════════════════════════════════════════════════════════
-
     /**
-     * 获取订单最终应付总额（含配送费）
-     * @return 最终总金额
+     * 获取配送状态
+     * @return 配送状态枚举
      */
-    public Double getFinalAmount() {
-        double base = getItemsTotal();
-        double fee = getDeliveryFee();
-        return base + fee;
+    public DeliveryStatus getDeliveryStatus() {
+        return deliveryStatus;
     }
 
     /**
-     * 判断是否为堂食订单
+     * 设置配送状态
+     * @param deliveryStatus 配送状态枚举
      */
-    public boolean isDineIn() {
-        return "DINE_IN".equals(orderType);
+    public void setDeliveryStatus(DeliveryStatus deliveryStatus) {
+        this.deliveryStatus = deliveryStatus;
     }
 
     /**
-     * 判断是否为外卖订单
+     * 返回订单对象的字符串表示
+     * @return 格式化后的字段信息，用于日志调试
      */
-    public boolean isTakeout() {
-        return "TAKEOUT".equals(orderType);
-    }
-
-    /**
-     * 判断是否为配送订单
-     */
-    public boolean isDelivery() {
-        return "DELIVERY".equals(deliveryMethod);
-    }
-
-    /**
-     * 判断是否为自取订单
-     */
-    public boolean isPickup() {
-        return "PICKUP".equals(deliveryMethod);
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 【toString 方法】
-    // ═══════════════════════════════════════════════════════════
-
     @Override
     public String toString() {
         return "Order{" +
@@ -403,37 +499,5 @@ public class Order {
                 ", totalAmount=" + String.format("%.2f", getTotalAmount()) +
                 ", isCheckedOut=" + isCheckedOut +
                 '}';
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 【equals & hashCode】（可选，用于集合操作）
-    // ═══════════════════════════════════════════════════════════
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Order order = (Order) o;
-        return orderId != null && orderId.equals(order.orderId);
-    }
-
-    @Override
-    public int hashCode() {
-        return orderId != null ? orderId.hashCode() : 0;
-    }
-
-
-    public DeliveryStatus getDeliveryStatus() {
-        return deliveryStatus;
-    }
-    public void setDeliveryStatus(DeliveryStatus deliveryStatus) {
-        this.deliveryStatus = deliveryStatus;
-    }
-
-    // 輔助方法：判斷是否為配送訂單且可開始配送
-    public boolean canStartDelivery() {
-        return "DELIVERY".equals(deliveryMethod)
-                && "ORDERED".equals(status)
-                && deliveryStatus == DeliveryStatus.NOT_DELIVERED;
     }
 }

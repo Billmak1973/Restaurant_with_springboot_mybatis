@@ -102,6 +102,7 @@
     <!-- ===== 插入操作 ===== -->
 
     <!-- 10. saveSubTable -->
+    <!-- useGeneratedKeys=true启用数据库自增主键回填，keyProperty指定将生成的ID自动注入Java对象的table_id字段，避免二次查询 -->
     <insert id="saveSubTable" useGeneratedKeys="true" keyProperty="table_id">
         INSERT INTO restaurant_tables (
         display_id, base_id, capacity, physical_capacity,
@@ -207,9 +208,9 @@
         actual_seats = #{actualSeats},
         end_time = NOW(),
         merged_with = NULL,
-        <!-- 🔧【修复】聚餐桌也要清空 group_with -->
+        <!-- 【修复】聚餐桌也要清空 group_with -->
         group_with = NULL,
-        <!-- 🔧【修复】MERGED 和 GROUPED 都要改回 MAIN -->
+        <!-- 【修复】MERGED 和 GROUPED 都要改回 MAIN -->
         table_type = CASE
         WHEN #{originalTableType} IN ('MERGED', 'GROUPED') THEN 'MAIN'
         ELSE table_type
@@ -261,7 +262,6 @@
         </foreach>
     </delete>
 
-    <!-- 🔧 替换原有的 updateMergeStatus，拆分成两个独立方法 -->
 
     <!-- 更新主桌为合并占用状态 -->
     <update id="updateTableToMergedOccupied">
@@ -289,11 +289,6 @@
         WHERE table_id = #{tableId}
     </update>
 
-
-
-
-
-
     <update id="updateTableForReservation">
         UPDATE restaurant_tables SET
         status = #{status},
@@ -309,7 +304,6 @@
         actual_seats = #{actualSeats},
         start_time = #{startTime},
         reserved_time = NULL,
-        <!-- 🔧 删除 group_with = NULL，保留原始值 -->
         current_reservation_id = #{reservationId}
         WHERE table_id = #{tableId}
     </update>
@@ -321,7 +315,6 @@
         actual_seats = #{actualSeats},
         start_time = NOW(),
         reserved_time = NULL,
-        <!-- 🔧 删除 group_with = NULL，保留原始值 -->
         current_reservation_id = #{reservationId}
         WHERE table_id = #{tableId}
     </update>
@@ -331,8 +324,8 @@
         UPDATE restaurant_tables
         SET
         merged_with = #{mergedWith},
-        table_type = 'MERGED',      <!-- 🔧 新增：修改餐桌類型 -->
-        status = 'OCCUPIED'         <!-- 🔧 建議：合併後狀態應變為占用 -->
+        table_type = 'MERGED',
+        status = 'OCCUPIED'
         WHERE table_id = #{tableId}
     </update>
 
@@ -374,7 +367,6 @@
         WHERE table_id = #{tableId}
     </update>
 
-    <!-- 🔧 取消预约专用：重置餐桌状态 -->
     <update id="resetTableAfterReservationCancel">
         UPDATE restaurant_tables
         SET

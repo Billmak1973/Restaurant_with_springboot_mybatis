@@ -27,8 +27,8 @@ public class MenuPanel extends JPanel {
     private final OrderSystemGUI frame;
     private final MenuItemService menuItemService;  //  新增
     private OrderType currentOrderType = OrderType.DINE_IN;
-    private final RestaurantService service;  // 🔧【新增】声明 service 成员变量
-    private final RestaurantController controller;  // 🔧 新增
+    private final RestaurantService service;  // 声明 service 成员变量
+    private final RestaurantController controller;
 
     // UI 组件
     private JLabel tableNumberDisplay;
@@ -68,7 +68,7 @@ public class MenuPanel extends JPanel {
      */
     public MenuPanel(OrderSystemGUI frame, RestaurantService service, RestaurantController controller, MenuItemService menuItemService, int menuType) {
         this.frame = frame;
-        this.service = service;           // 【新增】赋值 service
+        this.service = service;
         this.menuType = menuType;
         this.menuItemService = menuItemService;
         this.controller=controller;
@@ -1589,10 +1589,7 @@ public class MenuPanel extends JPanel {
                 if (fullItemId.contains("[BATCH:")) {
                     isGroupedOrder = true;
 
-                    // ═══════════════════════════════════════════════════════════
                     // 【核心修改】像 showOrderDialog 一样解析桌子数量
-                    // ═══════════════════════════════════════════════════════════
-
                     // 情况1：检查是否为餐桌类型的聚餐桌（GROUPED）
                     Tables currentTable = service.getTableById(currentTableNumber);
                     boolean isGroupedTable = (currentTable != null &&
@@ -1790,8 +1787,16 @@ public class MenuPanel extends JPanel {
                         "菜品编号必须以 '" + expectedPrefix + "' 开头（当前菜单类型：" + getMenuTypeTitle() + "）",
                         "输入错误", JOptionPane.ERROR_MESSAGE);
                 return;
-            }
 
+            }
+            // 检查临时订单中是否正在使用该菜品
+            if (frame.isItemInAnyTemporaryOrder(itemCode)) {
+                JOptionPane.showMessageDialog(dialog,
+                        "该菜品正在临时订单中被点选，无法删除！\n" +
+                                "请先在对应餐桌的订单中移除该菜品，或清空临时订单后再试。",
+                        "删除被阻止", JOptionPane.WARNING_MESSAGE);
+                return;  // 阻止删除操作
+            }
             try {
                 boolean deleted = frame.deleteMenuItemPhysically(itemCode);
 

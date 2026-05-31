@@ -6998,7 +6998,27 @@ public class RestaurantView extends JFrame implements ReservationMatchCallback{
 
 
     /**
-     *  实现回调接口：显示预约匹配提醒弹窗
+     * 显示预约匹配提醒弹窗
+     *
+     * 功能说明：
+     * 1. 使用 SwingUtilities.invokeLater 确保在 EDT 线程执行，避免界面卡顿
+     * 2. 构建 HTML 格式提示消息，包含预约号、客人信息、预约时间及所需餐桌规格
+     * 3. 通过 JOptionPane 展示模态信息对话框，提醒操作员及时分配空闲餐桌
+     *
+     * @param reservationId 匹配的预约记录编号
+     * @param customerName 预约客人姓名
+     * @param customerPhone 预约客人联系电话
+     * @param reservationTime 预约时间字符串
+     * @param requiredCapacity 所需餐桌容量（如 2/4/6 人桌）
+     * @param requiredCount 所需餐桌数量
+     *
+     * 执行时机：
+     * - 餐桌状态变更为空闲时，自动检查并提示匹配的 1.5 小时内预约
+     * - 确保预约顾客到店时餐桌已准备就绪，提升服务体验
+     *
+     * 线程安全：
+     * - 所有 Swing 组件操作封装在 invokeLater 中，保证线程安全
+     * - 避免后台业务线程直接操作界面导致异常
      */
     @Override
     public void showReservationMatchAlert(String reservationId, String customerName,

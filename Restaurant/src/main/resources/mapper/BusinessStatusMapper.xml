@@ -7,6 +7,7 @@
 <!--    2.7. 業務狀態表設計 (Business Status Table Design)-->
 <!--    技術說明：設計 business_status 表記錄每日營業狀態、叫號、營收等統計數據，支持按日期查詢報表，並通過 INSERT IGNORE 確保每日記錄唯一。-->
     <insert id="insertTodayStatus">
+<!--       IGNORE： 当插入数据遇到唯一键冲突、主键重复或其他约束错误时，不抛出异常中断程序，而是“静默跳过”该条数据，转为 Warning 继续执行。-->
         INSERT IGNORE INTO business_status (
         status_id,
         business_date,
@@ -16,6 +17,12 @@
         daily_revenue,
         daily_takeout_count
         )
+<!--        (SELECT MAX(status_id) FROM business_status)-->
+<!--        查询表中当前最大的 status_id。如果表是空的，MAX() 会返回 NULL。-->
+<!--        COALESCE(上一步的结果, 0)-->
+<!--        如果上一步是 NULL（说明表还没数据），就用 0 替代；如果不是 NULL，就保留原值。-->
+<!--        + 1-->
+<!--        在最大值（或 0）的基础上加 1，生成新的主键 ID。-->
         SELECT
         COALESCE((SELECT MAX(status_id) FROM business_status), 0) + 1,
         #{date},
@@ -24,12 +31,15 @@
         0,
         0.00,
         0
+<!--        FROM DUAL 是 SQL 中的一个虚拟表（Dummy Table），它只有 1 行 1 列，不存储任何真实业务数据。-->
         FROM DUAL
         WHERE NOT EXISTS (
         SELECT 1 FROM business_status WHERE business_date = #{date}
         )
     </insert>
+
     <!-- 2. 查询下一个叫号 -->
+<!--    resultType 用于简单映射（字段→属性自动匹配）；-->
     <select id="getNextCallNumber" resultType="java.lang.Integer">
         SELECT next_call_number
         FROM business_status
@@ -71,6 +81,7 @@
         #{nextCallNumber},
         0
         )
+<!--    如果插入時發現「業務日期」已存在（重複），就改為「更新」而不是報錯-->
         ON DUPLICATE KEY UPDATE
         is_open = VALUES(is_open),
         next_call_number = VALUES(next_call_number)
@@ -80,7 +91,7 @@
 <!--    3.8. 靈活返回值 (resultType="java.util.Map") 與視圖層對接-->
 <!--    技術說明：報表與狀態查詢直接返回 Map<String, Object>，跳過 DTO 創建，適應前端動態列渲染與 JSON 序列化需求。-->
 <!--    營業報表、菜品銷量等場景列數可能隨需求調整。返回 Map 列表使 Service 層無需為每個查詢定義專屬 VO/DTO，View 層（如 JTable 或 JFreeChart）可直接通過 row.get("revenue") 獲取數據，實現了「查詢即展示」的敏捷開發模式。-->
-
+<!--     resultType="java.util.Map" 表示：查询结果集的每一行将被映射为 Map<String, Object>，键为 SELECT 列名（或别名），值为对应字段数据，常用于动态报表或无需定义实体类的灵活查询。-->
     <select id="getDailyReport" resultType="java.util.Map">
         SELECT
         bs.business_date AS date,
@@ -124,6 +135,7 @@
         reservation_id AS "预约号",
         customer_name AS "客户姓名",
         customer_phone AS "客户电话",
+<!--        格式符对照：%Y=4位年 | %m=月 | %d=日 | %H=24时 | %i=分 | %s=秒-->
         DATE_FORMAT(reservation_time, '%Y-%m-%d %H:%i') AS "原定预约时间",
         forfeited_amount AS "没收金额",
         DATE_FORMAT(cancellation_time, '%Y-%m-%d %H:%i:%s') AS "取消时间",

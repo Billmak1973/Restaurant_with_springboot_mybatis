@@ -14,37 +14,40 @@ public enum OrderType {
     private final String dbOrderType;   // 對應數據庫 order_type 字段
     private final String dbDeliveryMethod; // 對應數據庫 delivery_method 字段
 
+    /**
+     * 订单类型枚举构造函数
+     * @param displayName 显示名称
+     * @param dbOrderType 数据库订单类型字段值
+     * @param dbDeliveryMethod 数据库配送方式字段值
+     */
     OrderType(String displayName, String dbOrderType, String dbDeliveryMethod) {
         this.displayName = displayName;
         this.dbOrderType = dbOrderType;
         this.dbDeliveryMethod = dbDeliveryMethod;
     }
 
+    /**
+     * 获取订单类型的显示名称
+     * @return 显示名称
+     */
     public String getDisplayName() {
         return displayName;
     }
 
+    /**
+     * 获取数据库订单类型字段值
+     * @return 数据库订单类型值
+     */
     public String getDbOrderType() {
         return dbOrderType;
     }
 
+    /**
+     * 获取数据库配送方式字段值
+     * @return 数据库配送方式值
+     */
     public String getDbDeliveryMethod() {
         return dbDeliveryMethod;
     }
 
-    /**
-     * 根據數據庫字段還原枚舉（查詢時用）
-     */
-    public static OrderType fromDbValues(String orderType, String deliveryMethod) {
-        if ("DINE_IN".equals(orderType)) {
-            return DINE_IN;
-        } else if ("TAKEOUT".equals(orderType)) {
-            if ("DELIVERY".equals(deliveryMethod)) {
-                return DELIVERY;
-            } else {
-                return PICKUP; // 默認自取
-            }
-        }
-        return PICKUP; // 默認值
-    }
 }

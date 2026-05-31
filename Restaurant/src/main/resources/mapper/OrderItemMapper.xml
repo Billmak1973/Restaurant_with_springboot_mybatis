@@ -30,6 +30,7 @@
 
     <!-- ===== 合并订单项 ===== -->
     <update id="updateExistingOrderItems">
+        <!-- foreach: MyBatis 动态循环标签，用于遍历集合拼接批量插入的 VALUES 子句 -->
         <foreach collection="items" item="item" separator=";">
             UPDATE order_items oi
             JOIN menu_items mi ON oi.item_id = mi.item_id
@@ -41,12 +42,15 @@
             ELSE 'UNSERVED'
             END,
             oi.price_at_order = #{item.priceAtOrder}
+            <!-- if: 独立条件判断，test为true时动态追加SQL片段，为false时直接跳过，多个if可同时生效 -->
             <if test="item.quantityDistribution != null and item.quantityDistribution != ''">
                 , oi.quantity_distribution = #{item.quantityDistribution, jdbcType=VARCHAR}
             </if>
             WHERE oi.order_id = #{orderId}
             AND mi.item_code = #{item.itemCode}
-            <!-- 新增：精确匹配 assigned_table_display_id -->
+            <!-- choose: 类似 switch 语句，按顺序评估分支，仅执行第一个满足条件的 SQL 块 互斥过滤条件：餐桌分配ID要么匹配具体值，要么匹配 IS NULL，两者必选其一且仅能生效一个 -->
+            <!-- when: 类似 if 条件，test 属性为 true 时动态拼接该片段，匹配后立即终止 -->
+            <!-- otherwise: 类似 else/default 分支，当所有 when 条件均不满足时的兜底 SQL -->
             <choose>
                 <when test="item.assignedTableDisplayId != null and item.assignedTableDisplayId != ''">
                     AND oi.assigned_table_display_id = #{item.assignedTableDisplayId}
@@ -57,28 +61,6 @@
             </choose>
         </foreach>
     </update>
-
-
-    <!-- 替代方案：单条插入，由 MyBatis 批量执行 -->
-    <insert id="insertNewOrderItemsSingle">
-        INSERT INTO order_items (
-        order_id,
-        item_id,
-        quantity,
-        served_quantity,
-        status,
-        price_at_order
-        )
-        SELECT
-        #{orderId},
-        mi.item_id,
-        #{quantity},
-        0,
-        'UNSERVED',
-        #{priceAtOrder}
-        FROM menu_items mi
-        WHERE mi.item_code = #{itemCode}
-    </insert>
 
     <!-- ===== 订单金额计算 ===== -->
 
@@ -133,7 +115,7 @@
         WHERE order_id = #{orderId}
         AND (
         served_quantity &lt; quantity  -- 数量未满
-        OR status IN ('PREPARING', 'PREPARED')  -- 🔧 或状态是准备中
+        OR status IN ('PREPARING', 'PREPARED')  --  或状态是准备中
         )
         )
     </select>
@@ -218,8 +200,8 @@
         oi.quantity AS quantity,
         oi.served_quantity AS servedQuantity,
         oi.status AS status,
-        oi.assigned_table_display_id AS assignedTableDisplayId, <!-- 🔧 新增这行 -->
-        oi.quantity_distribution AS quantityDistribution  <!-- 🔧 新增：查询 distribution -->
+        oi.assigned_table_display_id AS assignedTableDisplayId,
+        oi.quantity_distribution AS quantityDistribution
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
         WHERE oi.order_id = #{orderId}
@@ -231,6 +213,7 @@
 
     <!-- 预约订单专用：使用 PREPARING/PREPARED 状态 -->
     <update id="updateExistingOrderItemsForReservation">
+<!--         <foreach collection="items" item="item" separator=";"> 表示：遍历 items 集合，将当前元素命名为 item，并在生成的每段 SQL 之间用分号 ; 分隔-->
         <foreach collection="items" item="item" separator=";">
             UPDATE order_items oi
             JOIN menu_items mi ON oi.item_id = mi.item_id
@@ -307,7 +290,7 @@
     </select>
 
 
-    <!-- 🔧 聚餐桌專用：同時更新三個字段 -->
+    <!--  聚餐桌專用：同時更新三個字段 -->
     <update id="updateServedWithTableInfo">
         UPDATE order_items
         SET
@@ -338,7 +321,7 @@
         oi.order_item_id, oi.item_id, oi.quantity, oi.served_quantity,
         oi.prepared_quantity, oi.status, oi.price_at_order,
         oi.assigned_table_display_id, oi.served_table_display_id,
-        oi.quantity_distribution,  <!-- 🔧 新增 -->
+        oi.quantity_distribution,
         mi.item_code, mi.name AS item_name
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
@@ -360,7 +343,7 @@
             ELSE oi.status
             END,
             oi.price_at_order = #{item.priceAtOrder},
-            <!-- 🔧 新增：仅当传入的 distribution 不为空时才更新 -->
+            <!--  仅当传入的 distribution 不为空时才更新 -->
             <if test="item.quantityDistribution != null and item.quantityDistribution != ''">
                 oi.quantity_distribution = #{item.quantityDistribution},
             </if>
@@ -412,13 +395,13 @@
     </update>
 
 
-    <!-- 🔧 根据主键删除订单项（总数量≤0 时使用）-->
+    <!--  根据主键删除订单项（总数量≤0 时使用）-->
     <delete id="deleteOrderItemByOrderItemId">
         DELETE FROM order_items
         WHERE order_item_id = #{orderItemId}
     </delete>
 
-    <!-- 🔧 聚餐桌专用：更新订单项数量（智能撤销用） -->
+    <!--  聚餐桌专用：更新订单项数量（智能撤销用） -->
     <update id="updateGroupedOrderItemQuantity">
         UPDATE order_items
         SET
@@ -428,7 +411,7 @@
         WHERE order_item_id = #{orderItemId}
     </update>
 
-    <!-- 🔧 聚餐桌共同菜品专用更新 -->
+    <!--  聚餐桌共同菜品专用更新 -->
     <update id="updateSharedDishOrderItem">
         UPDATE order_items
         SET
@@ -439,6 +422,7 @@
             assigned_table_display_id = #{newAssignedTableIds},
         </if>
         <if test="newDistribution != null">
+<!--            jdbcType=VARCHAR: 显式声明参数的JDBC类型，核心作用是安全处理null值并避免数据库类型推断报错-->
             quantity_distribution = #{newDistribution, jdbcType=VARCHAR},
         </if>
         <if test="newDistribution == null">
@@ -451,7 +435,7 @@
         WHERE order_item_id = #{orderItemId}
     </update>
 
-    <!-- 🔧 更新订单项的 assigned_table_display_id 和 quantity_distribution -->
+    <!--  更新订单项的 assigned_table_display_id 和 quantity_distribution -->
     <update id="updateOrderItemDistribution">
         UPDATE order_items
         SET
@@ -465,7 +449,7 @@
         WHERE order_item_id = #{orderItemId}
     </update>
 
-    <!-- 🔧 聚餐桌延迟释放专用：清除订单明细中的分配信息 -->
+    <!--  聚餐桌延迟释放专用：清除订单明细中的分配信息 -->
     <update id="clearDistributionByOrderId">
         UPDATE order_items
         SET
@@ -475,7 +459,7 @@
     </update>
 
 
-    <!-- 🔧 聚餐桌专用：更新订单项数量 -->
+    <!--  聚餐桌专用：更新订单项数量 -->
     <update id="updateOrderItemQuantity">
         UPDATE order_items
         SET quantity = #{newQuantity}

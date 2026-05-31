@@ -645,6 +645,25 @@ public class OrderSystemGUI extends JFrame {
     }
 
     /**
+     *  检查菜品是否在任何临时订单中（供菜单管理调用）
+     * @param itemCode 菜品编号
+     * @return true=菜品在某个临时订单中，false=未被使用
+     */
+    public boolean isItemInAnyTemporaryOrder(String itemCode) {
+        if (itemCode == null || itemCode.isEmpty()) {
+            return false;
+        }
+        String normalizedItemCode = itemCode.trim().toUpperCase();
+
+        // 遍历所有餐桌的临时订单
+        for (Map<String, Integer> order : temporaryOrders.values()) {
+            if (order != null && order.containsKey(normalizedItemCode)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    /**
      * 更新菜品价格（代理到 MenuItemService）
      *
      * @param itemCode 菜品编号

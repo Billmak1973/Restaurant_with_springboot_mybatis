@@ -14,7 +14,7 @@
         items_total, delivery_fee, total_amount,
         is_checked_out, is_prepaid, prepaid_amount,
         delivery_status, reorder_time,
-        reservation_id  <!-- 🔧 VARCHAR 类型 -->
+        reservation_id  <!--  VARCHAR 类型 -->
         ) VALUES (
         #{tableId}, #{orderNumber}, #{orderType}, #{deliveryMethod},
         #{deliveryAddress}, #{customerPhone}, NOW(), #{status},
@@ -22,7 +22,7 @@
         #{isCheckedOut}, #{isPrepaid}, #{prepaidAmount},
         #{deliveryStatus, jdbcType=VARCHAR, typeHandler=org.apache.ibatis.type.EnumTypeHandler},
         #{reorderTime, jdbcType=TIMESTAMP},
-        #{reservationId, jdbcType=VARCHAR}  <!-- 🔧 修改类型 -->
+        #{reservationId, jdbcType=VARCHAR}  <!-- 修改类型 -->
         )
     </insert>
 
@@ -175,7 +175,7 @@
 <!--    技術說明：在 Mapper 層使用 CREATE TEMPORARY TABLE 構建中間結果集，實現複雜季度銷售統計的純 SQL 聚合，避免業務層多輪查詢與事務協調-->
 <!--    分析：季度報表需同時處理「更新現有記錄」與「插入新記錄」的邏輯。通過臨時表緩存當前訂單的聚合結果，單次調用即可完成 UPSERT 操作。臨時表會話級隔離特性確保了多線程並發結賬時不會互相干擾。-->
     <update id="recordQuarterlySales">
-        <!-- 1. 创建临时表 🔧 指定字符集和排序规则 -->
+        <!-- 1. 创建临时表  指定字符集和排序规则 -->
         CREATE TEMPORARY TABLE IF NOT EXISTS tmp_grouped_items (
         item_code VARCHAR(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
         item_name VARCHAR(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
@@ -200,7 +200,7 @@
         WHERE oi.order_id = #{orderId}
         GROUP BY mi.item_code, mi.name, oi.price_at_order;
 
-        <!-- 4. 更新现有记录 🔧 在比较时指定排序规则 -->
+        <!-- 4. 更新现有记录  在比较时指定排序规则 -->
         UPDATE item_quarterly_sales iqs
         INNER JOIN tmp_grouped_items gi
         ON CONCAT(iqs.item_code, '|', iqs.item_name, '|', iqs.sale_price) COLLATE utf8mb4_unicode_ci = gi.group_key COLLATE utf8mb4_unicode_ci
@@ -209,7 +209,7 @@
         iqs.sale_timestamp = NOW()
         WHERE iqs.year = #{year} AND iqs.quarter = #{quarter};
 
-        <!-- 5. 插入新记录 🔧 在比较时指定排序规则 -->
+        <!-- 5. 插入新记录  在比较时指定排序规则 -->
         INSERT INTO item_quarterly_sales
         (item_code, item_name, sale_price, quantity_sold, sale_timestamp, year, quarter)
         SELECT
@@ -276,13 +276,14 @@
         SELECT
         o.order_id,
         t.display_id as table_display,
-        t.status as table_status,  <!-- 🔧 新增：返回餐桌状态 -->
+        t.status as table_status,  <!--  新增：返回餐桌状态 -->
         CASE
         WHEN COUNT(oi.order_item_id) = 0 THEN '未下单'
         WHEN SUM(CASE WHEN oi.status = 'SERVED' THEN 1 ELSE 0 END) = COUNT(oi.order_item_id)
         THEN '制作完成'
         ELSE '制作中'
         END as order_status,
+<!--    优先取重单时间(为空则回退至原下单时间)，并格式化为"HH:mm"字符串供界面列表展示-->
         DATE_FORMAT(COALESCE(o.reorder_time, o.order_time), '%H:%i') as order_time
         FROM table_orders o
         LEFT JOIN restaurant_tables t ON o.table_id = t.table_id
@@ -386,7 +387,7 @@
         oi.price_at_order,
         oi.assigned_table_display_id,
         oi.served_table_display_id,
-        oi.quantity_distribution,  <!-- 🔧 新增这行 -->
+        oi.quantity_distribution,  <!--  新增这行 -->
         mi.item_code, mi.name AS item_name
         FROM order_items oi
         JOIN menu_items mi ON oi.item_id = mi.item_id
@@ -476,7 +477,7 @@
         total_amount = #{amount},
         items_total = #{amount},
         delivery_fee = 0.0,
-        reorder_time = #{newOrderTime}  <!-- 🔧 更新重单时间 -->
+        reorder_time = #{newOrderTime}  <!--  更新重单时间 -->
         WHERE order_id = #{orderId}
     </update>
 
@@ -495,8 +496,7 @@
         UPDATE table_orders
         SET order_type = #{newType}
         WHERE reservation_id = #{reservationId}
-        AND order_type = #{originalType}  <!-- 🔧 确保只更新预点餐订单 -->
-<!--        AND status = 'ORDERED'            &lt;!&ndash; 🔧 只更新未结账的订单 &ndash;&gt;-->
+        AND order_type = #{originalType}  <!--  确保只更新预点餐订单 -->
         AND status IN ('NO_ORDER', 'ORDERED')
     </update>
 
@@ -505,7 +505,6 @@
         FROM table_orders
         WHERE reservation_id = #{reservationId}
         AND order_type = 'RESERVATION'
-<!--        AND status IN ('NO_ORDER', 'ORDERED')  &lt;!&ndash; 🔧 改為 IN 條件 &ndash;&gt;-->
         LIMIT 1
     </select>
 
@@ -517,11 +516,11 @@
         oi.item_id,
         oi.quantity,
         oi.served_quantity,
-        oi.prepared_quantity,    <!-- 🔧 新增：已準備數量 -->
+        oi.prepared_quantity,
         oi.status,
         oi.price_at_order,
-        oi.assigned_table_display_id,        <!-- 🔧 新增这行 -->
-        oi.served_table_display_id,          <!-- 🔧 新增这行 -->
+        oi.assigned_table_display_id,
+        oi.served_table_display_id,
         mi.item_code,
         mi.name AS item_name
         FROM table_orders o
@@ -537,7 +536,7 @@
         FROM table_orders
         WHERE reservation_id = #{reservationId}
         AND order_type IN ('RESERVATION', 'DINE_IN')
-        <!-- 🔧 改为查预点餐或已下单状态，优先返回预点餐 -->
+        <!--  改为查预点餐或已下单状态，优先返回预点餐 -->
         AND status IN ('NO_ORDER', 'ORDERED')
         ORDER BY
         CASE status
@@ -568,10 +567,10 @@
         UPDATE table_orders
         SET status = #{status}
         WHERE order_id = #{orderId}
-        AND status = #{oldStatus}  <!-- 🔧 樂觀鎖：只更新預期舊狀態 -->
+        AND status = #{oldStatus}  <!--  樂觀鎖：只更新預期舊狀態 -->
     </update>
 
-    <!-- 新增：同时更新订单状态+items_total+total_amount -->
+    <!-- 同时更新订单状态+items_total+total_amount -->
     <update id="updateOrderStatusAndTotals">
         UPDATE table_orders
         SET
@@ -603,14 +602,15 @@
         oi.quantity, oi.served_quantity,oi.prepared_quantity, oi.status,
         oi.price_at_order,
         oi.assigned_table_display_id,
-        oi.served_table_display_id,  <!-- 🔧 新增 -->
-        oi.quantity_distribution,  <!-- 🔧 新增这行 -->
+        oi.served_table_display_id,  <!--  新增 -->
+        oi.quantity_distribution,  <!--  新增这行 -->
         mi.item_code, mi.name AS item_name
         FROM table_orders o
         JOIN order_items oi ON o.order_id = oi.order_id
         JOIN menu_items mi ON oi.item_id = mi.item_id
         JOIN restaurant_tables t ON o.table_id = t.table_id
         WHERE t.display_id IN
+        <!-- foreach循环拼接：open/close自动在首尾包裹括号，separator在元素间插入逗号，最终生成形如(id1,id2,id3)的SQL片段，专用于IN查询或批量赋值 -->
         <foreach collection="tableDisplayIds" item="displayId" open="(" separator="," close=")">
             #{displayId}
         </foreach>
@@ -630,7 +630,7 @@
         SELECT order_id
         FROM table_orders
         WHERE reservation_id = #{reservationId}
-        AND status IN ('NO_ORDER', 'ORDERED')  <!-- 🔧 活跃状态 -->
+        AND status IN ('NO_ORDER', 'ORDERED')  <!--  活跃状态 -->
         ORDER BY
         CASE status
         WHEN 'NO_ORDER' THEN 1  <!-- 优先返回预点餐订单 -->
